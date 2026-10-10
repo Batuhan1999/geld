@@ -7,7 +7,7 @@
 
 import { createElement } from '../dom';
 import type { GeldSettings } from '@geld/core';
-import type { BotVerdictRecord, CommentLane, GeldPrMeta, ReviewItem, ReviewerRecord, ReviewerState } from '@geld/review';
+import type { BotVerdictRecord, CommentLane, GeldPrMeta, ReviewItem, ReviewerState } from '@geld/review';
 import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, parseBotBody, parsePreviews, refusalReason, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
 import type { Preview } from '@geld/review';
 import { detectHeadSha } from '../head-sha';
@@ -26,17 +26,19 @@ import { commitTimes, isRewritten } from './commit-dates';
 import { editedAt, editsVersion, resetEditTimes, revisionAsOf } from './edit-times';
 import { absoluteTimeText, relativeTimeText } from './time';
 import { stickyHeaderBottomAt } from './sticky';
+import { fetchReviewerCandidates, hasReviewActions, pressReviewAction, requestReviewers, reviewRequestForm } from './reviewers';
+import type { ReviewerCandidate } from './reviewers';
 import { refDetails, refsVersion, resetRefs } from './refs';
 import { diffHashOf, isTrimmedPath, resetWholePaths, wholePath } from './whole-path';
 import { applyFolds, closureKindOf, collapseDescription, groupBotRuns, groupClosures, groupDoneHumans, groupLeftovers, groupTriggers, isFoldedNode, markSeen, setFullTimeline } from './fold';
 import type { FoldGroup } from './fold';
 import { ATTR_SUMMARY, findSummaryComment, mergeWithCrawler, usableMeta } from './meta-source';
-import { ATTR_CTL_SLOT, ATTR_GEAR_SLOT, ATTR_TIME_FOR, batchKey, panelSignature, CHECKS_KEY, foldKey, isVerdict, itemKey, mountPanel, PREVIEWS_KEY, renderBatchView, renderCommentsList, renderReportsList, REPORTS_KEY, reviewerGroups, REVIEWS_KEY, syncSpinners, unmountPanel } from './panel';
+import { ATTR_CTL_SLOT, ATTR_GEAR_SLOT, ATTR_TIME_FOR, batchKey, panelSignature, CHECKS_KEY, foldKey, isVerdict, itemKey, mountPanel, PREVIEWS_KEY, renderBatchView, renderCommentsList, renderReportsList, REPORTS_KEY, reviewerGroups, reviewerStatuses, REVIEWS_KEY, syncSpinners, unmountPanel } from './panel';
 import type { Batch, ReviewEntry, ReviewEntryState, ReviewThreadRef } from './panel';
 import { hideHoverCard, setHoverProvider, setReportProvider, setWhoProvider } from './hovercard';
 import type { HoverPreview, ReportCard, WhoCard } from './hovercard';
 import { knownMarkShape } from './mark-shape';
-import { allResolved, checkCountsFrom, checksSummary, digestMarkdown, isCurrent, itemMarkdown, newerSummaryAnchor, requiredReviewsFrom } from './panel-model';
+import { allResolved, checkCountsFrom, checksSummary, digestMarkdown, isCurrent, itemMarkdown, newerSummaryAnchor, requiredReviewsFrom, standingReviewers } from './panel-model';
 import type { MarkdownSubject, RequiredReviews } from './panel-model';
 import { fixVisible } from '@geld/review';
 import type { RawComment, SuggestedFix } from '@geld/review';
@@ -44,14 +46,14 @@ import type { Avatar, CheckAvatar, FoldRow, GroupId, PanelHandlers, PanelModel }
 import type { RepoBotsHint } from './panel-model';
 import { NO_REPO_BOTS, requestableBots } from './panel-model';
 import { outgoingMentions, renderMentionsView, renderQuickView, timeCommitRows } from './quick-view';
-import { redressComposer, renderChatView, renderCommentChat, rewordEditedMarks, sourceFocusKey, threadAnchorOf } from './chat';
+import { chatNeedsRedress, redressComposer, renderChatView, renderCommentChat, rewordEditedMarks, sourceFocusKey, threadAnchorOf } from './chat';
 import type { ChatByline, ChatRerun } from './chat';
 import { viaBotOf } from './via';
 import type { ChatHandlers, ChatSource } from './chat';
 import { quietClick } from './quiet-click';
 import { fitChips, stopFittingChips } from './fit-chips';
 import { applyHold, holdRow, readerScrolled, releaseHold, watchPanelForHold } from './hold';
-import { adoptReplacement, closestAtHome, compareHome, forgetLoan, onRestore, restoreAll, teleportInto, wornPiecesOf } from './teleport';
+import { adoptReplacement, ATTR_TELEPORTED, closestAtHome, compareHome, forgetLoan, onRestore, restoreAll, teleportInto, wornPiecesOf } from './teleport';
 
 const PRODUCER = { kind: 'crawler' as const, version: '0.1.0', ai: false };
 const ZERO_SHA = '0000000000000000000000000000000000000000';
@@ -627,6 +629,27 @@ function composeMeta(found: ReturnType<typeof findSummaryComment>, crawled: Geld
     return { meta: layer(usable), freshness: 'fresh' };
   }
   return { meta: layer(mergeWithCrawler(usable, crawled)), freshness: found.freshness };
+}
+
+/**
+ * GitHub's list of who can be asked to review, for the people menu: fetched
+ * once per pull request (the key is the page's, so another PR's list is
+ * never reused) and dropped after a request, since the pending set changed.
+ * The post itself never trusts it — `requestReviewers` is given a fresh list
+ * for the pending flags, as GitHub's own menu reads them on open.
+ */
+let candidatesCache: { readonly key: string; readonly promise: Promise<readonly ReviewerCandidate[] | null> } | null = null;
+function reviewerCandidates(): Promise<readonly ReviewerCandidate[] | null> {
+  const key = visit.pageKey;
+  if (candidatesCache === null || candidatesCache.key !== key) {
+    const promise = fetchReviewerCandidates().catch(() => null);
+    candidatesCache = { key, promise };
+    // A failed or empty answer is not kept: the next open asks again.
+    void promise.then((found) => {
+      if (found === null && candidatesCache?.promise === promise) candidatesCache = null;
+    });
+  }
+  return candidatesCache.promise;
 }
 
 /** The run store's key for a pull request: the page key, prefixed with the host off github.com. */
@@ -2345,11 +2368,38 @@ function completePath(path: string, hash: string | null, meta: GeldPrMeta): stri
  * has lost its node: React swaps GitHub's own sections (the checks list on
  * every status poll), and the page-world portal then takes the loaned node
  * out of the slot along with its placeholder. A slot carried across a panel
- * rebuild would otherwise stay empty until something else changed.
+ * rebuild would otherwise stay empty until something else changed. And
+ * again when a chat in it holds markup GitHub rewrote in place (a comment
+ * refreshed after a reaction, see `chatNeedsRedress`): the panel itself
+ * stands, nothing in the model changed, but the chat shows a raw comment.
  */
 function slotNeedsRender(slot: HTMLElement): boolean {
   if (slot.childElementCount === 0) return true;
-  return [...slot.querySelectorAll<HTMLElement>('.geld-review__qv, .geld-review__chat-body')].some((view) => view.childElementCount === 0);
+  if ([...slot.querySelectorAll<HTMLElement>('.geld-review__qv, .geld-review__chat-body')].some((view) => view.childElementCount === 0)) return true;
+  return [...slot.querySelectorAll<HTMLElement>('.geld-review__chat')].some(chatNeedsRedress);
+}
+
+/**
+ * Before a slot that still holds loans is rendered again (a chat redressed
+ * after GitHub rewrote its comment): every loan goes home first. A node on
+ * loan is not lent twice — `teleportInto` skips it — so rendering over the
+ * old chat would leave the comment stranded in the discarded one and the
+ * new chat saying "Not loaded on this page yet". The rows' worn controls
+ * and the CI gear go home with everything else and are worn again in the
+ * dress phase of this same pass, as after a panel rebuild. Not while the
+ * reader types in a reply box inside the slot (a reaction from someone else
+ * can refresh a message in the thread they are answering): the render waits
+ * for the field to blur, as a panel rebuild does.
+ */
+function readySlotForRender(slot: HTMLElement): boolean {
+  if (slot.querySelector(`[${ATTR_TELEPORTED}]`) === null) return true;
+  const active = document.activeElement;
+  if (active instanceof Element && slot.contains(active) && active.matches('textarea, input, [contenteditable]')) {
+    active.addEventListener('focusout', () => reapplySoon(), { once: true });
+    return false;
+  }
+  restoreAll();
+  return true;
 }
 
 /** What the repository says about its review bots (declared in its config, config files found), from the controller. */
@@ -2552,18 +2602,21 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   // states it nowhere, so the row there says "N approved" rather than a fraction.
   const stated = /at least\s+(\d+)\s+approving review/i.exec(`${boxText}\n${reviewersSidebarText()}`)?.[1];
   if (stated !== undefined) visit.knownRequired = Number.parseInt(stated, 10);
-  // A re-requested reviewer is awaited again: GitHub sets their earlier verdict aside (the merge box stops saying
-  // "changes requested"), and so does the row, for the tint and the count alike.
-  const awaited = new Set(awaiting.map((entry) => entry.author.toLowerCase()));
   // The sidebar's verdicts first — GitHub's own latest-per-reviewer, complete from the start — then the
-  // timeline's and the payload's for anyone the sidebar does not list.
-  const reviewers: ReviewerRecord[] = sidebar.flatMap((reviewer) => {
-    const state = sidebarVerdict(reviewer);
-    return state === null ? [] : [{ login: reviewer.login, state }];
+  // timeline's and the payload's for anyone whose verdict the sidebar does not state. A reviewer the sidebar only
+  // awaits (asked again) keeps the verdict they gave: GitHub still counts it (the merge box reads "Changes approved
+  // · 1 approval, 1 pending review"), so the count and the tint do too, as the heading's groups do (`reviewerGroups`).
+  // The payload is the Action's reading of the whole review list at one moment, for one head: with a payload at
+  // all (`local` is this device's own crawl), it fills in for what a partly loaded timeline has not read yet.
+  const reviewers = standingReviewers({
+    sidebar: sidebar.filter((reviewer) => !reviewer.bot).map((reviewer) => ({ login: reviewer.login, verdict: sidebarVerdict(reviewer), awaiting: reviewer.state === 'awaiting' })),
+    timeline: latestReviewers(reviews),
+    onTimeline: reviews.filter((review) => !review.author.bot).map((review) => ({ login: review.author.login, latestAt: review.createdAt })),
+    timelineComplete: !hasLoadMore() && !ingesting,
+    payload: composed.freshness === 'local' ? [] : meta.reviewers,
+    payloadAt: composed.freshness === 'local' ? null : meta.generatedAt,
+    payloadCurrent: composed.freshness === 'fresh' || composed.freshness === 'partial',
   });
-  const settled = new Set(sidebar.filter((reviewer) => !reviewer.bot).map((reviewer) => reviewer.login.toLowerCase()));
-  for (const record of latestReviewers(reviews)) if (!awaited.has(record.login.toLowerCase()) && !settled.has(record.login.toLowerCase())) reviewers.push(record);
-  for (const record of meta.reviewers) if (!awaited.has(record.login.toLowerCase()) && !settled.has(record.login.toLowerCase()) && !reviewers.some((entry) => entry.login === record.login)) reviewers.push(record);
   const requestable = phase('bots', () => requestableBots(meta, document, rawComments, repoBots));
   const iconByBot = new Map(requestable.map((bot) => [bot.id, bot.iconSrc]));
 
@@ -2606,6 +2659,9 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     checksRing,
     comments,
     reviewerGroups: reviewerGroups(comments, sidebar),
+    reviewerStatuses: reviewerStatuses(comments, sidebar),
+    canRequestReviewers: reviewRequestForm() !== null,
+    canDismissReviews: hasReviewActions(),
     ingesting,
     openSubKey: visit.openSubKey,
     openSources: visit.sourcesShown,
@@ -2714,6 +2770,50 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
       void postTopLevelComments(triggers);
     },
     onRequestMenuClosed: () => reapplySoon(),
+    loadReviewerCandidates: () => reviewerCandidates(),
+    onRequestReviewers: async (userIds, teamIds) => {
+      // The pending set is read afresh for the post: whatever the menu showed, GitHub's own controls or another tab
+      // may have changed who is requested since, and the form is the whole set.
+      // Without that read nothing is posted: a form with only the new names would withdraw everyone else's request.
+      const pending = await fetchReviewerCandidates().catch(() => null);
+      if (pending === null) return false;
+      const posted = await requestReviewers(userIds, teamIds, pending).catch(() => false);
+      candidatesCache = null;
+      if (posted) window.setTimeout(reapplySoon, 800);
+      return posted;
+    },
+    onDismissReview: (login) => {
+      void pressReviewAction(login, 'Dismiss review')
+        .then((pressed) => {
+          if (!pressed) console.warn('[geld] GitHub offers no way to dismiss that review here');
+        })
+        .catch(() => console.warn('[geld] Dismiss review did not open'));
+    },
+    onReRequestReview: (login) => {
+      // GitHub's own action when its merge box lists the verdict; else the request form with their id, the same post.
+      void pressReviewAction(login, 'Re-request review')
+        .then(async (pressed) => {
+          if (pressed) {
+            window.setTimeout(reapplySoon, 800);
+            return;
+          }
+          const found = await fetchReviewerCandidates().catch(() => null);
+          if (found === null) {
+            console.warn('[geld] GitHub did not list the reviewers; nothing was re-requested');
+            return;
+          }
+          const person = found.find((candidate) => !candidate.team && candidate.login.toLowerCase() === login.toLowerCase());
+          if (person === undefined) {
+            console.warn('[geld] GitHub does not list that reviewer among those that can be asked here');
+            return;
+          }
+          const posted = await requestReviewers([person.id], [], found);
+          candidatesCache = null;
+          if (posted) window.setTimeout(reapplySoon, 800);
+          else console.warn('[geld] GitHub did not take the re-request');
+        })
+        .catch(() => console.warn('[geld] Re-request review failed'));
+    },
     onToggleSub: (anchor) => {
       keepInPlace(`main:sub:${anchor}`, () => {
         visit.openSubKey = visit.openSubKey === anchor ? null : anchor;
@@ -2822,7 +2922,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
         visit.openKey = null;
         restoreAll();
       }
-    } else if (slotNeedsRender(mounted.slot)) {
+    } else if (slotNeedsRender(mounted.slot) && readySlotForRender(mounted.slot)) {
       if (visit.openKey === REVIEWS_KEY) {
         // An index of people's reviews; each line points at the round where its conversation opens.
         renderCommentsList(mounted.slot, model, panelHandlers);
