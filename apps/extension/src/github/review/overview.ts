@@ -8,7 +8,7 @@
 import { createElement } from '../dom';
 import type { GeldSettings } from '@geld/core';
 import type { BotVerdictRecord, CommentLane, GeldPrMeta, ReviewItem, ReviewerState } from '@geld/review';
-import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, parseBotBody, parsePreviews, refusalReason, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
+import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, parseBotBody, parsePreviews, refusalReason, REPORT_GRACE_MS, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
 import type { Preview } from '@geld/review';
 import { detectHeadSha } from '../head-sha';
 import { describePage } from '../page';
@@ -28,11 +28,12 @@ import { absoluteTimeText, relativeTimeText } from './time';
 import { stickyHeaderBottomAt } from './sticky';
 import { fetchReviewerCandidates, hasReviewActions, pressReviewAction, requestReviewers, reviewRequestForm } from './reviewers';
 import type { ReviewerCandidate } from './reviewers';
+import { nextRunGraceEnd, withRunTimes } from './run-starts';
 import { refDetails, refsVersion, resetRefs } from './refs';
 import { diffHashOf, isTrimmedPath, resetWholePaths, wholePath } from './whole-path';
 import { applyFolds, closureKindOf, collapseDescription, groupBotRuns, groupClosures, groupDoneHumans, groupLeftovers, groupTriggers, isFoldedNode, markSeen, setFullTimeline } from './fold';
 import type { FoldGroup } from './fold';
-import { ATTR_SUMMARY, findSummaryComment, mergeWithCrawler, usableMeta } from './meta-source';
+import { ATTR_SUMMARY, findSummaryComment, mergeWithCrawler, usableMeta, withLiveRuns } from './meta-source';
 import { ATTR_CTL_SLOT, ATTR_GEAR_SLOT, ATTR_TIME_FOR, batchKey, panelSignature, CHECKS_KEY, foldKey, isVerdict, itemKey, mountPanel, PREVIEWS_KEY, renderBatchView, renderCommentsList, renderReportsList, REPORTS_KEY, reviewerGroups, reviewerStatuses, REVIEWS_KEY, syncSpinners, unmountPanel } from './panel';
 import type { Batch, ReviewEntry, ReviewEntryState, ReviewThreadRef } from './panel';
 import { hideHoverCard, setHoverProvider, setReportProvider, setWhoProvider } from './hovercard';
@@ -416,9 +417,14 @@ function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: st
   const comments = crawled.comments.map((entry) => entry.comment);
   const items = clusterComments(comments, settings.reviewBots);
   // The merge box's check rows, as the Action would read them from the API: a bot whose run finished green and
-  // that flagged nothing is clean, whatever its opening comment said.
+  // that flagged nothing is clean, whatever its opening comment said. A run's start (shown while it runs, kept
+  // after) is a run asked for as surely as a trigger comment, and a report is a word newer than that start.
+  const checks = withRunTimes(crawlCheckRuns(document, headSha), visit.pageKey, headSha, reapplySoon);
+  // The grace a finished check's report is given ends on a clock, not on a page change: a pass is due then.
+  const graceEnd = nextRunGraceEnd(checks, REPORT_GRACE_MS);
+  if (graceEnd !== null) reapplyAt(graceEnd);
   const bots = verdictsFrom(
-    crawlCheckRuns(document, headSha),
+    checks,
     crawled.comments.map(({ comment, author }) => {
       const bot = author.bot ? resolveBotId(author.login, settings.reviewBots) : null;
       // A review bot's summary: when it was last rewritten says whether a run asked for since has reported into it,
@@ -626,7 +632,8 @@ function composeMeta(found: ReturnType<typeof findSummaryComment>, crawled: Geld
   // A digest the Action wrote with AI is the repository's; nothing this device wrote is layered over it.
   const layer = usable.producer.ai ? (meta: GeldPrMeta): GeldPrMeta => meta : withAi;
   if (found.freshness === 'fresh' && usable.truncated !== true) {
-    return { meta: layer(usable), freshness: 'fresh' };
+    // Fresh for the head, yet written at one moment: what runs now is the page's to say.
+    return { meta: layer({ ...usable, bots: withLiveRuns(usable.bots, crawled.bots) }), freshness: 'fresh' };
   }
   return { meta: layer(mergeWithCrawler(usable, crawled)), freshness: found.freshness };
 }
@@ -1102,6 +1109,24 @@ function reapplySoon(): void {
     reapplyTimer = null;
     reapplyNow();
   }, 150);
+}
+
+let reapplyAtTimer: number | null = null;
+let reapplyAtDue = Number.POSITIVE_INFINITY;
+
+/** A pass at a moment on the clock (a grace ending), the earliest asked for winning; nothing on the page need change. */
+function reapplyAt(when: number): void {
+  if (when >= reapplyAtDue) return;
+  if (reapplyAtTimer !== null) window.clearTimeout(reapplyAtTimer);
+  reapplyAtDue = when;
+  reapplyAtTimer = window.setTimeout(
+    () => {
+      reapplyAtTimer = null;
+      reapplyAtDue = Number.POSITIVE_INFINITY;
+      reapplySoon();
+    },
+    Math.max(0, when - Date.now()) + 50,
+  );
 }
 
 /**
