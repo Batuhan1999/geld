@@ -7009,6 +7009,40 @@ tr[data-geld-step-row='hidden'] {
   font-style: normal;
 }
 
+/*
+ * A hunk's scope row: the declarations enclosing it, pinned under the file's
+ * header while the hunk scrolls (sticky scroll, as editors do it). A `tr`
+ * cannot stick but its cell can; the next hunk's row paints over this one
+ * when it reaches the same edge, which is the hand-over wanted.
+ */
+.geld-step-note--scope .geld-step-note__cell {
+  position: sticky;
+  top: calc(var(--geld-rt-top, 0px) + var(--geld-rt-strip, 0px) + var(--geld-rt-file-header, 0px));
+  z-index: 2;
+  background: var(--bgColor-default, var(--color-canvas-default, #fff)) !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: top 180ms ease-out;
+}
+
+.geld-step-note__in {
+  margin-right: 6px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+}
+
+.geld-step-note__sep {
+  margin: 0 6px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+}
+
+.geld-step-note__scope {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+  color: var(--fgColor-default, var(--color-fg-default));
+  font: 11.5px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 /* ---- finish and empty states ----------------------------------------------- */
 
 .geld-review-tab__finish {

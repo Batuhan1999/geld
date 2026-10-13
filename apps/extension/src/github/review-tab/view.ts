@@ -6,7 +6,7 @@
  * hunks that belong to other steps fold with a note (`hunk-rows.ts`).
  */
 
-import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode } from '@geld/core';
+import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode, ScopeLine } from '@geld/core';
 import { formatCount, pluralize } from '@geld/core';
 import type { MovedBlock, ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
 import { finishBody, moveNoteWords, movesTouching, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
@@ -19,8 +19,8 @@ import { inlineText } from '../review/inline-text';
 import { teleportInto } from '../review/teleport';
 import { attachBreakdownTooltip } from '../ui/tooltip';
 import { ICON_ALERT, ICON_ARROW_LEFT, ICON_ARROW_RIGHT, ICON_CHECK_CIRCLE_FILL, ICON_CHEVRON_DOWN, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_DOT_CIRCLE, ICON_FLAG, ICON_INFO, ICON_KEBAB_HORIZONTAL, ICON_SPARKLE_FILL } from '../ui/icons';
-import type { MoveNote } from './hunk-rows';
-import { foldOtherHunks, markMoves } from './hunk-rows';
+import type { MoveNote, ScopeNote } from './hunk-rows';
+import { foldOtherHunks, markMoves, markScopes } from './hunk-rows';
 
 export const ROOT_CLASS = 'geld-review-tab';
 const C = (suffix: string): string => `${ROOT_CLASS}__${suffix}`;
@@ -61,6 +61,8 @@ export interface ReviewTabModel {
   readonly hunksByPath: ReadonlyMap<string, FileHunks>;
   /** Blocks moved between hunks, for the note under each end's first line. */
   readonly moves: readonly MovedBlock[];
+  /** The declarations enclosing a line of a file at the head, null while the file is on its way (`scopes.ts`). */
+  readonly scopesAt: (path: string, line: number) => readonly ScopeLine[] | null;
   /** Which Geld category hides a path, for the supporting sections and the step's counts. */
   readonly categoryOf: (path: string) => HiddenCategory | null;
   /** The categories in force on this repository, for the counts' label ("2 tests" vs "3 hidden files"). */
@@ -602,6 +604,8 @@ export function markStickyHeaders(root: HTMLElement): void {
     if (current === undefined) break;
     if (current.node !== root && getComputedStyle(current.node).position === 'sticky') {
       current.node.setAttribute(ATTR_FILE_HEADER, '');
+      // The hunks' scope rows stick right under this header: its height is the offset they need.
+      root.style.setProperty('--geld-rt-file-header', `${Math.round(current.node.getBoundingClientRect().height)}px`);
       continue;
     }
     if (current.depth >= 4) continue;
@@ -707,6 +711,16 @@ function mountEntry(slot: HTMLElement, entry: DiffEntry, model: ReviewTabModel, 
     }
   }
   if (notes.length > 0) markMoves(entry.root, { anchor: entry.anchor, notes });
+  // Where each shown hunk sits in its file: the enclosing declarations at the head (a deleted file has none there).
+  if (file.status !== 'deleted' && !file.binary) {
+    const scopes: ScopeNote[] = [];
+    for (const hunk of file.hunks) {
+      if (!keep.has(hunk.index)) continue;
+      const chain = model.scopesAt(path, hunk.addedAt[0] ?? hunk.newStart);
+      if (chain !== null && chain.length > 0) scopes.push({ hunk, chain });
+    }
+    if (scopes.length > 0) markScopes(entry.root, { anchor: entry.anchor, notes: scopes });
+  }
 }
 
 /* ---- finish ---------------------------------------------------------------- */

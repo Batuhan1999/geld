@@ -9,7 +9,7 @@
  * it. GitHub's DOM is never rewritten: attributes and one inserted row.
  */
 
-import type { DiffHunk } from '@geld/core';
+import type { DiffHunk, ScopeLine } from '@geld/core';
 import { formatCount } from '@geld/core';
 import { createElement, OWN_UI_ATTRIBUTE } from '../dom';
 
@@ -128,7 +128,7 @@ export function foldOtherHunks(root: HTMLElement, options: FoldOptions): void {
   }
   for (const note of root.querySelectorAll<HTMLElement>(`[${ATTR_NOTE}]`)) {
     const key = note.getAttribute(ATTR_RUN) ?? '';
-    if (!validRuns.has(key) && !key.startsWith('move:')) note.remove();
+    if (!validRuns.has(key) && !key.startsWith('move:') && !key.startsWith('scope:')) note.remove();
   }
 }
 
@@ -210,6 +210,67 @@ export function markMoves(root: HTMLElement, options: MoveOptions): void {
     const folded = row.getAttribute(ATTR_STEP_ROW);
     if (folded !== null) noteRow.setAttribute(ATTR_STEP_ROW, folded);
     row.insertAdjacentElement('afterend', noteRow);
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Scopes                                                                     */
+/* ------------------------------------------------------------------------- */
+
+export interface ScopeNote {
+  readonly hunk: DiffHunk;
+  /** The enclosing lines, outermost first. */
+  readonly chain: readonly ScopeLine[];
+}
+
+interface ScopeOptions {
+  readonly anchor: string;
+  readonly notes: readonly ScopeNote[];
+}
+
+/** The first body row showing a line of the hunk, and the unanchored rows (its `@@` header) right before it. */
+function firstRowsOf(tables: readonly HTMLTableElement[], anchor: string, hunk: DiffHunk): HTMLTableRowElement | null {
+  for (const table of tables) {
+    const rows = [...table.tBodies].flatMap((body) => [...body.rows]);
+    const index = rows.findIndex((row) => !row.hasAttribute(ATTR_NOTE) && anchoredLines(row, anchor).some((entry) => hunkOf([hunk], entry.side, entry.line) === hunk.index));
+    if (index === -1) continue;
+    let first = index;
+    while (first > 0) {
+      const previous = rows[first - 1];
+      if (previous === undefined || previous.hasAttribute(ATTR_NOTE) || anchoredLines(previous, anchor).length > 0) break;
+      first -= 1;
+    }
+    return rows[first] ?? null;
+  }
+  return null;
+}
+
+/**
+ * One row above each hunk saying where in the file it sits: the enclosing
+ * declarations, outermost first ("export function foldOutlineTail(" ›
+ * "for (const event of tail) {"), pinned under the file's header while the
+ * hunk scrolls (the stylesheet makes the cell sticky), so a hunk that starts
+ * mid-function still says which function. Idempotent.
+ */
+export function markScopes(root: HTMLElement, options: ScopeOptions): void {
+  const tables = [...root.querySelectorAll('table')].filter((table) => table.closest(`[${OWN_UI_ATTRIBUTE}]`) === null);
+  for (const note of options.notes) {
+    if (note.chain.length === 0) continue;
+    const key = `scope:${options.anchor}#${note.hunk.index}`;
+    if (root.querySelector(`[${ATTR_NOTE}][${ATTR_RUN}="${key}"]`) !== null) continue;
+    const row = firstRowsOf(tables, options.anchor, note.hunk);
+    if (row === null) continue;
+    const columns = [...row.cells].reduce((sum, cell) => sum + cell.colSpan, 0);
+    const text = createElement('span', { class: `${NOTE_CLASS}__text` }, [createElement('span', { class: `${NOTE_CLASS}__in` }, ['in'])]);
+    note.chain.forEach((scope, position) => {
+      if (position > 0) text.append(createElement('span', { class: `${NOTE_CLASS}__sep`, 'aria-hidden': 'true' }, ['›']));
+      text.append(createElement('code', { class: `${NOTE_CLASS}__scope`, title: `Line ${scope.line}` }, [scope.text]));
+    });
+    const cell = createElement('td', { class: `${NOTE_CLASS}__cell`, colspan: String(Math.max(1, columns)) }, [text]);
+    const noteRow = createElement('tr', { class: `${NOTE_CLASS} ${NOTE_CLASS}--scope`, [OWN_UI_ATTRIBUTE]: '', [ATTR_NOTE]: '', [ATTR_RUN]: key }, [cell]);
+    const folded = row.getAttribute(ATTR_STEP_ROW);
+    if (folded !== null) noteRow.setAttribute(ATTR_STEP_ROW, folded);
+    row.insertAdjacentElement('beforebegin', noteRow);
   }
 }
 

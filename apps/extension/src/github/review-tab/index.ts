@@ -23,6 +23,7 @@ import { activateControl, findViewedControls } from '../whitespace-viewed';
 import { clearFoldedHunks } from './hunk-rows';
 import { diffHunksFor, dropOtherPages, planInputFor, pullPathOf } from './inputs';
 import { closePlanner, dropPlan, markStep, openPlanner, planWithAi, plannerState, resetReview, reviewModelFor, setCurrentStep, storyFor, unmarkStep } from './planner';
+import { dropOtherFiles, scopesAt as scopesAtHead, scopesVersion } from './scopes';
 import { loadPlanRecord, loadProgress, reviewKey } from './store';
 import { ensureReviewTabLink, filesTabLink, interceptFilesTab, removeReviewTabLink, reviewTabUrl } from './tab';
 import type { InputPhase, ReviewTabHandlers, ReviewTabModel } from './view';
@@ -190,6 +191,11 @@ export function applyReviewTab(context: ReviewTabContext): void {
     }
   }
 
+  // The file at the head behind each hunk's scope line: `/owner/repo` from the pull request's path.
+  const repo = pullPath === null ? null : pullPath.replace(/^\//, '').split('/pull/')[0] ?? null;
+  const readScopes: ReviewTabModel['scopesAt'] = repo === null || headSha === null ? () => [] : (path, line) => scopesAtHead(repo, headSha, path, line, context.reapply);
+  if (repo !== null && headSha !== null) dropOtherFiles(repo, headSha);
+
   const view = context.view;
   const entries = entriesOf(current, view);
   // The files layout, out of sight and out of the way (but laid out, for its lazy loaders).
@@ -235,6 +241,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
     entries,
     hunksByPath,
     moves,
+    scopesAt: readScopes,
     categoryOf: context.classify,
     activeCategories: context.activeCategories,
     collapsedSections: current.collapsedSections,
@@ -277,6 +284,7 @@ function stickyBarOf(area: HTMLElement): HTMLElement | null {
 /** Take Geld's marks off a loaned node before it goes home: folded rows and their notes, the sticky-header mark. */
 function undress(node: HTMLElement): void {
   clearFoldedHunks(node);
+  node.style.removeProperty('--geld-rt-file-header');
   node.removeAttribute(ATTR_FILE_HEADER);
   for (const element of node.querySelectorAll(`[${ATTR_FILE_HEADER}]`)) element.removeAttribute(ATTR_FILE_HEADER);
   node.removeAttribute(ATTR_VIEWED);
@@ -401,6 +409,8 @@ function signatureOf(model: ReviewTabModel): string {
     model.virtualized ? 1 : 0,
     entries,
     model.hunksByPath.size,
+    model.moves.length,
+    scopesVersion(),
     model.flagOpen ? 1 : 0,
     model.helpOpen ? 1 : 0,
     [...model.collapsedSections].sort().join(','),

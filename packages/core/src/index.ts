@@ -11,6 +11,7 @@ export * from './change-kinds';
 export * from './comment-lines';
 export * from './category-icons';
 export * from './diff-hunks';
+export * from './scopes';
 export * from './diff-parse';
 export * from './diff-summaries';
 export * from './format';
