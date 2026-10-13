@@ -20,7 +20,19 @@ import {
 } from './review-plan';
 
 function hunk(index: number, added: readonly string[], removed: readonly string[] = [], newStart = 1): PlanHunk {
-  return { index, header: `@@ -${newStart},${removed.length} +${newStart},${added.length} @@`, oldStart: newStart, oldLines: removed.length, newStart, newLines: added.length, added, removed, signature: hashText(`${index}:${added.join('|')}:${removed.join('|')}`) };
+  return {
+    index,
+    header: `@@ -${newStart},${removed.length} +${newStart},${added.length} @@`,
+    oldStart: newStart,
+    oldLines: removed.length,
+    newStart,
+    newLines: added.length,
+    added,
+    addedAt: added.map((_, offset) => newStart + offset),
+    removed,
+    removedAt: removed.map((_, offset) => newStart + offset),
+    signature: hashText(`${index}:${added.join('|')}:${removed.join('|')}`),
+  };
 }
 
 function file(path: string, hunks: readonly PlanHunk[], extra: Partial<PlanFile> = {}): PlanFile {

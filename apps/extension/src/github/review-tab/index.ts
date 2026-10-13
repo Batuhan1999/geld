@@ -11,7 +11,7 @@
 
 import type { GeldSettings, HiddenCategory } from '@geld/core';
 import type { FileHunks } from '@geld/core';
-import type { ReviewStep } from '@geld/review';
+import type { MovedBlock, ReviewStep } from '@geld/review';
 import { finishBody, nextPendingStep, reviewComplete, stepDisplayState } from '@geld/review';
 import type { StoredStory } from '../../lib/local-state';
 import { queryAll } from '../dom';
@@ -176,12 +176,14 @@ export function applyReviewTab(context: ReviewTabContext): void {
   const pullPath = pullPathOf(context.url);
   let inputPhase: InputPhase = { kind: 'loading', reason: null };
   let hunksByPath = new Map<string, FileHunks>();
+  let moves: readonly MovedBlock[] = [];
   let state = plannerState(null);
   if (page.diffUrl !== null && headSha !== null && pullPath !== null) {
     const input = planInputFor({ diffUrl: page.diffUrl, headSha, pullPath, classify: context.classify, commitFiles: context.commitFiles, onChange: context.reapply });
     if (input.status === 'failed') inputPhase = { kind: 'failed', reason: input.reason };
     else if (input.status === 'ready') {
       inputPhase = { kind: 'ready' };
+      moves = input.input.moves ?? [];
       // Commit file lists still arriving: the rules producer plans once they have (a plan from the store shows meanwhile).
       state = plannerState(input.commitsPending && plannerState(null).plan === null ? null : input.input, settings);
       hunksByPath = new Map(diffHunksFor(page.diffUrl, headSha, context.reapply).files.map((file) => [file.path, file] as const));
@@ -232,6 +234,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
     view,
     entries,
     hunksByPath,
+    moves,
     categoryOf: context.classify,
     activeCategories: context.activeCategories,
     collapsedSections: current.collapsedSections,

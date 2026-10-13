@@ -9,7 +9,8 @@
 import { z } from 'zod';
 import type { PromptParse } from './prompts';
 import type { HunkRef, PlanInput, ReviewPlan, ReviewStep, StepKind, StepProposal } from './review-plan';
-import { isStepKind, refKey, refsOf, STEP_KINDS, STEP_SIZE_CAP, touchesSummary } from './review-plan';
+import { isStepKind, movesOf, refKey, refsOf, STEP_KINDS, STEP_SIZE_CAP, touchesSummary } from './review-plan';
+import { movesTouching } from './moves';
 
 export const PLAN_SYSTEM = `You plan a code review. A pull request's diff is given as numbered hunks (h1, h2, …), each with its file, header and changed lines, plus the pull request's title, its commits, and a first grouping made by simple rules. Group the hunks into steps a reviewer reads in order.
 Rules:
@@ -18,12 +19,14 @@ Rules:
 - A step is read in one sitting: prefer steps under ${STEP_SIZE_CAP} changed lines, a few hunks in one to three files, and split a large body of work into the parts a reader would take in turn (the data model, then the logic, then where it is wired in). A tiny pull request may be one step. Do not pad: a step with one hunk is fine when it is its own change.
 - "key": s1, s2, … in reading order. "title": three to seven words, imperative or a noun phrase, naming the change not the files ("Debounce the search box", "Settings schema for the new toggle"). "kind": one of ${STEP_KINDS.join(', ')}. "gist": one sentence, under 160 characters, saying what the step does. "watch": zero to three short items worth a second look, only when the diff shows one.
 - Files Geld hides (tests, generated output, fixtures) are listed by path only and are not hunks to place; their steps are decided afterwards.
+- "moves" lists blocks cut from one hunk and pasted into another ("h3 → h9 · 31 lines"). Both ends of a move belong to one step, and a move is not new code: say "moved", not "adds".
 - When "previousSteps" are given, the reader has already worked through them: keep a step's key where its hunks are the same change, and change only what the new and removed hunks require.
 - Return JSON only, matching the schema.`;
 
 export const STORY_SYSTEM = `You explain one step of a code review to the reviewer, who did not write the code. The whole plan is given for context, then the step's hunks in full.
 Rules:
 - "story": two to four short sentences, in the present tense, about the code as it now is ("A new \`MergeGate\` decides each row's merge action from the checks rollup, and the Ready to merge section renders it on every row."). The first sentence is the point: what the step does. Then how it fits the pull request, and what the pieces do. Plain words; name a file only where the reader would otherwise be lost. Never say what is not in the diff. No praise, no "this PR", no headings or lists. Inline code in backticks is fine.
+- "moves" lists code cut from one place and pasted into another: say it moved and what, if anything, changed on the way. Never describe moved code as new.
 - "why": one sentence tying the step to the pull request's goal, or omit it when the story already says so.
 - "watch": zero to three things worth a second look, each one sentence starting with what to check ("The retry loop has no cap"). Only what the diff shows.
 - Return JSON only, matching the schema.`;
@@ -138,6 +141,14 @@ export function planUserPrompt(input: PlanInput, options: PlanPromptOptions): st
     hiddenFiles: input.files.filter((file) => file.hidden !== null).map((file) => file.path),
     candidates: options.candidates.map(toPrompt),
   };
+  const moves = movesOf(input)
+    .map((move) => {
+      const from = handleOf.get(refKey(move.from));
+      const to = handleOf.get(refKey(move.to));
+      return from === undefined || to === undefined ? null : `${from} → ${to} · ${move.lines} lines${move.exact ? '' : ' (reindented)'}`;
+    })
+    .filter((line): line is string => line !== null);
+  if (moves.length > 0) payload.moves = moves;
   if (options.previous !== undefined) {
     payload.previousSteps = options.previous.plan.steps.filter((step) => step.touches.length > 0).map((step) => toPrompt({ key: step.id, title: step.title, kind: step.kind, touches: step.touches }));
     payload.newHunks = options.previous.newHandles;
@@ -235,6 +246,21 @@ export function parsePlanOutput(text: string, handles: ReadonlyMap<string, HunkR
 /** How many changed lines of the step the story prompt carries in full before excerpting. */
 const STORY_FULL_UNDER = 1500;
 
+/** `moves: ["31 lines moved from a.ts (old line 38) to b.ts (line 6)"]` for the step's hunks, or nothing. */
+function movesLine(input: PlanInput, step: ReviewStep): { readonly moves?: readonly string[] } {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const ref of step.touches) {
+    for (const move of movesTouching(movesOf(input), ref)) {
+      const key = `${refKey(move.from)}>${refKey(move.to)}@${move.from.index}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(`${move.lines} lines moved from ${move.from.path} (old line ${move.from.line}) to ${move.to.path} (line ${move.to.line})${move.exact ? '' : ', reindented'}`);
+    }
+  }
+  return lines.length === 0 ? {} : { moves: lines };
+}
+
 export function storyUserPrompt(input: PlanInput, plan: ReviewPlan, step: ReviewStep): string {
   const files = new Map(input.files.map((file) => [file.path, file] as const));
   const size = step.touches.reduce((sum, ref) => sum + (files.get(ref.path)?.hunks[ref.hunk]?.added.length ?? 0) + (files.get(ref.path)?.hunks[ref.hunk]?.removed.length ?? 0), 0);
@@ -249,6 +275,7 @@ export function storyUserPrompt(input: PlanInput, plan: ReviewPlan, step: Review
     ...(step.gist === null ? {} : { gist: step.gist }),
     touches: touchesSummary(step).map((entry) => `${entry.path} (${entry.hunks} ${entry.hunks === 1 ? 'hunk' : 'hunks'})`),
     supporting: [...new Set(step.supporting.map((ref) => ref.path))],
+    ...movesLine(input, step),
     hunks: step.touches.map((ref) => {
       const file = files.get(ref.path);
       const hunk = file?.hunks[ref.hunk];

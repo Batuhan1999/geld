@@ -44,6 +44,9 @@ describe('parseUnifiedDiffHunks', () => {
     expect(first?.header).toBe('@@ -1,3 +1,4 @@ export function a()');
     expect(first?.added).toEqual(['const b = 3;', 'const c = 4;']);
     expect(first?.removed).toEqual(['const b = 2;']);
+    // Line numbers per changed line: `const b = 2;` was old line 2, the two added lines are new lines 2 and 3.
+    expect(first?.removedAt).toEqual([2]);
+    expect(first?.addedAt).toEqual([2, 3]);
     expect(first === undefined ? null : hunkNewRange(first)).toEqual([1, 5]);
     expect(first === undefined ? null : hunkOldRange(first)).toEqual([1, 4]);
     const second = a?.hunks[1];
@@ -56,6 +59,9 @@ describe('parseUnifiedDiffHunks', () => {
     expect(binary?.status).toBe('added');
     expect(gone?.status).toBe('deleted');
     expect(gone?.hunks[0]?.removed).toEqual(['gone', 'gone too']);
+    expect(gone?.hunks[0]?.removedAt).toEqual([1, 2]);
+    expect(second?.addedAt).toEqual([11]);
+    expect(second?.removedAt).toEqual([10]);
     expect(gone?.hunks[0] === undefined ? null : hunkNewRange(gone.hunks[0])).toEqual([0, 0]);
   });
 

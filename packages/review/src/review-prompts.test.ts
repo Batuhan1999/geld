@@ -4,7 +4,7 @@ import { hashText, normalizePlan, rulesPlan, rulesProposals } from './review-pla
 import { diffDetailFor, hunkHandles, parsePlanOutput, parseStoryOutput, planUserPrompt, storyUserPrompt } from './review-prompts';
 
 function hunk(index: number, added: readonly string[], removed: readonly string[] = []): PlanHunk {
-  return { index, header: `@@ -1,${removed.length} +1,${added.length} @@`, oldStart: 1, oldLines: removed.length, newStart: 1, newLines: added.length, added, removed, signature: hashText(`${index}:${added.join('|')}`) };
+  return { index, header: `@@ -1,${removed.length} +1,${added.length} @@`, oldStart: 1, oldLines: removed.length, newStart: 1, newLines: added.length, added, addedAt: added.map((_, offset) => offset + 1), removed, removedAt: removed.map((_, offset) => offset + 1), signature: hashText(`${index}:${added.join('|')}`) };
 }
 
 function file(path: string, hunks: readonly PlanHunk[], extra: Partial<PlanFile> = {}): PlanFile {

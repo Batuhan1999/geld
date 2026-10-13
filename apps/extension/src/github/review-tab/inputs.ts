@@ -11,6 +11,7 @@
 import type { FileHunks, HiddenCategory } from '@geld/core';
 import { parseUnifiedDiffHunks } from '@geld/core';
 import type { PlanCommit, PlanFile, PlanInput } from '@geld/review';
+import { detectMoves } from '@geld/review';
 import { browser } from 'wxt/browser';
 import type { FetchDiffTextRequest } from '../../lib/messages';
 import { isFetchDiffTextResponse } from '../../lib/messages';
@@ -211,12 +212,14 @@ export function planInputFor(sources: PlanInputSources): PlanInputState {
       status: file.status,
       binary: file.binary,
       hidden: category === null ? null : { id: category.id, title: category.title },
-      hunks: file.hunks.map((hunk) => ({ index: hunk.index, header: hunk.header, oldStart: hunk.oldStart, oldLines: hunk.oldLines, newStart: hunk.newStart, newLines: hunk.newLines, added: hunk.added, removed: hunk.removed, signature: hunk.signature })),
+      hunks: file.hunks.map((hunk) => ({ index: hunk.index, header: hunk.header, oldStart: hunk.oldStart, oldLines: hunk.oldLines, newStart: hunk.newStart, newLines: hunk.newLines, added: hunk.added, addedAt: hunk.addedAt, removed: hunk.removed, removedAt: hunk.removedAt, signature: hunk.signature })),
     };
   });
+  // Moves are found once per diff here (the memo holds them), not on every pass that reads the input.
+  const moves = memo !== null && memo.files === diff.files && memo.state.status === 'ready' ? memo.state.input.moves : detectMoves(files);
   const state: PlanInputState = {
     status: 'ready',
-    input: { title, body: null, headSha: sources.headSha, commits: planCommits, files, findings: [] },
+    input: { title, body: null, headSha: sources.headSha, commits: planCommits, files, findings: [], ...(moves === undefined ? {} : { moves }) },
     commitsPending,
   };
   memo = { files: diff.files, commitsKey, title, headSha: sources.headSha, state };

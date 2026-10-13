@@ -12,6 +12,9 @@
  * Nothing in here touches a browser or the network.
  */
 
+import type { MovedBlock } from './moves';
+import { detectMoves } from './moves';
+
 /** FNV-1a over the text as a short base-36 key (the same shape `@geld/core`'s `hashText` gives, kept here so this package stays dependency-free). */
 export function hashText(text: string): string {
   let hash = 0x811c9dc5;
@@ -91,7 +94,11 @@ export interface PlanHunk {
   readonly newStart: number;
   readonly newLines: number;
   readonly added: readonly string[];
+  /** The new-file line number of each added line. */
+  readonly addedAt: readonly number[];
   readonly removed: readonly string[];
+  /** The old-file line number of each removed line. */
+  readonly removedAt: readonly number[];
   readonly signature: string;
 }
 
@@ -126,6 +133,13 @@ export interface PlanInput {
   readonly commits: readonly PlanCommit[];
   readonly files: readonly PlanFile[];
   readonly findings: readonly PlanFinding[];
+  /** Blocks moved between hunks ({@link detectMoves}); computed from `files` when absent. */
+  readonly moves?: readonly MovedBlock[];
+}
+
+/** The input's moves, from the field or the files. */
+export function movesOf(input: PlanInput): readonly MovedBlock[] {
+  return input.moves ?? detectMoves(input.files);
 }
 
 /** A step as a producer proposes it, before normalisation assigns ids, supporting changes and order. */
@@ -457,6 +471,7 @@ export function rulesProposals(input: PlanInput): readonly StepProposal[] {
   const files = new Map(input.files.map((file) => [file.path, file] as const));
   const visible = input.files.filter((file) => file.hidden === null);
   const refs = visible.flatMap((file) => refsOf(file));
+  const visibleKeys = new Set(refs.map(refKey));
   const groups = new Groups();
   for (const ref of refs) groups.add(refKey(ref), refSize(files, ref));
   const refsByPath = new Map<string, HunkRef[]>();
@@ -512,7 +527,13 @@ export function rulesProposals(input: PlanInput): readonly StepProposal[] {
     }
   }
 
-  // 3. Path: the same stem anywhere (search.ts, search.css, Search.tsx), then the same directory between lone files.
+  // 3. Moves: a block cut from one hunk and pasted into another is read in one place, both ends together.
+  for (const move of movesOf(input)) {
+    if (!visibleKeys.has(refKey(move.from)) || !visibleKeys.has(refKey(move.to))) continue;
+    groups.union(refKey(move.from), refKey(move.to), STEP_SIZE_CAP, null);
+  }
+
+  // 4. Path: the same stem anywhere (search.ts, search.css, Search.tsx), then the same directory between lone files.
   const byStem = new Map<string, string[]>();
   for (const path of refsByPath.keys()) {
     const stem = stemOf(path);
@@ -741,11 +762,22 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
     }
     return best?.draft;
   };
+  // A hidden hunk that is one end of a move (a test moved with the code it tests) goes where the other end went.
+  const moves = movesOf(input);
+  const byMove = (ref: HunkRef): Draft | undefined => {
+    for (const move of moves) {
+      const other = refKey(move.from) === refKey(ref) ? move.to : refKey(move.to) === refKey(ref) ? move.from : null;
+      if (other === null) continue;
+      const owner = drafts.find((draft) => [...draft.touches, ...draft.supporting].some((candidate) => refKey(candidate) === refKey(other)));
+      if (owner !== undefined) return owner;
+    }
+    return undefined;
+  };
   for (const ref of hiddenRefs.values()) {
     if (claimed.has(refKey(ref))) continue;
     const file = files.get(ref.path);
     const target = file === undefined ? null : supportTarget(file, drafts.flatMap(touchedPathsOf));
-    const owner = bySymbol(ref) ?? (target === null ? undefined : drafts.find((draft) => touchedPathsOf(draft).includes(target)));
+    const owner = byMove(ref) ?? bySymbol(ref) ?? (target === null ? undefined : drafts.find((draft) => touchedPathsOf(draft).includes(target)));
     if (owner === undefined) leftovers.push(ref);
     else owner.supporting.push(ref);
     claimed.add(refKey(ref));

@@ -21,8 +21,12 @@ export interface DiffHunk {
   readonly newLines: number;
   /** Added lines without their `+` prefix, in order. */
   readonly added: readonly string[];
+  /** The new-file line number of each entry in `added`. */
+  readonly addedAt: readonly number[];
   /** Removed lines without their `-` prefix, in order. */
   readonly removed: readonly string[];
+  /** The old-file line number of each entry in `removed`. */
+  readonly removedAt: readonly number[];
   /**
    * A short hash of the hunk's changed text (not its position), so a hunk
    * that moved down a file after an unrelated edit above it still answers to
@@ -60,7 +64,12 @@ interface OpenHunk {
   newStart: number;
   newLines: number;
   added: string[];
+  addedAt: number[];
   removed: string[];
+  removedAt: number[];
+  /** The next line numbers on each side, advanced by every content line. */
+  oldLine: number;
+  newLine: number;
 }
 
 interface OpenFile {
@@ -89,7 +98,9 @@ export function parseUnifiedDiffHunks(diffText: string): readonly FileHunks[] {
       newStart: hunk.newStart,
       newLines: hunk.newLines,
       added: hunk.added,
+      addedAt: hunk.addedAt,
       removed: hunk.removed,
+      removedAt: hunk.removedAt,
       signature: hashText(`${file.path}\n-${hunk.removed.join('\n-')}\n+${hunk.added.join('\n+')}`),
     });
     file.open = null;
@@ -117,14 +128,20 @@ export function parseUnifiedDiffHunks(diffText: string): readonly FileHunks[] {
     if (line.startsWith('@@')) {
       closeHunk(file);
       const header = HUNK_HEADER.exec(line);
+      const oldStart = Number(header?.[1] ?? 1);
+      const newStart = Number(header?.[3] ?? 1);
       file.open = {
         header: line,
-        oldStart: Number(header?.[1] ?? 1),
+        oldStart,
         oldLines: header?.[2] === undefined ? 1 : Number(header[2]),
-        newStart: Number(header?.[3] ?? 1),
+        newStart,
         newLines: header?.[4] === undefined ? 1 : Number(header[4]),
         added: [],
+        addedAt: [],
         removed: [],
+        removedAt: [],
+        oldLine: oldStart,
+        newLine: newStart,
       };
       continue;
     }
@@ -140,9 +157,21 @@ export function parseUnifiedDiffHunks(diffText: string): readonly FileHunks[] {
       else if (line.startsWith('Binary files ') || line === 'GIT binary patch') file.binary = true;
       continue;
     }
-    if (line.startsWith('+')) file.open.added.push(line.slice(1));
-    else if (line.startsWith('-')) file.open.removed.push(line.slice(1));
-    // Context lines, `\ No newline at end of file`, and the blank line a trailing newline leaves add nothing.
+    const open = file.open;
+    if (line.startsWith('+')) {
+      open.added.push(line.slice(1));
+      open.addedAt.push(open.newLine);
+      open.newLine += 1;
+    } else if (line.startsWith('-')) {
+      open.removed.push(line.slice(1));
+      open.removedAt.push(open.oldLine);
+      open.oldLine += 1;
+    } else if (line.startsWith(' ') || line === '') {
+      // A context line (an empty one arrives as '' once the diff's trailing newline is split off; harmless at the end).
+      open.oldLine += 1;
+      open.newLine += 1;
+    }
+    // `\ No newline at end of file` numbers nothing.
   }
   flush();
   return files;

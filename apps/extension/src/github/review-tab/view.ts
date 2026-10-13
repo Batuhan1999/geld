@@ -8,8 +8,8 @@
 
 import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode } from '@geld/core';
 import { formatCount, pluralize } from '@geld/core';
-import type { ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
-import { finishBody, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
+import type { MovedBlock, ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
+import { finishBody, moveNoteWords, movesTouching, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
 import type { StoredStory } from '../../lib/local-state';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from '../dom';
 import type { CategoryTotals, HiddenBreakdown, StatsBreakdown } from '../breakdown';
@@ -19,7 +19,8 @@ import { inlineText } from '../review/inline-text';
 import { teleportInto } from '../review/teleport';
 import { attachBreakdownTooltip } from '../ui/tooltip';
 import { ICON_ALERT, ICON_ARROW_LEFT, ICON_ARROW_RIGHT, ICON_CHECK_CIRCLE_FILL, ICON_CHEVRON_DOWN, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_DOT_CIRCLE, ICON_FLAG, ICON_INFO, ICON_KEBAB_HORIZONTAL, ICON_SPARKLE_FILL } from '../ui/icons';
-import { foldOtherHunks } from './hunk-rows';
+import type { MoveNote } from './hunk-rows';
+import { foldOtherHunks, markMoves } from './hunk-rows';
 
 export const ROOT_CLASS = 'geld-review-tab';
 const C = (suffix: string): string => `${ROOT_CLASS}__${suffix}`;
@@ -58,6 +59,8 @@ export interface ReviewTabModel {
    */
   readonly entries: ReadonlyMap<string, DiffEntry>;
   readonly hunksByPath: ReadonlyMap<string, FileHunks>;
+  /** Blocks moved between hunks, for the note under each end's first line. */
+  readonly moves: readonly MovedBlock[];
   /** Which Geld category hides a path, for the supporting sections and the step's counts. */
   readonly categoryOf: (path: string) => HiddenCategory | null;
   /** The categories in force on this repository, for the counts' label ("2 tests" vs "3 hidden files"). */
@@ -642,30 +645,68 @@ function renderFile(model: ReviewTabModel, plan: ReviewPlan, step: ReviewStep, p
     slot.append(placeholder);
     return slot;
   }
-  mountEntry(slot, entry, model, plan, step, path, role);
+  mountEntry(slot, entry, model, plan, step, path, role, handlers);
   handlers.loaned(path, entry);
   return slot;
 }
 
-/** Move GitHub's rendered diff into the slot and fold the hunks other steps own. */
-function mountEntry(slot: HTMLElement, entry: DiffEntry, model: ReviewTabModel, plan: ReviewPlan, step: ReviewStep, path: string, role: 'touches' | 'supporting'): void {
+/** The step holding a hunk, by index in the plan, or null. */
+function ownerOf(plan: ReviewPlan, path: string, hunk: number): { readonly index: number; readonly step: ReviewStep } | null {
+  const index = plan.steps.findIndex((candidate) => [...candidate.touches, ...candidate.supporting].some((ref) => ref.path === path && ref.hunk === hunk));
+  const step = plan.steps[index];
+  return step === undefined ? null : { index, step };
+}
+
+/** Move GitHub's rendered diff into the slot, fold the hunks other steps own and note the moved blocks. */
+function mountEntry(slot: HTMLElement, entry: DiffEntry, model: ReviewTabModel, plan: ReviewPlan, step: ReviewStep, path: string, role: 'touches' | 'supporting', handlers: ReviewTabHandlers): void {
   teleportInto(slot, [entry.root]);
   const file = model.hunksByPath.get(path);
   if (file === undefined || entry.anchor === null || file.hunks.length === 0) return;
   const refs = role === 'touches' ? step.touches : step.supporting;
   const keep = new Set(refs.filter((ref) => ref.path === path).map((ref) => ref.hunk));
-  if (keep.size >= file.hunks.length) return;
-  foldOtherHunks(entry.root, {
-    anchor: entry.anchor,
-    hunks: file.hunks,
-    keep,
-    stepOf: (hunk) => {
-      const index = plan.steps.findIndex((candidate) => [...candidate.touches, ...candidate.supporting].some((ref) => ref.path === path && ref.hunk === hunk));
-      const owner = plan.steps[index];
-      return owner === undefined ? null : { index, title: owner.title };
-    },
-    shownRuns: model.shownRuns,
-  });
+  if (keep.size < file.hunks.length) {
+    foldOtherHunks(entry.root, {
+      anchor: entry.anchor,
+      hunks: file.hunks,
+      keep,
+      stepOf: (hunk) => {
+        const owner = ownerOf(plan, path, hunk);
+        return owner === null ? null : { index: owner.index, title: owner.step.title };
+      },
+      shownRuns: model.shownRuns,
+    });
+  }
+  // Moved blocks: a note under the first line of each end in this file. "Where it went" scrolls to the other end
+  // when it is in this step, else opens the step that holds it.
+  const notes: MoveNote[] = [];
+  const inStep = new Set([...step.touches, ...step.supporting].map((ref) => `${ref.path}#${ref.hunk}`));
+  const seen = new Set<string>();
+  for (const hunk of file.hunks) {
+    for (const move of movesTouching(model.moves, { path, hunk: hunk.index })) {
+      for (const side of ['from', 'to'] as const) {
+        const end = move[side];
+        if (end.path !== path || end.hunk !== hunk.index) continue;
+        const key = `${side}:${end.line}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const other = side === 'from' ? move.to : move.from;
+        const otherSide = side === 'from' ? 'R' : 'L';
+        const go = (): void => {
+          if (inStep.has(`${other.path}#${other.hunk}`)) {
+            const slotOf = slot.closest(`.${ROOT_CLASS}`) ?? document;
+            const anchor = model.entries.get(other.path)?.anchor ?? null;
+            const row = anchor === null ? null : slotOf.querySelector<HTMLElement>(`[data-line-anchor="${CSS.escape(`${anchor}${otherSide}${other.line}`)}"], [id="${CSS.escape(`${anchor}${otherSide}${other.line}`)}"]`);
+            (row?.closest('tr') ?? slotOf.querySelector<HTMLElement>(`[data-geld-review-file="${CSS.escape(other.path)}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            return;
+          }
+          const owner = ownerOf(plan, other.path, other.hunk);
+          if (owner !== null) handlers.selectStep(owner.step.id);
+        };
+        notes.push({ side: side === 'from' ? 'L' : 'R', line: end.line, words: moveNoteWords(move, side), go });
+      }
+    }
+  }
+  if (notes.length > 0) markMoves(entry.root, { anchor: entry.anchor, notes });
 }
 
 /* ---- finish ---------------------------------------------------------------- */

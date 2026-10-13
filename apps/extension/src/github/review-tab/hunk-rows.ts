@@ -127,7 +127,8 @@ export function foldOtherHunks(root: HTMLElement, options: FoldOptions): void {
     flush();
   }
   for (const note of root.querySelectorAll<HTMLElement>(`[${ATTR_NOTE}]`)) {
-    if (!validRuns.has(note.getAttribute(ATTR_RUN) ?? '')) note.remove();
+    const key = note.getAttribute(ATTR_RUN) ?? '';
+    if (!validRuns.has(key) && !key.startsWith('move:')) note.remove();
   }
 }
 
@@ -147,6 +148,69 @@ function ensureNote(first: HTMLTableRowElement, key: string, count: number, othe
   const cell = createElement('td', { class: `${NOTE_CLASS}__cell`, colspan: String(columns) }, [createElement('span', { class: `${NOTE_CLASS}__text` }, [noteText(count, other)]), button]);
   const note = createElement('tr', { class: NOTE_CLASS, [OWN_UI_ATTRIBUTE]: '', [ATTR_NOTE]: '', [ATTR_RUN]: key }, [cell]);
   first.insertAdjacentElement('beforebegin', note);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Moves                                                                      */
+/* ------------------------------------------------------------------------- */
+
+export interface MoveNote {
+  /** The side the first moved line is on: `L` for the cut (old file), `R` for the paste (new file). */
+  readonly side: 'L' | 'R';
+  readonly line: number;
+  readonly words: string;
+  /** Go to the other end (the other file in this step, or the step that holds it); null when there is nowhere to go. */
+  readonly go: (() => void) | null;
+}
+
+interface MoveOptions {
+  readonly anchor: string;
+  readonly notes: readonly MoveNote[];
+}
+
+/**
+ * One note row under the first line of each moved block ("↗ Moved to
+ * editor-launch.ts · 31 lines"), on both ends, so the red and green blocks
+ * read as one cut and paste. Rows are found by their line anchors, as the
+ * folds are; a note inside a folded run hides and shows with the run.
+ * Idempotent: a note already in place is kept.
+ */
+export function markMoves(root: HTMLElement, options: MoveOptions): void {
+  const tables = [...root.querySelectorAll('table')].filter((table) => table.closest(`[${OWN_UI_ATTRIBUTE}]`) === null);
+  for (const note of options.notes) {
+    const key = `move:${options.anchor}${note.side}${note.line}`;
+    if (root.querySelector(`[${ATTR_NOTE}][${ATTR_RUN}="${key}"]`) !== null) continue;
+    let row: HTMLTableRowElement | null = null;
+    for (const table of tables) {
+      for (const candidate of [...table.tBodies].flatMap((body) => [...body.rows])) {
+        if (candidate.hasAttribute(ATTR_NOTE)) continue;
+        if (anchoredLines(candidate, options.anchor).some((entry) => entry.side === note.side && entry.line === note.line)) {
+          row = candidate;
+          break;
+        }
+      }
+      if (row !== null) break;
+    }
+    if (row === null) continue;
+    const columns = [...row.cells].reduce((sum, cell) => sum + cell.colSpan, 0);
+    const text = createElement('span', { class: `${NOTE_CLASS}__text` }, [createElement('span', { class: `${NOTE_CLASS}__arrow`, 'aria-hidden': 'true' }, [note.side === 'L' ? '↗' : '↙']), note.words]);
+    const cell = createElement('td', { class: `${NOTE_CLASS}__cell`, colspan: String(Math.max(1, columns)) }, [text]);
+    if (note.go !== null) {
+      const go = note.go;
+      const button = createElement('button', { type: 'button', class: `${NOTE_CLASS}__show` }, [note.side === 'L' ? 'Where it went' : 'Where it was']);
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        go();
+      });
+      cell.append(button);
+    }
+    const noteRow = createElement('tr', { class: `${NOTE_CLASS} ${NOTE_CLASS}--move`, [OWN_UI_ATTRIBUTE]: '', [ATTR_NOTE]: '', [ATTR_RUN]: key }, [cell]);
+    // Folded with the run it sits in, if any.
+    const folded = row.getAttribute(ATTR_STEP_ROW);
+    if (folded !== null) noteRow.setAttribute(ATTR_STEP_ROW, folded);
+    row.insertAdjacentElement('afterend', noteRow);
+  }
 }
 
 function noteText(count: number, other: OtherStep | null): string {

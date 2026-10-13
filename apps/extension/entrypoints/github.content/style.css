@@ -6997,6 +6997,18 @@ tr[data-geld-step-row='hidden'] {
   text-decoration: underline;
 }
 
+/* A moved block's note: the muted surface (nothing to show or hide), the arrow saying which way the code went. */
+.geld-step-note--move .geld-step-note__cell {
+  background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa)) !important;
+  font-style: italic;
+}
+
+.geld-step-note__arrow {
+  display: inline-block;
+  margin-right: 6px;
+  font-style: normal;
+}
+
 /* ---- finish and empty states ----------------------------------------------- */
 
 .geld-review-tab__finish {

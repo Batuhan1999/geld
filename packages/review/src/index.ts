@@ -16,3 +16,4 @@ export * from './model-guide';
 export * from './inline-markdown';
 export * from './review-plan';
 export * from './review-prompts';
+export * from './moves';
