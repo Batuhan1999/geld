@@ -23,7 +23,7 @@ import { restoreAll, teleportedNodes } from '../review/teleport';
 import { activateControl, findViewedControls } from '../whitespace-viewed';
 import { clearFoldedHunks } from './hunk-rows';
 import { diffHunksFor, dropOtherPages, planInputFor, pullPathOf } from './inputs';
-import { closePlanner, dropPlan, markStep, openPlanner, planWithAi, plannerState, resetReview, reviewModelFor, setCurrentStep, storyFor, unmarkStep } from './planner';
+import { addReading, closePlanner, dropPlan, markStep, openPlanner, planWithAi, plannerState, resetReview, reviewModelFor, setCurrentStep, storyFor, unmarkStep } from './planner';
 import { dropOtherFiles, scopesAt as scopesAtHead, scopesVersion } from './scopes';
 import { loadPlanRecord, loadProgress, reviewKey } from './store';
 import type { TabTarget } from './tab';
@@ -85,6 +85,10 @@ interface Visit {
   resizeObserver: ResizeObserver | null;
   /** Redraws the Diagram tab's arrows when its box changes size. */
   unwatchDiagram: (() => void) | null;
+  /** The step being read and since when (tab visible, step view up), for the reading measure. */
+  reading: { stepId: string; since: number } | null;
+  readingTimer: ReturnType<typeof setInterval> | null;
+  unbindVisibility: (() => void) | null;
   /** GitHub's sticky bar, found in the files layout once; on loan it is no longer there to find. */
   toolbar: HTMLElement | null;
   settings: GeldSettings;
@@ -168,7 +172,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
   const key = reviewKey(page.stateKey);
   if (visit === null || visit.stateKey !== page.stateKey) {
     teardownReviewTab();
-    visit = { stateKey: page.stateKey, key, root: null, area: null, signature: '', shownRuns: new Set(), collapsedSections: new Set(), flagOpen: false, flagDraft: '', finishOpen: false, helpOpen: false, seek: null, seekTimer: null, wanted: new Set(), loaned: new Map(), unbindKeys: null, unbindFilesTab: null, scrollToStep: null, rebuildAsked: false, observers: [], resizeObserver: null, unwatchDiagram: null, toolbar: null, settings };
+    visit = { stateKey: page.stateKey, key, root: null, area: null, signature: '', shownRuns: new Set(), collapsedSections: new Set(), flagOpen: false, flagDraft: '', finishOpen: false, helpOpen: false, seek: null, seekTimer: null, wanted: new Set(), loaned: new Map(), unbindKeys: null, unbindFilesTab: null, scrollToStep: null, rebuildAsked: false, observers: [], resizeObserver: null, unwatchDiagram: null, reading: null, readingTimer: null, unbindVisibility: null, toolbar: null, settings };
     openPlanner(key, () => context.reapply());
     if (page.diffUrl !== null) dropOtherPages(page.diffUrl);
   }
@@ -262,6 +266,60 @@ export function applyReviewTab(context: ReviewTabContext): void {
   const handlers = makeHandlers(context, current);
   mount(current, model, handlers, view);
   seekWanted(current, view, context.reapply);
+  trackReading(current, mode === 'review' && !finish ? (currentStep?.id ?? null) : null);
+}
+
+/* ------------------------------------------------------------------------- */
+/* The reading measure                                                        */
+/* ------------------------------------------------------------------------- */
+
+/** Credit the open step every so often, so a tab closed without a last pass loses at most this much. */
+const READING_FLUSH_MS = 15_000;
+
+/**
+ * Time the reader spends with a step open and the tab visible, credited to
+ * the step (`addReading`) when the step changes, the tab hides, every
+ * `READING_FLUSH_MS`, and on teardown. Local only, shown at the finish.
+ */
+function trackReading(current: Visit, stepId: string | null): void {
+  const now = Date.now();
+  const visible = document.visibilityState === 'visible';
+  const open = current.reading;
+  if (open !== null && (open.stepId !== stepId || !visible)) {
+    addReading(open.stepId, now - open.since);
+    current.reading = null;
+  }
+  if (stepId !== null && visible && current.reading === null) current.reading = { stepId, since: now };
+  if (current.readingTimer === null) {
+    current.readingTimer = setInterval(() => {
+      const reading = current.reading;
+      if (reading === null || document.visibilityState !== 'visible') return;
+      const at = Date.now();
+      addReading(reading.stepId, at - reading.since);
+      reading.since = at;
+    }, READING_FLUSH_MS);
+  }
+  if (current.unbindVisibility === null) {
+    // Hidden: credit what was read and stop the clock; the pass the controller runs when the tab shows starts it again.
+    const onVisibility = (): void => {
+      const reading = current.reading;
+      if (document.visibilityState === 'visible' || reading === null) return;
+      addReading(reading.stepId, Date.now() - reading.since);
+      current.reading = null;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    current.unbindVisibility = () => document.removeEventListener('visibilitychange', onVisibility);
+  }
+}
+
+function stopReading(current: Visit): void {
+  const reading = current.reading;
+  if (reading !== null && document.visibilityState === 'visible') addReading(reading.stepId, Date.now() - reading.since);
+  current.reading = null;
+  if (current.readingTimer !== null) clearInterval(current.readingTimer);
+  current.readingTimer = null;
+  current.unbindVisibility?.();
+  current.unbindVisibility = null;
 }
 
 /**
@@ -857,6 +915,7 @@ export function teardownReviewTab(): void {
     return;
   }
   visit = null;
+  stopReading(current);
   for (const node of teleportedNodes()) undress(node);
   restoreAll();
   current.root?.remove();

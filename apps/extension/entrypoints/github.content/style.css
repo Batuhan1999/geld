@@ -7416,9 +7416,14 @@ tr[data-geld-step-row='hidden'] {
   padding: 16px 20px;
 }
 
-.geld-review-tab__finish-summary {
+.geld-review-tab__finish-summary,
+.geld-review-tab__finish-reading {
   margin: 0 0 12px;
   color: var(--geld-rt-muted);
+}
+
+.geld-review-tab__finish-summary + .geld-review-tab__finish-reading {
+  margin-top: -8px;
 }
 
 .geld-review-tab__flagged {

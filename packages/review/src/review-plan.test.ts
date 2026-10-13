@@ -5,8 +5,10 @@ import {
   cleanCommitTitle,
   definedSymbols,
   finishBody,
+  formatReadingTime,
   hashText,
   kindFor,
+  readingSummary,
   nextPendingStep,
   normalizePlan,
   planDelta,
@@ -17,6 +19,7 @@ import {
   rulesProposals,
   stemOf,
   stepDisplayState,
+  withReading,
 } from './review-plan';
 
 function hunk(index: number, added: readonly string[], removed: readonly string[] = [], newStart = 1): PlanHunk {
@@ -214,6 +217,25 @@ describe('progress', () => {
     expect(reviewComplete(plan, done)).toBe(true);
     expect(finishBody(plan, done)).toContain(`Reviewed in ${plan.steps.length} steps with Geld.`);
     expect(finishBody(plan, done)).toContain(`- **${first.title}**: hm`);
+  });
+});
+
+describe('reading', () => {
+  it('adds time per step, carries it across plans and sums it for the finish', () => {
+    const plan = rulesPlan(input, 'now');
+    const [first, second] = plan.steps;
+    if (first === undefined || second === undefined) throw new Error('two steps expected');
+    let progress: ReviewProgress = { planId: plan.id, steps: {}, current: null };
+    progress = withReading(progress, first.id, 90_000);
+    progress = withReading(progress, first.id, 30_000);
+    progress = withReading(progress, second.id, 0);
+    expect(progress.reading).toEqual({ [first.id]: 120_000 });
+    expect(readingSummary(plan, progress)).toEqual({ stepsRead: 1, stepsTotal: plan.steps.length, ms: 120_000 });
+    const carried = carryProgress({ ...progress, reading: { ...progress.reading, gone: 5 } }, plan);
+    expect(carried.reading).toEqual({ [first.id]: 120_000 });
+    expect(formatReadingTime(20_000)).toBe('under a minute');
+    expect(formatReadingTime(12 * 60_000)).toBe('about 12 min');
+    expect(formatReadingTime(65 * 60_000)).toBe('1 h 05 min');
   });
 });
 

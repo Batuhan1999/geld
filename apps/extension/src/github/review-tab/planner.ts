@@ -28,6 +28,7 @@ import {
   STORY_JSON_SCHEMA,
   STORY_SYSTEM,
   storyUserPrompt,
+  withReading,
 } from '@geld/review';
 import { browser } from 'wxt/browser';
 import type { ReviewPlanRecord, StoredStory } from '../../lib/local-state';
@@ -172,6 +173,16 @@ export function unmarkStep(step: ReviewStep): void {
 
 export function setCurrentStep(stepId: string | null): void {
   withProgress((progress) => (progress.current === stepId ? progress : { ...progress, current: stepId }));
+}
+
+/** Add reading time to a step and store it, without asking the view to rebuild (nothing shown changes until the finish). */
+export function addReading(stepId: string, ms: number): void {
+  const current = visit;
+  const plan = current?.effective ?? null;
+  if (current === null || plan === null || ms <= 0) return;
+  const base = current.progress ?? { planId: plan.id, steps: {}, current: null };
+  current.progress = withReading(base.planId === plan.id ? base : carryProgress(base, plan), stepId, ms);
+  void saveProgress(current.key, current.progress);
 }
 
 /** Forget the plan (the rules make a new one on the next pass) but keep the marks: they carry over by step id. */

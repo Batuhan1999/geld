@@ -9,7 +9,7 @@
 import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode, ScopeLine } from '@geld/core';
 import { formatCount, pluralize } from '@geld/core';
 import type { MovedBlock, PlanOverview, ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
-import { finishBody, moveNoteWords, movesTouching, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
+import { finishBody, formatReadingTime, moveNoteWords, movesTouching, nextPendingStep, readingSummary, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
 import type { StoredStory } from '../../lib/local-state';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from '../dom';
 import type { CategoryTotals, HiddenBreakdown, StatsBreakdown } from '../breakdown';
@@ -810,6 +810,9 @@ function renderFinish(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLE
   article.append(createElement('p', { class: C('eyebrow') }, ['Finish']), createElement('h2', { class: C('step-title') }, [left === 0 ? 'Every step reviewed' : `${pluralize(left, 'step', 'steps')} still to review`]));
   const summary = createElement('p', { class: C('finish-summary') }, [`${pluralize(accepted, 'step', 'steps')} accepted, ${flagged.length} flagged.`]);
   article.append(summary);
+  // What the reading came to, from this device's clock: steps opened and the time the tab was in front with one open.
+  const reading = readingSummary(plan, model.progress);
+  if (reading.ms > 0) article.append(createElement('p', { class: C('finish-reading') }, [`You read ${reading.stepsRead} of ${pluralize(reading.stepsTotal, 'step', 'steps')} in ${formatReadingTime(reading.ms)}.`]));
   if (flagged.length > 0) {
     const list = createElement('ul', { class: C('flagged') });
     for (const step of flagged) {

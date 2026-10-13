@@ -998,6 +998,43 @@ export interface ReviewProgress {
   readonly planId: string;
   readonly steps: Readonly<Record<string, StepProgress>>;
   readonly current: string | null;
+  /** Milliseconds the reader spent with each step open and the tab visible, by step id; kept on this device only. */
+  readonly reading?: Readonly<Record<string, number>>;
+}
+
+/** Add `ms` of reading to a step. */
+export function withReading(progress: ReviewProgress, stepId: string, ms: number): ReviewProgress {
+  if (ms <= 0) return progress;
+  return { ...progress, reading: { ...progress.reading, [stepId]: (progress.reading?.[stepId] ?? 0) + ms } };
+}
+
+export interface ReadingSummary {
+  /** Steps the reader opened at all. */
+  readonly stepsRead: number;
+  readonly stepsTotal: number;
+  readonly ms: number;
+}
+
+/** What the finish says about the reading: steps opened and the time spent over the plan's steps. */
+export function readingSummary(plan: ReviewPlan, progress: ReviewProgress | null): ReadingSummary {
+  const reading = progress?.reading ?? {};
+  let stepsRead = 0;
+  let ms = 0;
+  for (const step of plan.steps) {
+    const spent = reading[step.id] ?? 0;
+    if (spent > 0) stepsRead += 1;
+    ms += spent;
+  }
+  return { stepsRead, stepsTotal: plan.steps.length, ms };
+}
+
+/** "under a minute", "about 12 min", "1 h 05 min". */
+export function formatReadingTime(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return 'under a minute';
+  if (minutes < 60) return `about ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${String(minutes % 60).padStart(2, '0')} min`;
 }
 
 /** What the stepper shows for a step: pending, accepted, flagged, or changed since it was marked. */
@@ -1015,7 +1052,8 @@ export function carryProgress(progress: ReviewProgress | null, next: ReviewPlan)
   if (progress === null) return { planId: next.id, steps: {}, current: null };
   const ids = new Set(next.steps.map((step) => step.id));
   const steps = Object.fromEntries(Object.entries(progress.steps).filter(([id]) => ids.has(id)));
-  return { planId: next.id, steps, current: progress.current !== null && ids.has(progress.current) ? progress.current : null };
+  const reading = Object.fromEntries(Object.entries(progress.reading ?? {}).filter(([id]) => ids.has(id)));
+  return { planId: next.id, steps, current: progress.current !== null && ids.has(progress.current) ? progress.current : null, ...(Object.keys(reading).length === 0 ? {} : { reading }) };
 }
 
 /** The first step that is neither accepted nor flagged (a changed step counts as pending), after `after` when given. */
