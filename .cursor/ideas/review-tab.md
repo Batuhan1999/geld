@@ -1,6 +1,6 @@
 # Idea: a Review tab that walks a pull request in steps, not files
 
-Status: **being built** (Oct 2026). Phases 1 to 4 below are in `apps/extension/src/github/review-tab/` behind the `reviewTab` experiment; the assistant column (5), Jev's judgments (6) and the narrow and Enterprise passes (7) are not. Written to be carried out without further input: every open question below has a default, and the defaults together are a buildable spec. Companion idea: `scope-map.md` (the same inputs drawn as a map).
+Status: **being built** (Oct 2026). Phases 1 to 4 below are in `apps/extension/src/github/review-tab/` behind the `reviewTab` experiment, plus the second round under "What landed next" (replan mode, smaller steps, the Reviewed checkbox, moves, scopes, the overview and before/after, the Diagram tab, the reading measure); the assistant column (5), Jev's judgments (6) and the narrow and Enterprise passes (7) are not. Written to be carried out without further input: every open question below has a default, and the defaults together are a buildable spec. Companion idea: `scope-map.md` (the same inputs drawn as a map).
 
 ## What landed first, and what the page taught
 
@@ -12,6 +12,20 @@ Status: **being built** (Oct 2026). Phases 1 to 4 below are in `apps/extension/s
 - **Progress survives a push by step id and fingerprint**, as planned, and a stored plan is laid over a later diff by hunk signature (`remapProposals`) so stale hunk refs are never shown; new hunks gather under "Everything else" behind a Replan (AI) or Regroup (rules) notice. The rules plan is remade for free on a new head.
 - **The rules producer needs stop-lists.** "Same stem anywhere" grouped four `package.json`s with a `cspell.yml`; generic stems (`index`, `package`, `main`, `types`, …) are left out, and lone files sharing a whole name or a directory join instead. Without commit file lists (over 12 commits, or signed out of the Commits JSON) the grouping is weak on purpose: that is what the model is for.
 - **Verified in the headed harness** (`.claude/skills/github-surface/SKILL.md` §4) on wxt#2544 (classic files page, 2 commits → "Replace nano-spawn with tinyexec" · "Fix cspell" · "Tests"), on vitest#10554 (124 files, 27 rules steps), with a seeded AI-shaped plan splitting one file's hunks across two steps (the fold notes both ways, accept, flag with a note, the finish and its prefilled body, keyboard, both tab switches), and with a mock gateway in the service worker (plan call with 28 handles and the rules' candidates, stories for the current and next step, "Planned by mock/planner"). The React PR files experience and a signed-in finish were not reachable from the harness.
+
+## What landed next, and why (Oct 2026)
+
+A second round, after reading closely how guided-review products that measured their effect ended up: what they introduced, kept and dropped. The pattern they report is the same everywhere: a good diff alone changes nothing, the explanation must *reorder the reading*, chapters got more bite-sized under use, diagrams crowd the page wherever they sit beside code, and the account of the whole change (what the system did, what it does now) is what people ask for first.
+
+- **A push is the reader's call** (`reviewReplan`, Experiments). Manual (default) keeps the steps being worked through, lays them over the new diff and shows GitHub's own "changed since" attention bar with Refresh; automatic remakes the rules' plan at once and re-asks the model once per new head, the bar saying "Updating the steps for `abc1234`…". The old behaviour (rules remade silently, a model's plan remapped with a footer note) made the reader lose their place without being told.
+- **Smaller steps.** The size cap is 240 changed lines and a single file over it splits by runs of hunks; the prompts ask for the parts a reader would take in turn and two to four present-tense sentences. Hunk-level steps stay: they are the win over file-level chapters.
+- **The mark where the eye is.** A Reviewed checkbox ends the eyebrow in the step's head and in the sticky strip; the foot's Accept still moves on.
+- **Moves and scopes** make GitHub's diff read as a person would cut it: a block cut here and pasted there says so under its first line on both ends (`@geld/review/moves.ts`), and every hunk is headed with the declarations enclosing it, read from the file at the head and pinned under the file header while the hunk scrolls (`@geld/core/scopes.ts`). Neither needs the model.
+- **The account first.** The plan call also writes an overview (paragraph, mechanisms) and the behaviour as a before/after diff whose lines point at steps; both sit across the top of the Review tab. Prose, not a picture, at the top: that is what survived elsewhere once diagrams had been tried in every position.
+- **Diagrams in a tab of their own** (`#diagram`): the same path as boxes and arrows (`flow-layout.ts`, `diagram.ts`), boxes opening their steps. Beside the diffs it crowds; a tab costs a switch, which on GitHub's page is the smaller price. The owner may rename the tabs (Guide, Diagram) later.
+- **A reading measure, local only**: the finish says how many steps were opened and for how long. The point of the tab is that pull requests get read; this is how a reader sees that they did.
+
+Still ahead: expanding GitHub's own context lines up to the enclosing declaration (its expanders fetch twenty lines at a time, and the two experiences differ there) rather than naming it in a row; a before/after per step; the assistant column; Jev's judgments; the virtualised files view; verification on the React files experience with a signed-in session.
 
 ## What
 
