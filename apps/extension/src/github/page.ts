@@ -11,10 +11,19 @@ export type PageKind = 'pull-files' | 'pull-review' | 'pull-conversation' | 'pul
 
 /** The plain word, not a `geld-` prefix: GitHub's pull request pages carry no element with that id (checked Oct 2026), and the generic name is the one worth owning. */
 export const REVIEW_TAB_HASH = '#review';
+/** The Diagram tab: the same page, the plan's flow drawn large in place of the steps. */
+export const DIAGRAM_TAB_HASH = '#diagram';
 
-/** Whether a URL asks for the Review tab (the files page at `#review`). */
+export type ReviewTabMode = 'review' | 'diagram';
+
+/** Which of Geld's tabs a files URL asks for, or null for GitHub's own files view. */
+export function reviewTabModeOf(url: URL): ReviewTabMode | null {
+  return url.hash === REVIEW_TAB_HASH ? 'review' : url.hash === DIAGRAM_TAB_HASH ? 'diagram' : null;
+}
+
+/** Whether a URL asks for one of Geld's tabs (the files page at `#review` or `#diagram`). */
 export function isReviewTabUrl(url: URL): boolean {
-  return url.hash === REVIEW_TAB_HASH;
+  return reviewTabModeOf(url) !== null;
 }
 
 export interface PageInfo {

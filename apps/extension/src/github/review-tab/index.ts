@@ -17,7 +17,8 @@ import type { StoredStory } from '../../lib/local-state';
 import { queryAll } from '../dom';
 import type { DiffEntry, DiffView } from '../model';
 import type { PageInfo } from '../page';
-import { REVIEW_TAB_HASH } from '../page';
+import { DIAGRAM_TAB_HASH, REVIEW_TAB_HASH, reviewTabModeOf } from '../page';
+import { drawFlowEdges, watchDiagram } from './diagram';
 import { restoreAll, teleportedNodes } from '../review/teleport';
 import { activateControl, findViewedControls } from '../whitespace-viewed';
 import { clearFoldedHunks } from './hunk-rows';
@@ -25,6 +26,7 @@ import { diffHunksFor, dropOtherPages, planInputFor, pullPathOf } from './inputs
 import { closePlanner, dropPlan, markStep, openPlanner, planWithAi, plannerState, resetReview, reviewModelFor, setCurrentStep, storyFor, unmarkStep } from './planner';
 import { dropOtherFiles, scopesAt as scopesAtHead, scopesVersion } from './scopes';
 import { loadPlanRecord, loadProgress, reviewKey } from './store';
+import type { TabTarget } from './tab';
 import { ensureReviewTabLink, filesTabLink, interceptFilesTab, removeReviewTabLink, reviewTabUrl } from './tab';
 import type { InputPhase, ReviewTabHandlers, ReviewTabModel } from './view';
 import { ATTR_FILE_HEADER, counterFor, markStickyHeaders, renderReviewTab, ROOT_CLASS } from './view';
@@ -81,6 +83,8 @@ interface Visit {
   observers: IntersectionObserver[];
   /** Re-places the step's line over the toolbar when the toolbar changes size. */
   resizeObserver: ResizeObserver | null;
+  /** Redraws the Diagram tab's arrows when its box changes size. */
+  unwatchDiagram: (() => void) | null;
   /** GitHub's sticky bar, found in the files layout once; on loan it is no longer there to find. */
   toolbar: HTMLElement | null;
   settings: GeldSettings;
@@ -120,24 +124,25 @@ function tabCounter(stateKey: string, live: boolean, reapply: () => void): strin
 /* The tab link, on every pull request page                                   */
 /* ------------------------------------------------------------------------- */
 
-/** Switch between Files changed and Review in place: the path is the same, only the fragment changes. */
-function switchView(toReview: boolean, reapply: () => void): void {
+/** Switch between Files changed, Review and Diagram in place: the path is the same, only the fragment changes. */
+function switchView(target: TabTarget, reapply: () => void): void {
   const files = filesTabLink();
   const url = files === null ? new URL(location.href) : reviewTabUrl(files.href);
-  url.hash = toReview ? REVIEW_TAB_HASH : '';
-  const target = `${url.pathname}${url.search}${url.hash}`;
-  if (target !== `${location.pathname}${location.search}${location.hash}`) history.pushState(history.state, '', target);
+  url.hash = target === 'review' ? REVIEW_TAB_HASH : target === 'diagram' ? DIAGRAM_TAB_HASH : '';
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (next !== `${location.pathname}${location.search}${location.hash}`) history.pushState(history.state, '', next);
   reapply();
 }
 
-/** Keep the Review tab in the pull request's tab bar (every PR page), current when the Review view is up. */
+/** Keep Geld's tabs in the pull request's tab bar (every PR page), the shown one current. */
 export function applyReviewTabLink(page: PageInfo, settings: GeldSettings, reapply: () => void): void {
   if (!settings.reviewTab || !page.kind.startsWith('pull')) {
     removeReviewTabLink();
     return;
   }
   const onFilesPage = page.kind === 'pull-files' || page.kind === 'pull-review';
-  ensureReviewTabLink({ active: page.kind === 'pull-review', counter: tabCounter(page.stateKey, page.kind === 'pull-review', reapply), onSwitch: onFilesPage ? (toReview) => switchView(toReview, reapply) : null });
+  const active = page.kind === 'pull-review' ? (reviewTabModeOf(new URL(location.href)) ?? 'review') : null;
+  ensureReviewTabLink({ active, counter: tabCounter(page.stateKey, page.kind === 'pull-review', reapply), onSwitch: onFilesPage ? (target) => switchView(target, reapply) : null });
 }
 
 /* ------------------------------------------------------------------------- */
@@ -163,14 +168,15 @@ export function applyReviewTab(context: ReviewTabContext): void {
   const key = reviewKey(page.stateKey);
   if (visit === null || visit.stateKey !== page.stateKey) {
     teardownReviewTab();
-    visit = { stateKey: page.stateKey, key, root: null, area: null, signature: '', shownRuns: new Set(), collapsedSections: new Set(), flagOpen: false, flagDraft: '', finishOpen: false, helpOpen: false, seek: null, seekTimer: null, wanted: new Set(), loaned: new Map(), unbindKeys: null, unbindFilesTab: null, scrollToStep: null, rebuildAsked: false, observers: [], resizeObserver: null, toolbar: null, settings };
+    visit = { stateKey: page.stateKey, key, root: null, area: null, signature: '', shownRuns: new Set(), collapsedSections: new Set(), flagOpen: false, flagDraft: '', finishOpen: false, helpOpen: false, seek: null, seekTimer: null, wanted: new Set(), loaned: new Map(), unbindKeys: null, unbindFilesTab: null, scrollToStep: null, rebuildAsked: false, observers: [], resizeObserver: null, unwatchDiagram: null, toolbar: null, settings };
     openPlanner(key, () => context.reapply());
     if (page.diffUrl !== null) dropOtherPages(page.diffUrl);
   }
   const current = visit;
   current.settings = settings;
   if (!document.documentElement.hasAttribute(ATTR_PAGE)) document.documentElement.setAttribute(ATTR_PAGE, '');
-  current.unbindFilesTab ??= interceptFilesTab((toReview) => switchView(toReview, context.reapply));
+  current.unbindFilesTab ??= interceptFilesTab((target) => switchView(target, context.reapply));
+  const mode = reviewTabModeOf(context.url) ?? 'review';
   current.unbindKeys ??= bindKeys();
 
   const headSha = context.headSha;
@@ -223,6 +229,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
   }
 
   const model: ReviewTabModel = {
+    mode,
     plan,
     progress,
     current: currentStep,
@@ -391,6 +398,7 @@ function signatureOf(model: ReviewTabModel): string {
   const entries = [...model.entries.keys()].sort().join('|');
   const story = model.story === null ? '' : `${model.story.at}:${model.story.story.length}`;
   return [
+    model.mode,
     model.plan?.id ?? '',
     model.plan?.madeAt ?? '',
     steps,
@@ -460,6 +468,9 @@ function mount(current: Visit, model: ReviewTabModel, handlers: ReviewTabHandler
   for (const loaned of next.querySelectorAll<HTMLElement>(`.${ROOT_CLASS}__file > [data-geld-teleported]`)) markStickyHeaders(loaned);
   markViewedUi(next, current.loaned.values(), current.toolbar);
   watchBar(current, next);
+  current.unwatchDiagram?.();
+  current.unwatchDiagram = watchDiagram(next);
+  if (model.mode === 'diagram') drawFlowEdges(next);
   if (current.scrollToStep !== null && current.scrollToStep === model.current?.id) {
     current.scrollToStep = null;
     const top = next.getBoundingClientRect().top;
@@ -617,7 +628,12 @@ function makeHandlers(context: ReviewTabContext, current: Visit): ReviewTabHandl
       current.helpOpen = !current.helpOpen;
       reapply();
     },
-    goToFiles: () => switchView(false, context.reapply),
+    goToFiles: () => switchView('files', context.reapply),
+    goToDiagram: () => switchView('diagram', context.reapply),
+    openStepInReview: (id) => {
+      switchView('review', context.reapply);
+      open(id);
+    },
     wantFile: (path) => current.wanted.add(path),
     loaned: (path, entry) => current.loaned.set(path, entry),
   };
@@ -782,6 +798,8 @@ function bindKeys(): () => void {
     const state = plannerState(null);
     const plan = state.plan;
     if (plan === null) return;
+    // The Diagram tab has no current step to act on; only the help answers there.
+    if (reviewTabModeOf(new URL(location.href)) === 'diagram' && event.key !== '?') return;
     const handlers = makeHandlers(context, current);
     const currentId = state.progress?.current ?? nextPendingStep(plan, state.progress)?.id ?? plan.steps[0]?.id ?? null;
     const index = plan.steps.findIndex((step) => step.id === currentId);
@@ -848,6 +866,7 @@ export function teardownReviewTab(): void {
   if (current.seekTimer !== null) clearTimeout(current.seekTimer);
   for (const observer of current.observers) observer.disconnect();
   current.resizeObserver?.disconnect();
+  current.unwatchDiagram?.();
   current.unbindKeys?.();
   current.unbindFilesTab?.();
   document.documentElement.removeAttribute(ATTR_PAGE);

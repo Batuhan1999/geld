@@ -18,7 +18,9 @@ import type { DiffEntry, DiffView } from '../model';
 import { inlineText } from '../review/inline-text';
 import { teleportInto } from '../review/teleport';
 import { attachBreakdownTooltip } from '../ui/tooltip';
-import { ICON_ALERT, ICON_ARROW_LEFT, ICON_ARROW_RIGHT, ICON_CHECK_CIRCLE_FILL, ICON_CHEVRON_DOWN, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_DOT_CIRCLE, ICON_FLAG, ICON_INFO, ICON_KEBAB_HORIZONTAL, ICON_SPARKLE_FILL } from '../ui/icons';
+import { ICON_ALERT, ICON_ARROW_LEFT, ICON_ARROW_RIGHT, ICON_CHECK_CIRCLE_FILL, ICON_CHEVRON_DOWN, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_DOT_CIRCLE, ICON_FLAG, ICON_INFO, ICON_KEBAB_HORIZONTAL, ICON_SPARKLE_FILL, ICON_WORKFLOW } from '../ui/icons';
+import type { ReviewTabMode } from '../page';
+import { hasDiagram, renderDiagram } from './diagram';
 import type { MoveNote, ScopeNote } from './hunk-rows';
 import { foldOtherHunks, markMoves, markScopes } from './hunk-rows';
 
@@ -30,6 +32,8 @@ export const ATTR_FILE_HEADER = 'data-geld-file-header';
 export type InputPhase = { readonly kind: 'loading'; readonly reason: string | null } | { readonly kind: 'failed'; readonly reason: string } | { readonly kind: 'ready' };
 
 export interface ReviewTabModel {
+  /** Which of Geld's tabs the page shows: the steps, or the plan's flow drawn large. */
+  readonly mode: ReviewTabMode;
   readonly plan: ReviewPlan | null;
   readonly progress: ReviewProgress | null;
   /** The step shown in the main column (null before a plan, or at the finish). */
@@ -95,6 +99,9 @@ export interface ReviewTabHandlers {
   readonly markAllViewed: () => void;
   readonly toggleHelp: () => void;
   readonly goToFiles: () => void;
+  /** From the Diagram tab: open this step in the Review tab. */
+  readonly openStepInReview: (id: string) => void;
+  readonly goToDiagram: () => void;
   readonly wantFile: (path: string) => void;
   /** A file was moved into the step: remembered so the next pass still knows it. */
   readonly loaned: (path: string, entry: DiffEntry) => void;
@@ -140,7 +147,7 @@ export function counterFor(plan: ReviewPlan | null, progress: ReviewProgress | n
 /* ------------------------------------------------------------------------- */
 
 export function renderReviewTab(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLElement {
-  const root = createElement('div', { class: ROOT_CLASS, [OWN_UI_ATTRIBUTE]: '', role: 'region', 'aria-label': 'Review in steps' });
+  const root = createElement('div', { class: ROOT_CLASS, [OWN_UI_ATTRIBUTE]: '', role: 'region', 'aria-label': model.mode === 'diagram' ? 'Diagram of the pull request' : 'Review in steps', 'data-mode': model.mode });
   if (model.toolbar !== null) {
     // GitHub's sticky bar (the pull request's title, "Changes from all commits", the file filter, Review changes)
     // across the top, as on Files changed: the same node, so every control in it is GitHub's. The sentinel above
@@ -150,7 +157,7 @@ export function renderReviewTab(model: ReviewTabModel, handlers: ReviewTabHandle
     // The current step's line and title, shown once the step's own head has scrolled under the bar: in the bar's
     // own controls row, after "Changes from all commits" and the filters (the classic toolbar), else as a second
     // row under the bar. Inside GitHub's node, so it is marked as Geld's and taken out before the node goes home.
-    const step = model.finish ? null : model.current;
+    const step = model.finish || model.mode === 'diagram' ? null : model.current;
     const index = step === null || model.plan === null ? -1 : model.plan.steps.findIndex((candidate) => candidate.id === step.id);
     if (step !== null && model.plan !== null && index >= 0) {
       // Laid over the toolbar's empty middle by `placeStrip` once the bar is stuck (measured, so it fits both the
@@ -159,6 +166,11 @@ export function renderReviewTab(model: ReviewTabModel, handlers: ReviewTabHandle
       bar.append(createElement('div', { class: C('bar-step'), 'aria-hidden': 'true' }, [inner]));
     }
     root.append(createElement('div', { class: C('bar-sentinel'), 'aria-hidden': 'true' }), bar);
+  }
+  if (model.mode === 'diagram') {
+    root.append(renderDiagram({ plan: model.plan, loaded: model.loaded, planning: model.planning, aiModel: model.aiModel }, { openStep: handlers.openStepInReview, planWithAi: () => handlers.planWithAi(false) }));
+    if (model.helpOpen) root.append(renderHelp(handlers));
+    return root;
   }
   const overview = model.plan?.overview;
   if (overview !== undefined && !model.finish && model.plan !== null && model.plan.steps.length > 0) root.append(renderOverview(overview, model, model.plan, handlers));
@@ -218,6 +230,10 @@ function renderOverview(overview: PlanOverview, model: ReviewTabModel, plan: Rev
         list.append(item);
       }
       card.append(list);
+    }
+    if (hasDiagram(overview)) {
+      const open = button('See it as a diagram', C('link-button'), () => handlers.goToDiagram(), ICON_WORKFLOW);
+      card.append(createElement('p', { class: C('before-after-foot') }, [open]));
     }
     box.append(card);
   }

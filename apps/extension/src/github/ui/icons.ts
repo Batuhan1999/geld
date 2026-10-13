@@ -310,6 +310,12 @@ export const ICON_CHECKLIST = octicon(
   'octicon-checklist',
 );
 
+/** Octicon `workflow`: the Diagram tab's mark in the pull request's tab bar. */
+export const ICON_WORKFLOW = octicon(
+  '<path d="M0 1.75C0 .784.784 0 1.75 0h3.5C6.216 0 7 .784 7 1.75v3.5A1.75 1.75 0 0 1 5.25 7H4v4a1 1 0 0 0 1 1h4v-1.25C9 9.784 9.784 9 10.75 9h3.5c.966 0 1.75.784 1.75 1.75v3.5A1.75 1.75 0 0 1 14.25 16h-3.5A1.75 1.75 0 0 1 9 14.25v-.75H5A2.5 2.5 0 0 1 2.5 11V7h-.75A1.75 1.75 0 0 1 0 5.25Zm1.75-.25a.25.25 0 0 0-.25.25v3.5c0 .138.112.25.25.25h3.5a.25.25 0 0 0 .25-.25v-3.5a.25.25 0 0 0-.25-.25Zm9 9a.25.25 0 0 0-.25.25v3.5c0 .138.112.25.25.25h3.5a.25.25 0 0 0 .25-.25v-3.5a.25.25 0 0 0-.25-.25Z"></path>',
+  'octicon-workflow',
+);
+
 /** Octicon `flag`: a step flagged with a note. */
 export const ICON_FLAG = octicon(
   '<path d="M1 1.75C1 .784 1.784 0 2.75 0h10.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 13.25 12H2.5v3.25a.75.75 0 0 1-1.5 0Zm1.5 8.75h10.75a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25Z"></path>',

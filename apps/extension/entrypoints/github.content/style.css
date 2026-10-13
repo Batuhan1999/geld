@@ -6650,10 +6650,225 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   text-decoration: underline;
 }
 
+.geld-review-tab__before-after-foot {
+  margin: 0;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--geld-rt-border-muted);
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .geld-review-tab__overview {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ---- the Diagram tab: the flow drawn large (review-tab/diagram.ts) ---------- */
+
+.geld-review-tab__diagram {
+  grid-column: 1 / -1;
+  margin-top: 16px;
+}
+
+.geld-review-tab__diagram-summary {
+  max-width: 72ch;
+  margin: 0 0 16px;
+  color: var(--geld-rt-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.geld-review-tab__diagram-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.geld-review-tab__diagram-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.geld-review-tab__diagram-caption {
+  color: var(--geld-rt-muted);
+  font-size: 13px;
+}
+
+.geld-review-tab__diagram-legend {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  list-style: none;
+  color: var(--geld-rt-muted);
+  font-size: 12px;
+}
+
+.geld-review-tab__diagram-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The grid of columns; the arrows are an SVG laid over it, labels small pills at their middles. */
+.geld-review-tab__flow {
+  position: relative;
+  padding: 24px;
+  border: 1px solid var(--geld-rt-border);
+  border-radius: 6px;
+  background: var(--geld-rt-bg);
+  overflow-x: auto;
+}
+
+.geld-review-tab__flow-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--geld-rt-layers, 1), minmax(180px, 1fr));
+  gap: 0 56px;
+  min-width: calc(var(--geld-rt-layers, 1) * 180px + (var(--geld-rt-layers, 1) - 1) * 56px);
+}
+
+.geld-review-tab__flow-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+  min-width: 0;
+}
+
+.geld-review-tab__flow-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 36px 8px 12px;
+  border: 1px solid var(--geld-rt-border);
+  border-radius: 6px;
+  background: var(--geld-rt-bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.geld-review-tab__flow-node {
+  cursor: pointer;
+}
+
+button.geld-review-tab__flow-node:hover {
+  border-color: var(--geld-rt-accent);
+}
+
+.geld-review-tab__flow-node[data-kind='decision'] {
+  border-style: dashed;
+}
+
+.geld-review-tab__flow-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--geld-rt-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.geld-review-tab__flow-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-review-tab__flow-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.geld-review-tab__flow-label code {
+  font-size: 12px;
+}
+
+.geld-review-tab__flow-step {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  color: var(--geld-rt-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* The kind's mark: a dot in the kind's colour, a small diamond for a decision. */
+.geld-review-tab__flow-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--geld-rt-muted);
+}
+
+[data-kind='new'] > .geld-review-tab__flow-dot,
+[data-kind='new'] > * > .geld-review-tab__flow-dot {
+  background: var(--geld-rt-done);
+}
+
+[data-kind='changed'] > .geld-review-tab__flow-dot,
+[data-kind='changed'] > * > .geld-review-tab__flow-dot {
+  background: var(--geld-rt-warn);
+}
+
+[data-kind='existing'] > .geld-review-tab__flow-dot,
+[data-kind='existing'] > * > .geld-review-tab__flow-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--geld-rt-muted);
+}
+
+[data-kind='decision'] > .geld-review-tab__flow-dot,
+[data-kind='decision'] > * > .geld-review-tab__flow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--geld-rt-accent);
+  transform: rotate(45deg);
+}
+
+.geld-review-tab__flow-edges {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.geld-review-tab__flow-edges path {
+  fill: none;
+  stroke: var(--geld-rt-border);
+  stroke-width: 1.5;
+}
+
+.geld-review-tab__flow-edges marker path {
+  fill: var(--geld-rt-border);
+  stroke: none;
+}
+
+.geld-review-tab__flow-edge-label {
+  position: absolute;
+  z-index: 1;
+  padding: 0 6px;
+  border: 1px solid var(--geld-rt-border);
+  border-radius: 999px;
+  background: var(--geld-rt-bg);
+  color: var(--geld-rt-muted);
+  font-size: 11px;
+  line-height: 16px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 /* ---- the step ------------------------------------------------------------ */
