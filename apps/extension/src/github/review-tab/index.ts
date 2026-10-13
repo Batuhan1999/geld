@@ -543,6 +543,14 @@ function makeHandlers(context: ReviewTabContext, current: Visit): ReviewTabHandl
       markViewedIfWhole(current, context, step);
       moveOn(step);
     },
+    markReviewed: (step, reviewed) => {
+      if (reviewed) {
+        markStep(step, 'accepted');
+        markViewedIfWhole(current, context, step);
+      } else unmarkStep(step);
+      current.finishOpen = false;
+      reapply();
+    },
     flag: (step, note) => {
       markStep(step, 'flagged', note);
       current.flagOpen = false;

@@ -6634,6 +6634,33 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   color: var(--geld-rt-warn);
 }
 
+/* The Reviewed checkbox at the eyebrow's end: GitHub's own checkbox look, the word in the muted colour until ticked. */
+.geld-review-tab__reviewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.geld-review-tab__reviewed[data-state='accepted'] {
+  color: var(--geld-rt-done);
+}
+
+.geld-review-tab__reviewed-box {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--geld-rt-done);
+  cursor: pointer;
+}
+
+.geld-review-tab__bar-step .geld-review-tab__reviewed {
+  flex: none;
+}
+
 .geld-review-tab__step-title {
   margin: 0 0 8px;
   font-size: 20px;

@@ -103,6 +103,21 @@ describe('rules producer', () => {
     // The rules producer never joins two such files in the first place.
     expect(rulesProposals(large)).toHaveLength(2);
   });
+
+  it('splits one file still over the cap by runs of its hunks, in order', () => {
+    const lines = (count: number): string[] => Array.from({ length: count }, (_, index) => `line ${index}`);
+    const one: PlanInput = {
+      ...input,
+      commits: [],
+      files: [file('a.ts', [hunk(0, lines(150), [], 1), hunk(1, lines(150), [], 200), hunk(2, lines(30), [], 400), hunk(3, lines(300), [], 500)])],
+      findings: [],
+    };
+    const plan = rulesPlan(one, 'now');
+    expect(plan.steps.map((step) => step.title)).toEqual(['Update a.ts · 1 of 3', 'Update a.ts · 2 of 3', 'Update a.ts · 3 of 3']);
+    expect(plan.steps.map((step) => step.touches.map((ref) => ref.hunk))).toEqual([[0], [1, 2], [3]]);
+    expect(plan.steps[1]?.dependsOn).toEqual([plan.steps[0]?.id]);
+    expect(plan.steps[2]?.dependsOn).toEqual([plan.steps[1]?.id]);
+  });
 });
 
 describe('normalizePlan', () => {

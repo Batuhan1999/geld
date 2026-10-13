@@ -15,7 +15,7 @@ export const PLAN_SYSTEM = `You plan a code review. A pull request's diff is giv
 Rules:
 - A step is one body of work: a feature slice, a fix, a refactor, a migration. Group by purpose, never by file type or by file. A hunk belongs to exactly one step. Every hunk listed must appear in some step; invent none.
 - Order the steps so each reads with what came before it: foundations (types, data, shared helpers) before what uses them; the change the pull request is about before its follow-through. Name a dependency in "dependsOn" (step keys) only when reading the other step first is needed to understand this one.
-- Prefer steps under ${STEP_SIZE_CAP} changed lines. A tiny pull request may be one step. Do not pad: a step with one hunk is fine when it is its own change.
+- A step is read in one sitting: prefer steps under ${STEP_SIZE_CAP} changed lines, a few hunks in one to three files, and split a large body of work into the parts a reader would take in turn (the data model, then the logic, then where it is wired in). A tiny pull request may be one step. Do not pad: a step with one hunk is fine when it is its own change.
 - "key": s1, s2, … in reading order. "title": three to seven words, imperative or a noun phrase, naming the change not the files ("Debounce the search box", "Settings schema for the new toggle"). "kind": one of ${STEP_KINDS.join(', ')}. "gist": one sentence, under 160 characters, saying what the step does. "watch": zero to three short items worth a second look, only when the diff shows one.
 - Files Geld hides (tests, generated output, fixtures) are listed by path only and are not hunks to place; their steps are decided afterwards.
 - When "previousSteps" are given, the reader has already worked through them: keep a step's key where its hunks are the same change, and change only what the new and removed hunks require.
@@ -23,7 +23,7 @@ Rules:
 
 export const STORY_SYSTEM = `You explain one step of a code review to the reviewer, who did not write the code. The whole plan is given for context, then the step's hunks in full.
 Rules:
-- "story": three to five short sentences. The first sentence is the point: what the step does. Then how it fits the pull request, and what the pieces do. Plain words; name a file only where the reader would otherwise be lost. Never say what is not in the diff. No praise, no "this PR", no headings or lists. Inline code in backticks is fine.
+- "story": two to four short sentences, in the present tense, about the code as it now is ("A new \`MergeGate\` decides each row's merge action from the checks rollup, and the Ready to merge section renders it on every row."). The first sentence is the point: what the step does. Then how it fits the pull request, and what the pieces do. Plain words; name a file only where the reader would otherwise be lost. Never say what is not in the diff. No praise, no "this PR", no headings or lists. Inline code in backticks is fine.
 - "why": one sentence tying the step to the pull request's goal, or omit it when the story already says so.
 - "watch": zero to three things worth a second look, each one sentence starting with what to check ("The retry loop has no cap"). Only what the diff shows.
 - Return JSON only, matching the schema.`;

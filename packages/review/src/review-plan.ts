@@ -316,8 +316,14 @@ export function mentionedSymbols(added: readonly string[]): ReadonlySet<string> 
 /* Rules producer                                                             */
 /* ------------------------------------------------------------------------- */
 
-/** A step larger than this many changed lines is split by file. */
-export const STEP_SIZE_CAP = 400;
+/**
+ * A step larger than this many changed lines is split: by file first, then a
+ * file still over it by runs of its hunks. Sized for one sitting: a step is
+ * read, understood and marked before the next, and a reader who has to
+ * scroll through four hundred changed lines to find the point stops reading
+ * (the one lesson every guided-review product reports is "more bite-sized").
+ */
+export const STEP_SIZE_CAP = 240;
 
 /** File stems that name a convention, not a thing: four `package.json`s or `index.ts`s share nothing but the name. */
 const GENERIC_STEMS = new Set(['index', 'package', 'main', 'mod', 'lib', 'types', 'type', 'utils', 'util', 'helpers', 'config', 'constants', 'readme', 'changelog', 'license', 'setup', 'init', 'app', 'server', 'client', 'test', 'tests', 'spec', '__init__', 'makefile', 'dockerfile', 'cargo', 'go', 'gemfile', 'pnpm-lock', 'yarn', 'package-lock', 'tsconfig', 'vite', 'vitest', 'jest', 'eslint', 'prettier', 'schema', 'styles', 'style', 'page', 'layout', 'route', 'routes', 'model', 'models', 'component', 'components']);
@@ -750,26 +756,59 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
     drafts.push({ key: '__supporting', title, kind, gist: null, touches: [], supporting: leftovers.sort(compareRefs(fileOrder)), dependsOn: [], watch: [] });
   }
 
-  // Oversized steps are split by file: "Title · file".
+  // Oversized steps are split by file ("Title · file"), and a file still over the cap by runs of its hunks
+  // ("Title · file · 2 of 3"); each part reads after the one before it, and the supporting changes stay with the first.
   const sized: Draft[] = [];
+  const sizeOf = (refs: readonly HunkRef[]): number => refs.reduce((sum, ref) => sum + refSize(files, ref), 0);
+  const chain = (parts: readonly HunkRef[][], base: Draft, name: (index: number) => string): void => {
+    parts.forEach((touches, index) => {
+      sized.push({
+        ...base,
+        key: `${base.key}/${index}`,
+        title: name(index),
+        touches,
+        supporting: index === 0 ? base.supporting : [],
+        dependsOn: index === 0 ? base.dependsOn : [`${base.key}/${index - 1}`],
+      });
+    });
+  };
+  const hunkRuns = (refs: readonly HunkRef[]): HunkRef[][] => {
+    const runs: HunkRef[][] = [];
+    let run: HunkRef[] = [];
+    for (const ref of refs) {
+      if (run.length > 0 && sizeOf(run) + refSize(files, ref) > STEP_SIZE_CAP) {
+        runs.push(run);
+        run = [];
+      }
+      run.push(ref);
+    }
+    if (run.length > 0) runs.push(run);
+    return runs;
+  };
   for (const draft of drafts) {
-    const size = draft.touches.reduce((sum, ref) => sum + refSize(files, ref), 0);
     const paths = touchedPathsOf(draft);
-    if (size <= STEP_SIZE_CAP || paths.length < 2) {
+    if (sizeOf(draft.touches) <= STEP_SIZE_CAP) {
       sized.push(draft);
       continue;
     }
-    paths.forEach((path, index) => {
+    const byFile = paths.map((path) => draft.touches.filter((ref) => ref.path === path));
+    const parts: Array<{ readonly refs: HunkRef[]; readonly title: string }> = [];
+    for (const refs of byFile) {
+      const path = refs[0]?.path ?? '';
       const name = FILE_NAME.exec(path)?.[0] ?? path;
-      sized.push({
-        ...draft,
-        key: `${draft.key}/${index}`,
-        title: `${draft.title} · ${name}`,
-        touches: draft.touches.filter((ref) => ref.path === path),
-        supporting: index === 0 ? draft.supporting : [],
-        dependsOn: index === 0 ? draft.dependsOn : [`${draft.key}/${index - 1}`],
-      });
-    });
+      const fileTitle = paths.length === 1 ? draft.title : `${draft.title} · ${name}`;
+      const runs = sizeOf(refs) <= STEP_SIZE_CAP ? [refs] : hunkRuns(refs);
+      runs.forEach((run, index) => parts.push({ refs: run, title: runs.length === 1 ? fileTitle : `${fileTitle} · ${index + 1} of ${runs.length}` }));
+    }
+    if (parts.length < 2) {
+      sized.push(draft);
+      continue;
+    }
+    chain(
+      parts.map((part) => part.refs),
+      draft,
+      (index) => parts[index]?.title ?? draft.title,
+    );
   }
 
   const ordered = topologicalOrder(sized);

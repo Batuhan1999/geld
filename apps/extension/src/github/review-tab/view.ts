@@ -75,6 +75,8 @@ export interface ReviewTabModel {
 export interface ReviewTabHandlers {
   readonly selectStep: (id: string) => void;
   readonly accept: (step: ReviewStep) => void;
+  /** Mark (or unmark) the step reviewed where it stands, without moving on: the Reviewed checkbox. */
+  readonly markReviewed: (step: ReviewStep, reviewed: boolean) => void;
   readonly flag: (step: ReviewStep, note: string) => void;
   readonly unmark: (step: ReviewStep) => void;
   readonly openFlag: (open: boolean) => void;
@@ -148,7 +150,7 @@ export function renderReviewTab(model: ReviewTabModel, handlers: ReviewTabHandle
     if (step !== null && model.plan !== null && index >= 0) {
       // Laid over the toolbar's empty middle by `placeStrip` once the bar is stuck (measured, so it fits both the
       // classic and the React toolbar); a row of its own under the bar when there is no room there.
-      const inner = createElement('div', { class: C('bar-step-inner') }, [stepEyebrow(model, model.plan, step, index, stepDisplayState(step, model.progress)), createElement('p', { class: C('bar-step-title') }, inlineText(step.title))]);
+      const inner = createElement('div', { class: C('bar-step-inner') }, [stepEyebrow(model, model.plan, step, index, stepDisplayState(step, model.progress), handlers, true), createElement('p', { class: C('bar-step-title') }, inlineText(step.title))]);
       bar.append(createElement('div', { class: C('bar-step'), 'aria-hidden': 'true' }, [inner]));
     }
     root.append(createElement('div', { class: C('bar-sentinel'), 'aria-hidden': 'true' }), bar);
@@ -344,7 +346,7 @@ function renderStep(model: ReviewTabModel, step: ReviewStep, handlers: ReviewTab
 
   /* Head: position, kind, title, story, the step's own counts at the right. */
   const head = createElement('header', { class: C('step-head') });
-  const eyebrow = stepEyebrow(model, plan, step, index, state);
+  const eyebrow = stepEyebrow(model, plan, step, index, state, handlers);
   const title = createElement('h2', { class: C('step-title'), id: 'geld-review-step-title' }, inlineText(step.title));
   head.append(eyebrow, title, renderStory(model, step));
   const touches = touchesSummary(step);
@@ -478,10 +480,24 @@ function countsInline(model: ReviewTabModel, step: ReviewStep): readonly Node[] 
   return [createElement('span', { class: C('counts'), role: 'group', 'aria-label': `${own.additions} additions and ${own.deletions} deletions in this step${hidden.totals.files > 0 ? `, ${hidden.totals.files} supporting ${hidden.totals.files === 1 ? 'file' : 'files'}` : ''}` }, nodes)];
 }
 
-/** "Step 1 of 10 · Other · +385 −14 · 2 tests", the step's state when it has one; the same line heads the step and the sticky strip. */
-function stepEyebrow(model: ReviewTabModel, plan: ReviewPlan, step: ReviewStep, index: number, state: StepDisplayState): HTMLElement {
+/**
+ * "Step 1 of 10 · Other · +385 -14 · 2 tests" and, at the end, the Reviewed
+ * checkbox: the step's mark where the reader's eye already is, ticked
+ * without leaving the step (the foot's Accept moves on). A flagged or
+ * changed step says so before the box. The same line heads the step and the
+ * sticky strip; the strip's copy is pointer-only (`strip`), the head's is
+ * the one assistive technology reads.
+ */
+function stepEyebrow(model: ReviewTabModel, plan: ReviewPlan, step: ReviewStep, index: number, state: StepDisplayState, handlers: ReviewTabHandlers, strip = false): HTMLElement {
   const eyebrow = createElement('p', { class: C('eyebrow') }, [createElement('span', {}, [`Step ${index + 1} of ${plan.steps.length}`]), createElement('span', { class: C('kind') }, [STEP_KIND_LABELS[step.kind]]), ...countsInline(model, step)]);
-  if (state !== 'pending') eyebrow.append(createElement('span', { class: C('state-word'), 'data-state': state }, [svgFromString(STATE_ICON[state]), STATE_WORD[state]]));
+  if (state === 'flagged' || state === 'changed') eyebrow.append(createElement('span', { class: C('state-word'), 'data-state': state }, [svgFromString(STATE_ICON[state]), STATE_WORD[state]]));
+  const box = createElement('input', { type: 'checkbox', class: C('reviewed-box') });
+  box.checked = state === 'accepted';
+  if (strip) box.tabIndex = -1;
+  box.addEventListener('change', () => handlers.markReviewed(step, box.checked));
+  const label = createElement('label', { class: C('reviewed'), 'data-state': state }, [box, createElement('span', {}, ['Reviewed'])]);
+  if (!strip) label.setAttribute('title', state === 'accepted' ? 'Unmark this step' : 'Mark this step reviewed and stay on it');
+  eyebrow.append(label);
   return eyebrow;
 }
 
