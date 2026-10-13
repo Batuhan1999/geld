@@ -124,7 +124,7 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
       void savePlanRecord(current.key, record);
     } else {
       const delta = planDelta(planSignatures(plan), input);
-      plan = normalizePlan(input, remapProposals(record.plan, input), { producer: record.plan.producer, model: record.plan.model, madeAt: record.plan.madeAt, fromHeaders: record.plan.fromHeaders });
+      plan = normalizePlan(input, remapProposals(record.plan, input), { producer: record.plan.producer, model: record.plan.model, madeAt: record.plan.madeAt, fromHeaders: record.plan.fromHeaders, ...(record.plan.overview === undefined ? {} : { overview: record.plan.overview }) });
       behind = { head: input.headSha, newHunks: delta.added.length, goneHunks: delta.removed.length };
       if (automatic && settings !== null && !current.planning && current.autoReplanHead !== input.headSha) {
         current.autoReplanHead = input.headSha;
@@ -279,10 +279,10 @@ export async function planWithAi(settings: GeldSettings, replan: boolean): Promi
     record = recordWithError(record, result.reason, now);
   } else {
     const parsed = parsePlanOutput(result.text, hunkHandles(input));
-    if (!parsed.ok || parsed.value.length === 0) {
+    if (!parsed.ok || parsed.value.steps.length === 0) {
       record = recordWithError(record, 'The model answered in a shape Geld could not read.', now);
     } else {
-      const plan = normalizePlan(input, parsed.value, { producer: 'ai', model: result.model, madeAt: now, fromHeaders: planIsFromHeaders(input) });
+      const plan = normalizePlan(input, parsed.value.steps, { producer: 'ai', model: result.model, madeAt: now, fromHeaders: planIsFromHeaders(input), ...(parsed.value.overview === null ? {} : { overview: parsed.value.overview }) });
       record = recordWithError(recordWithPlan(record, plan, now), null, now);
       current.effective = plan;
       if (current.progress !== null) current.progress = carryProgress(current.progress, plan);

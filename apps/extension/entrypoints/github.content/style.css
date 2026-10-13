@@ -6504,6 +6504,158 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   text-decoration: underline;
 }
 
+/* ---- overview: the account before the steps -------------------------------- */
+
+.geld-review-tab__overview {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.geld-review-tab__overview-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.geld-review-tab__overview-summary {
+  margin: 0 0 8px;
+  color: var(--geld-rt-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.geld-review-tab__overview-points {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--geld-rt-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.geld-review-tab__overview-points li + li {
+  margin-top: 4px;
+}
+
+/* The behaviour diff: a card like a file's, its lines coloured as diff lines are, a step badge at the right. */
+.geld-review-tab__before-after {
+  border: 1px solid var(--geld-rt-border);
+  border-radius: 6px;
+  background: var(--geld-rt-bg);
+  overflow: hidden;
+}
+
+.geld-review-tab__before-after-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--geld-rt-border-muted);
+  background: var(--geld-rt-subtle);
+  color: var(--geld-rt-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-review-tab__before-after[data-collapsed] .geld-review-tab__before-after-head {
+  border-bottom: 0;
+}
+
+.geld-review-tab__before-after-head > .octicon {
+  transition: transform 150ms ease-out;
+}
+
+.geld-review-tab__before-after[data-collapsed] .geld-review-tab__before-after-head > .octicon {
+  transform: rotate(-90deg);
+}
+
+.geld-review-tab__before-after-name {
+  color: var(--fgColor-default, var(--color-fg-default));
+  font-weight: 600;
+}
+
+.geld-review-tab__before-after-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-review-tab__before-after-lines {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  font: 12px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  line-height: 20px;
+}
+
+.geld-review-tab__before-after-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 12px 0 calc(12px + var(--geld-rt-depth, 0) * 16px);
+}
+
+.geld-review-tab__before-after-line[data-kind='before'] {
+  background: var(--bgColor-danger-muted, var(--color-danger-subtle, #ffebe9));
+}
+
+.geld-review-tab__before-after-line[data-kind='after'] {
+  background: var(--bgColor-success-muted, var(--color-success-subtle, #dafbe1));
+}
+
+.geld-review-tab__before-after-mark {
+  flex: none;
+  width: 1ch;
+  color: var(--geld-rt-muted);
+}
+
+.geld-review-tab__before-after-line[data-kind='before'] .geld-review-tab__before-after-mark {
+  color: var(--geld-rt-bad);
+}
+
+.geld-review-tab__before-after-line[data-kind='after'] .geld-review-tab__before-after-mark {
+  color: var(--geld-rt-done);
+}
+
+.geld-review-tab__before-after-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  font-size: 12.5px;
+}
+
+.geld-review-tab__before-after-step {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--geld-rt-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.geld-review-tab__before-after-step:hover {
+  color: var(--geld-rt-accent);
+  text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .geld-review-tab__overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---- the step ------------------------------------------------------------ */
 
 .geld-review-tab__main {

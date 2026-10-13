@@ -68,6 +68,56 @@ export interface ReviewStep {
 
 export type PlanProducer = 'rules' | 'ai';
 
+/* ------------------------------------------------------------------------- */
+/* The overview: what the pull request does, before and after, as a flow     */
+/* ------------------------------------------------------------------------- */
+
+export type BeforeAfterKind = 'same' | 'before' | 'after';
+
+/** One line of the behaviour diff: unchanged behaviour plain, the old way as `before`, the new as `after`, each pointing at the step that shows it. */
+export interface BeforeAfterLine {
+  readonly kind: BeforeAfterKind;
+  readonly text: string;
+  /** Nesting under the line above, 0 to 3. */
+  readonly depth: number;
+  /** The step (id) where this behaviour is read, or null. */
+  readonly step: string | null;
+}
+
+export const FLOW_NODE_KINDS = ['new', 'changed', 'existing', 'decision'] as const;
+export type FlowNodeKind = (typeof FLOW_NODE_KINDS)[number];
+
+export function isFlowNodeKind(value: unknown): value is FlowNodeKind {
+  return typeof value === 'string' && FLOW_NODE_KINDS.some((kind) => kind === value);
+}
+
+/** A box in the before/after flow: a function or a decision, named by file, pointing at its step. */
+export interface FlowNode {
+  readonly id: string;
+  readonly label: string;
+  readonly file: string | null;
+  readonly kind: FlowNodeKind;
+  readonly step: string | null;
+}
+
+export interface FlowEdge {
+  readonly from: string;
+  readonly to: string;
+  /** "yes", "no", or null. */
+  readonly label: string | null;
+}
+
+export interface PlanOverview {
+  /** Three or four sentences: what the system did, what the pull request turns it into, how, why. */
+  readonly summary: string;
+  /** One line per mechanism, in reading order. */
+  readonly points: readonly string[];
+  /** The behaviour diff: a caption naming the path through the system, then its lines. */
+  readonly beforeAfter: { readonly caption: string; readonly lines: readonly BeforeAfterLine[] } | null;
+  /** The same path as boxes and arrows, for the Diagram tab. */
+  readonly flow: { readonly caption: string; readonly nodes: readonly FlowNode[]; readonly edges: readonly FlowEdge[] } | null;
+}
+
 export interface ReviewPlan {
   /** Binds progress to a plan: a hash of the head and the step ids. */
   readonly id: string;
@@ -80,6 +130,8 @@ export interface ReviewPlan {
   readonly unassigned: readonly HunkRef[];
   /** The model saw hunk headers only (a very large pull request): the view says so once. */
   readonly fromHeaders: boolean;
+  /** The model's account of the whole pull request, with step ids resolved; absent for a rules plan (and in plans stored before it existed). */
+  readonly overview?: PlanOverview;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -633,6 +685,18 @@ export interface NormalizeOptions {
   readonly model: string | null;
   readonly madeAt: string;
   readonly fromHeaders?: boolean;
+  /** The producer's overview, its step references in the producer's keys (or in step ids, for a plan laid over a new diff). */
+  readonly overview?: PlanOverview;
+}
+
+/** The overview with every step reference mapped through `idOf`; a reference to no step reads null. */
+function resolveOverview(overview: PlanOverview, idOf: (key: string | null) => string | null): PlanOverview {
+  return {
+    summary: overview.summary,
+    points: overview.points,
+    beforeAfter: overview.beforeAfter === null ? null : { caption: overview.beforeAfter.caption, lines: overview.beforeAfter.lines.map((line) => ({ ...line, step: idOf(line.step) })) },
+    flow: overview.flow === null ? null : { caption: overview.flow.caption, nodes: overview.flow.nodes.map((node) => ({ ...node, step: idOf(node.step) })), edges: overview.flow.edges },
+  };
 }
 
 /** Which touched file a hidden file supports: the same stem in the same directory first, then the same stem anywhere. */
@@ -890,7 +954,15 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
     };
   });
 
-  return {
+  // A split step's parts share the proposal's key with a suffix: a reference to the key lands on its first part.
+  const stepIds = new Set(steps.map((step) => step.id));
+  const idOf = (key: string | null): string | null => {
+    if (key === null) return null;
+    const direct = idByKey.get(key) ?? idByKey.get(`${key}/0`);
+    if (direct !== undefined) return direct;
+    return stepIds.has(key) ? key : null;
+  };
+  const plan: ReviewPlan = {
     id: hashText(`${input.headSha}\n${steps.map((step) => step.id).join('\n')}`),
     headSha: input.headSha,
     madeAt: options.madeAt,
@@ -900,6 +972,7 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
     unassigned,
     fromHeaders: options.fromHeaders === true,
   };
+  return options.overview === undefined ? plan : { ...plan, overview: resolveOverview(options.overview, idOf) };
 }
 
 /** The rules producer end to end. */

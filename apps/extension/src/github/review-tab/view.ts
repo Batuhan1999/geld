@@ -8,7 +8,7 @@
 
 import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode, ScopeLine } from '@geld/core';
 import { formatCount, pluralize } from '@geld/core';
-import type { MovedBlock, ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
+import type { MovedBlock, PlanOverview, ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
 import { finishBody, moveNoteWords, movesTouching, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
 import type { StoredStory } from '../../lib/local-state';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from '../dom';
@@ -160,9 +160,68 @@ export function renderReviewTab(model: ReviewTabModel, handlers: ReviewTabHandle
     }
     root.append(createElement('div', { class: C('bar-sentinel'), 'aria-hidden': 'true' }), bar);
   }
+  const overview = model.plan?.overview;
+  if (overview !== undefined && !model.finish && model.plan !== null && model.plan.steps.length > 0) root.append(renderOverview(overview, model, model.plan, handlers));
   root.append(renderStepper(model, handlers), renderMain(model, handlers));
   if (model.helpOpen) root.append(renderHelp(handlers));
   return root;
+}
+
+/* ---- overview ---------------------------------------------------------------- */
+
+const OVERVIEW_SECTION = 'overview:before-after';
+
+/**
+ * What the pull request does, before the steps: the model's paragraph and
+ * its numbered mechanisms on the left, the behaviour as a diff on the right
+ * (plain lines for what stays, red for the old way, green for the new, each
+ * with the number of the step where it is read). The flow of the same path
+ * is the Diagram tab's; a link there sits under the card.
+ */
+function renderOverview(overview: PlanOverview, model: ReviewTabModel, plan: ReviewPlan, handlers: ReviewTabHandlers): HTMLElement {
+  const box = createElement('section', { class: C('overview'), 'aria-label': 'Overview' });
+  const words = createElement('div', { class: C('overview-words') });
+  words.append(createElement('h2', { class: C('overview-title') }, ['Overview']));
+  if (overview.summary !== '') words.append(createElement('p', { class: C('overview-summary') }, inlineText(overview.summary)));
+  if (overview.points.length > 0) {
+    const list = createElement('ol', { class: C('overview-points') });
+    for (const point of overview.points) list.append(createElement('li', {}, inlineText(point)));
+    words.append(list);
+  }
+  box.append(words);
+  const diff = overview.beforeAfter;
+  if (diff !== null) {
+    const collapsed = model.collapsedSections.has(OVERVIEW_SECTION);
+    const card = createElement('div', { class: C('before-after') });
+    if (collapsed) card.setAttribute('data-collapsed', '');
+    const before = diff.lines.filter((line) => line.kind === 'before').length;
+    const after = diff.lines.filter((line) => line.kind === 'after').length;
+    const toggle = createElement('button', { type: 'button', class: C('before-after-head'), 'aria-expanded': String(!collapsed) }, [svgFromString(ICON_CHEVRON_DOWN), createElement('span', { class: C('before-after-name') }, ['Before / after']), createElement('span', { class: C('before-after-caption') }, [diff.caption])]);
+    toggle.append(createElement('span', { class: C('counts') }, [createElement('span', { class: C('counts-add') }, [`+${after}`]), createElement('span', { class: C('counts-del') }, [`-${before}`])]));
+    toggle.addEventListener('click', () => handlers.toggleSection(OVERVIEW_SECTION));
+    card.append(toggle);
+    if (!collapsed) {
+      const list = createElement('ol', { class: C('before-after-lines') });
+      for (const line of diff.lines) {
+        const item = createElement('li', { class: C('before-after-line'), 'data-kind': line.kind, style: `--geld-rt-depth:${line.depth}` });
+        item.append(createElement('span', { class: C('before-after-mark'), 'aria-hidden': 'true' }, [line.kind === 'before' ? '-' : line.kind === 'after' ? '+' : '']));
+        item.append(createElement('span', { class: C('before-after-text') }, inlineText(line.text)));
+        const index = line.step === null ? -1 : plan.steps.findIndex((step) => step.id === line.step);
+        if (index >= 0) {
+          const step = plan.steps[index];
+          const badge = createElement('button', { type: 'button', class: C('before-after-step'), title: step === undefined ? '' : `Step ${index + 1}: ${step.title}`, 'aria-label': `Open step ${index + 1}` }, [String(index + 1).padStart(2, '0')]);
+          badge.addEventListener('click', () => {
+            if (step !== undefined) handlers.selectStep(step.id);
+          });
+          item.append(badge);
+        }
+        list.append(item);
+      }
+      card.append(list);
+    }
+    box.append(card);
+  }
+  return box;
 }
 
 /* ---- stepper ---------------------------------------------------------------- */

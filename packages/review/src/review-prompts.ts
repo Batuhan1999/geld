@@ -8,8 +8,8 @@
 
 import { z } from 'zod';
 import type { PromptParse } from './prompts';
-import type { HunkRef, PlanInput, ReviewPlan, ReviewStep, StepKind, StepProposal } from './review-plan';
-import { isStepKind, movesOf, refKey, refsOf, STEP_KINDS, STEP_SIZE_CAP, touchesSummary } from './review-plan';
+import type { BeforeAfterKind, BeforeAfterLine, FlowNode, HunkRef, PlanInput, PlanOverview, ReviewPlan, ReviewStep, StepKind, StepProposal } from './review-plan';
+import { FLOW_NODE_KINDS, isFlowNodeKind, isStepKind, movesOf, refKey, refsOf, STEP_KINDS, STEP_SIZE_CAP, touchesSummary } from './review-plan';
 import { movesTouching } from './moves';
 
 export const PLAN_SYSTEM = `You plan a code review. A pull request's diff is given as numbered hunks (h1, h2, …), each with its file, header and changed lines, plus the pull request's title, its commits, and a first grouping made by simple rules. Group the hunks into steps a reviewer reads in order.
@@ -20,7 +20,8 @@ Rules:
 - "key": s1, s2, … in reading order. "title": three to seven words, imperative or a noun phrase, naming the change not the files ("Debounce the search box", "Settings schema for the new toggle"). "kind": one of ${STEP_KINDS.join(', ')}. "gist": one sentence, under 160 characters, saying what the step does. "watch": zero to three short items worth a second look, only when the diff shows one.
 - Files Geld hides (tests, generated output, fixtures) are listed by path only and are not hunks to place; their steps are decided afterwards.
 - "moves" lists blocks cut from one hunk and pasted into another ("h3 → h9 · 31 lines"). Both ends of a move belong to one step, and a move is not new code: say "moved", not "adds".
-- When "previousSteps" are given, the reader has already worked through them: keep a step's key where its hunks are the same change, and change only what the new and removed hunks require.
+- When "previousSteps" are given, the reader has already worked through them: keep a step's key where its hunks are the same change, and change only what the new and removed hunks require; rewrite "previousOverview" only where the new hunks change the account.
+- "overview" is the account of the whole pull request a reader gets before the steps. "summary": three or four sentences in one paragraph: what the system did before, what this pull request turns it into, the mechanism in a clause, and why. "points": one line per mechanism in reading order, zero to five, each under 140 characters, identifiers in backticks. "beforeAfter": the behaviour as a diff, not the code: a "caption" naming the path through the system ("A row in Ready to merge", "Crew merge completion path"), then "lines" in reading order, each with "kind" same (behaviour that stays), before (the old way, gone) or after (the new way), "depth" 0 to 3 for nesting under the line above, "text" under 100 characters in plain words with → for "leads to", and "step": the key of the step where that behaviour is read, or null. Four to twelve lines. "flow": the same path as boxes and arrows: "nodes" (id n1, n2, …; "label": a function or a question, under 48 characters; "file": its file's name or null; "kind" new, changed, existing or decision; "step": the step key or null) and "edges" (from, to, "label": yes, no or null for a decision's branches). Three to ten nodes, a tree or a near tree, no cycles.
 - Return JSON only, matching the schema.`;
 
 export const STORY_SYSTEM = `You explain one step of a code review to the reviewer, who did not write the code. The whole plan is given for context, then the step's hunks in full.
@@ -152,6 +153,8 @@ export function planUserPrompt(input: PlanInput, options: PlanPromptOptions): st
   if (options.previous !== undefined) {
     payload.previousSteps = options.previous.plan.steps.filter((step) => step.touches.length > 0).map((step) => toPrompt({ key: step.id, title: step.title, kind: step.kind, touches: step.touches }));
     payload.newHunks = options.previous.newHandles;
+    // The previous steps are keyed by their ids, so the previous overview's step references already fit.
+    if (options.previous.plan.overview !== undefined) payload.previousOverview = options.previous.plan.overview;
   }
   if (input.findings.length > 0) payload.openFindings = input.findings.map((finding) => (finding.line === undefined ? finding.path : `${finding.path}:${finding.line}`));
   return JSON.stringify(payload, null, 1);
@@ -161,10 +164,12 @@ export function planUserPrompt(input: PlanInput, options: PlanPromptOptions): st
 /* Plan output                                                                */
 /* ------------------------------------------------------------------------- */
 
+const STEP_REF = { type: ['string', 'null'] } as const;
+
 export const PLAN_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['steps'],
+  required: ['steps', 'overview'],
   properties: {
     steps: {
       type: 'array',
@@ -183,8 +188,62 @@ export const PLAN_JSON_SCHEMA = {
         },
       },
     },
+    overview: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['summary', 'points', 'beforeAfter', 'flow'],
+      properties: {
+        summary: { type: 'string' },
+        points: { type: 'array', items: { type: 'string' } },
+        beforeAfter: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['caption', 'lines'],
+          properties: {
+            caption: { type: 'string' },
+            lines: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['kind', 'text', 'depth', 'step'],
+                properties: { kind: { type: 'string', enum: ['same', 'before', 'after'] }, text: { type: 'string' }, depth: { type: 'integer' }, step: STEP_REF },
+              },
+            },
+          },
+        },
+        flow: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['caption', 'nodes', 'edges'],
+          properties: {
+            caption: { type: 'string' },
+            nodes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['id', 'label', 'file', 'kind', 'step'],
+                properties: { id: { type: 'string' }, label: { type: 'string' }, file: { type: ['string', 'null'] }, kind: { type: 'string', enum: [...FLOW_NODE_KINDS] }, step: STEP_REF },
+              },
+            },
+            edges: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['from', 'to', 'label'],
+                properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: ['string', 'null'] } },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;
+
+const stepRef = z.string().nullable().optional();
 
 const planOutputSchema = z.object({
   steps: z.array(
@@ -198,7 +257,63 @@ const planOutputSchema = z.object({
       watch: z.array(z.string().max(300)).optional(),
     }),
   ),
+  // Lenient on purpose: a model that answers the steps alone still gives a plan.
+  overview: z
+    .object({
+      summary: z.string().max(2000).optional(),
+      points: z.array(z.string().max(300)).optional(),
+      beforeAfter: z
+        .object({
+          caption: z.string().max(200).optional(),
+          lines: z.array(z.object({ kind: z.string(), text: z.string().max(300), depth: z.number().optional(), step: stepRef })).optional(),
+        })
+        .nullable()
+        .optional(),
+      flow: z
+        .object({
+          caption: z.string().max(200).optional(),
+          nodes: z.array(z.object({ id: z.string().min(1), label: z.string().max(200), file: z.string().nullable().optional(), kind: z.string().optional(), step: stepRef })).optional(),
+          edges: z.array(z.object({ from: z.string(), to: z.string(), label: z.string().nullable().optional() })).optional(),
+        })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
 });
+
+export interface PlanOutput {
+  readonly steps: readonly StepProposal[];
+  /** Step references are the answer's keys; `normalizePlan` turns them into ids. */
+  readonly overview: PlanOverview | null;
+}
+
+const MAX_FLOW_NODES = 12;
+
+function overviewOf(raw: NonNullable<z.infer<typeof planOutputSchema>['overview']>, keys: ReadonlySet<string>): PlanOverview | null {
+  const summary = raw.summary?.trim() ?? '';
+  const points = (raw.points ?? []).map((point) => point.trim()).filter((point) => point !== '').slice(0, 5);
+  const ref = (key: string | null | undefined): string | null => (typeof key === 'string' && keys.has(key.trim()) ? key.trim() : null);
+  const kindOf = (kind: string): BeforeAfterKind => (kind === 'before' || kind === 'after' ? kind : 'same');
+  const lines: BeforeAfterLine[] = (raw.beforeAfter?.lines ?? [])
+    .map((line) => ({
+      kind: kindOf(line.kind),
+      text: line.text.trim(),
+      depth: Math.max(0, Math.min(3, Math.round(line.depth ?? 0))),
+      step: ref(line.step),
+    }))
+    .filter((line) => line.text !== '');
+  const beforeAfter = raw.beforeAfter === null || raw.beforeAfter === undefined || lines.length === 0 ? null : { caption: raw.beforeAfter.caption?.trim() ?? '', lines };
+  const nodes: FlowNode[] = (raw.flow?.nodes ?? [])
+    .map((node): FlowNode => ({ id: node.id.trim(), label: node.label.trim(), file: typeof node.file === 'string' && node.file.trim() !== '' ? node.file.trim() : null, kind: isFlowNodeKind(node.kind) ? node.kind : 'changed', step: ref(node.step) }))
+    .filter((node) => node.id !== '' && node.label !== '')
+    .slice(0, MAX_FLOW_NODES);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = (raw.flow?.edges ?? []).map((edge) => ({ from: edge.from.trim(), to: edge.to.trim(), label: typeof edge.label === 'string' && edge.label.trim() !== '' ? edge.label.trim() : null })).filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to);
+  const flow = raw.flow === null || raw.flow === undefined || nodes.length === 0 ? null : { caption: raw.flow.caption?.trim() ?? '', nodes, edges };
+  if (summary === '' && points.length === 0 && beforeAfter === null && flow === null) return null;
+  return { summary, points, beforeAfter, flow };
+}
 
 function parseJsonObject(text: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly issues: readonly string[] } {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/u, '');
@@ -218,12 +333,13 @@ function issuesOf(error: z.ZodError): readonly string[] {
  * dropped, an unknown kind reads `other`, and `dependsOn` keeps only keys
  * the answer defines. `normalizePlan` then enforces coverage.
  */
-export function parsePlanOutput(text: string, handles: ReadonlyMap<string, HunkRef>): PromptParse<readonly StepProposal[]> {
+export function parsePlanOutput(text: string, handles: ReadonlyMap<string, HunkRef>): PromptParse<PlanOutput> {
   const json = parseJsonObject(text);
   if (!json.ok) return json;
   const parsed = planOutputSchema.safeParse(json.value);
   if (!parsed.success) return { ok: false, issues: issuesOf(parsed.error) };
   const keys = new Set(parsed.data.steps.map((step) => step.key));
+  const overview = parsed.data.overview === null || parsed.data.overview === undefined ? null : overviewOf(parsed.data.overview, keys);
   const proposals: StepProposal[] = parsed.data.steps.map((step) => {
     const gist = step.gist?.trim() ?? '';
     return {
@@ -236,7 +352,7 @@ export function parsePlanOutput(text: string, handles: ReadonlyMap<string, HunkR
       watch: (step.watch ?? []).map((item) => item.trim()).filter((item) => item !== ''),
     };
   });
-  return { ok: true, value: proposals.filter((proposal) => proposal.touches.length > 0) };
+  return { ok: true, value: { steps: proposals.filter((proposal) => proposal.touches.length > 0), overview } };
 }
 
 /* ------------------------------------------------------------------------- */

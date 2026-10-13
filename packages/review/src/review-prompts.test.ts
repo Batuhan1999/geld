@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanFile, PlanHunk, PlanInput } from './review-plan';
-import { hashText, normalizePlan, rulesPlan, rulesProposals } from './review-plan';
+import { hashText, normalizePlan, remapProposals, rulesPlan, rulesProposals } from './review-plan';
 import { diffDetailFor, hunkHandles, parsePlanOutput, parseStoryOutput, planUserPrompt, storyUserPrompt } from './review-prompts';
 
 function hunk(index: number, added: readonly string[], removed: readonly string[] = []): PlanHunk {
@@ -52,16 +52,80 @@ describe('plan prompt', () => {
     const parsed = parsePlanOutput(text, handles);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value).toEqual([
+    expect(parsed.value.steps).toEqual([
       { key: 's1', title: 'Add the retry loop', kind: 'feature', gist: 'Retries three times', touches: [{ path: 'src/fetch.ts', hunk: 0 }], dependsOn: ['s2'], watch: ['no cap'] },
       { key: 's2', title: 'Nothing', kind: 'other', gist: null, touches: [{ path: 'src/fetch.ts', hunk: 1 }], dependsOn: [], watch: [] },
     ]);
-    const plan = normalizePlan(input, parsed.value, { producer: 'ai', model: 'm', madeAt: 'now' });
+    // No overview in the answer: still a plan.
+    expect(parsed.value.overview).toBeNull();
+    const plan = normalizePlan(input, parsed.value.steps, { producer: 'ai', model: 'm', madeAt: 'now' });
     // s1 depends on s2, so s2 reads first; the hidden test file follows fetch.ts into the step that owns its first hunk.
     expect(plan.steps.map((step) => step.title)).toEqual(['Nothing', 'Add the retry loop']);
     expect(plan.steps.flatMap((step) => step.supporting.map((ref) => ref.path))).toEqual(['src/fetch.test.ts']);
+    expect(plan.overview).toBeUndefined();
     expect(parsePlanOutput('not json', handles)).toMatchObject({ ok: false });
     expect(parsePlanOutput('{"steps":"no"}', handles)).toMatchObject({ ok: false });
+  });
+
+  it('reads the overview, keeps only step references it knows and resolves them to ids', () => {
+    const handles = hunkHandles(input);
+    const answer = {
+      steps: [
+        { key: 's1', title: 'Retry loop', kind: 'feature', gist: '', hunks: ['h1'], dependsOn: [], watch: [] },
+        { key: 's2', title: 'Wire it', kind: 'feature', gist: '', hunks: ['h2'], dependsOn: ['s1'], watch: [] },
+      ],
+      overview: {
+        summary: ' Fetches used to fail once and give up. This pull request retries them. ',
+        points: ['Add `retry` with three attempts', '', 'Use it in `fetchJson`'],
+        beforeAfter: {
+          caption: 'A failing fetch',
+          lines: [
+            { kind: 'same', text: 'fetchJson(url)', depth: 0, step: null },
+            { kind: 'before', text: 'one attempt → throw', depth: 1, step: 's9' },
+            { kind: 'after', text: 'retry three times → throw', depth: 1, step: 's1' },
+            { kind: 'odd', text: '   ', depth: 7, step: 's2' },
+          ],
+        },
+        flow: {
+          caption: 'Fetch path',
+          nodes: [
+            { id: 'n1', label: 'fetchJson', file: 'fetch.ts', kind: 'changed', step: 's2' },
+            { id: 'n2', label: 'Failed?', file: null, kind: 'decision', step: 's1' },
+            { id: 'n3', label: 'retry', file: 'fetch.ts', kind: 'new', step: 's1' },
+          ],
+          edges: [
+            { from: 'n1', to: 'n2', label: null },
+            { from: 'n2', to: 'n3', label: 'yes' },
+            { from: 'n2', to: 'nope', label: 'no' },
+            { from: 'n3', to: 'n3', label: null },
+          ],
+        },
+      },
+    };
+    const parsed = parsePlanOutput(JSON.stringify(answer), handles);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const overview = parsed.value.overview;
+    expect(overview?.summary).toBe('Fetches used to fail once and give up. This pull request retries them.');
+    expect(overview?.points).toEqual(['Add `retry` with three attempts', 'Use it in `fetchJson`']);
+    expect(overview?.beforeAfter?.lines.map((line) => [line.kind, line.depth, line.step])).toEqual([
+      ['same', 0, null],
+      ['before', 1, null],
+      ['after', 1, 's1'],
+    ]);
+    expect(overview?.flow?.nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3']);
+    expect(overview?.flow?.edges).toEqual([
+      { from: 'n1', to: 'n2', label: null },
+      { from: 'n2', to: 'n3', label: 'yes' },
+    ]);
+    const plan = normalizePlan(input, parsed.value.steps, { producer: 'ai', model: 'm', madeAt: 'now', ...(overview === null ? {} : { overview }) });
+    const retry = plan.steps.find((step) => step.title === 'Retry loop');
+    const wire = plan.steps.find((step) => step.title === 'Wire it');
+    expect(plan.overview?.beforeAfter?.lines[2]?.step).toBe(retry?.id);
+    expect(plan.overview?.flow?.nodes.map((node) => node.step)).toEqual([wire?.id, retry?.id, retry?.id]);
+    // Laid over a later diff the references are ids already, and they survive.
+    const again = normalizePlan(input, remapProposals(plan, input), { producer: 'ai', model: 'm', madeAt: 'later', overview: plan.overview ?? { summary: '', points: [], beforeAfter: null, flow: null } });
+    expect(again.overview?.flow?.nodes[0]?.step).toBe(wire?.id);
   });
 });
 
