@@ -6,7 +6,7 @@
  * hunks that belong to other steps fold with a note (`hunk-rows.ts`).
  */
 
-import type { ChangeTotals, FileHunks, HiddenCategory } from '@geld/core';
+import type { ChangeTotals, FileHunks, HiddenCategory, ReviewReplanMode } from '@geld/core';
 import { formatCount, pluralize } from '@geld/core';
 import type { ReviewPlan, ReviewProgress, ReviewStep, StepDisplayState } from '@geld/review';
 import { finishBody, nextPendingStep, reviewComplete, STEP_KIND_LABELS, stepDisplayState, touchesSummary } from '@geld/review';
@@ -37,7 +37,9 @@ export interface ReviewTabModel {
   /** The store has answered (a plan may still be null while the diff loads). */
   readonly loaded: boolean;
   readonly planning: boolean;
-  readonly behind: { readonly newHunks: number; readonly goneHunks: number } | null;
+  readonly behind: { readonly head: string; readonly newHunks: number; readonly goneHunks: number } | null;
+  /** What a push does to the plan: kept with a notice (`manual`) or remade (`automatic`). */
+  readonly replan: ReviewReplanMode;
   readonly error: string | null;
   /** The planning model when AI can be asked, else null. */
   readonly aiModel: string | null;
@@ -255,10 +257,6 @@ function renderStepperFoot(model: ReviewTabModel, handlers: ReviewTabHandlers): 
     foot.append(notice([model.error, ' ', button('Try again', C('link-button'), () => handlers.planWithAi(model.behind !== null))], 'bad'));
   }
   if (model.plan === null) return foot;
-  if (model.behind !== null) {
-    const words = model.behind.newHunks === 0 ? 'The diff changed since this plan.' : `${pluralize(model.behind.newHunks, 'new hunk', 'new hunks')} since this plan, listed under Everything else.`;
-    foot.append(notice([words, ' ', model.aiModel === null ? button('Regroup', C('link-button'), () => handlers.regroup()) : button('Replan', C('link-button'), () => handlers.planWithAi(true), ICON_SPARKLE_FILL)], 'warn'));
-  }
   // How the steps came to be is the info mark's; the footer keeps only what the reader can act on.
   if (model.plan.producer === 'rules' && model.aiModel !== null) {
     foot.append(notice([button('Plan with AI', C('link-button'), () => handlers.planWithAi(false), ICON_SPARKLE_FILL), ' to group the steps by purpose and explain each one.']));
@@ -287,6 +285,8 @@ function renderMain(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLEle
     main.append(renderEmpty('Nothing to review', 'This pull request changes no files.', handlers));
     return main;
   }
+  const stale = renderStale(model, handlers);
+  if (stale !== null) main.append(stale);
   if (model.finish) {
     main.append(renderFinish(model, handlers));
     return main;
@@ -295,6 +295,37 @@ function renderMain(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLEle
   if (step === undefined) return main;
   main.append(renderStep(model, step, handlers));
   return main;
+}
+
+/**
+ * The notice GitHub's files page shows when the pull request changed under
+ * the reader, for the steps: a push left the plan behind, so the steps are
+ * the plan as laid over the new diff (hunks it knows where they were, new
+ * ones under Everything else) until Refresh remakes them. In automatic mode
+ * the same bar says the steps are being remade for the new head.
+ */
+function renderStale(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLElement | null {
+  const behind = model.behind;
+  if (behind === null) return null;
+  const head = createElement('code', {}, [behind.head.slice(0, 7)]);
+  const bar = createElement('div', { class: C('stale'), role: 'status' });
+  if (model.planning) {
+    bar.append(svgFromString(ICON_SPARKLE_FILL), createElement('span', { class: C('stale-words'), 'data-pending': '' }, ['Updating the steps for ', head, '…']));
+    return bar;
+  }
+  const counts: string[] = [];
+  if (behind.newHunks > 0) counts.push(pluralize(behind.newHunks, 'new hunk', 'new hunks'));
+  if (behind.goneHunks > 0) counts.push(`${formatCount(behind.goneHunks)} gone`);
+  const words = createElement('span', { class: C('stale-words') }, [createElement('strong', {}, ['This pull request changed since these steps were planned.']), ' ']);
+  words.append(counts.length === 0 ? 'The same changes sit at new places.' : `${counts.join(', ')} at `, ...(counts.length === 0 ? [] : [head, behind.newHunks > 0 ? ', listed under Everything else.' : '.']));
+  bar.append(svgFromString(ICON_ALERT), words);
+  const refresh = button('Refresh', `btn btn-sm ${C('stale-refresh')}`, () => {
+    if (model.plan?.producer === 'ai' && model.aiModel !== null) handlers.planWithAi(true);
+    else handlers.regroup();
+  });
+  refresh.title = model.plan?.producer === 'ai' && model.aiModel !== null ? `Replan with ${model.aiModel}, keeping the steps whose changes are the same` : 'Regroup the steps for the new changes';
+  bar.append(refresh);
+  return bar;
 }
 
 function renderEmpty(title: string, words: string, handlers: ReviewTabHandlers, pending = false): HTMLElement {

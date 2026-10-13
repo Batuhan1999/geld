@@ -51,6 +51,8 @@ interface Visit {
   input: PlanInput | null;
   /** The plan as laid over the current diff (the stored one, or its remap after a push). */
   effective: ReviewPlan | null;
+  /** The head the automatic mode already asked the model to replan for, so one push costs one call. */
+  autoReplanHead: string | null;
 }
 
 let visit: Visit | null = null;
@@ -60,7 +62,7 @@ let onChange: () => void = () => undefined;
 export function openPlanner(key: string, notify: () => void): void {
   onChange = notify;
   if (visit?.key === key) return;
-  const fresh: Visit = { key, record: null, progress: null, loaded: false, planning: false, storiesInFlight: new Set(), storiesAsked: new Set(), input: null, effective: null };
+  const fresh: Visit = { key, record: null, progress: null, loaded: false, planning: false, storiesInFlight: new Set(), storiesAsked: new Set(), input: null, effective: null, autoReplanHead: null };
   visit = fresh;
   void Promise.all([loadPlanRecord(key), loadProgress(key)]).then(([record, progress]) => {
     if (visit !== fresh) return;
@@ -81,8 +83,8 @@ export interface PlannerState {
   readonly plan: ReviewPlan | null;
   readonly progress: ReviewProgress | null;
   readonly planning: boolean;
-  /** The plan was made for an earlier head; `newHunks` says how many hunks it never saw. */
-  readonly behind: { readonly newHunks: number; readonly goneHunks: number } | null;
+  /** The plan was made for an earlier head (`head` is the one on the page now); `newHunks` says how many hunks it never saw. */
+  readonly behind: { readonly head: string; readonly newHunks: number; readonly goneHunks: number } | null;
   readonly error: string | null;
   readonly storiesInFlight: ReadonlySet<string>;
 }
@@ -91,11 +93,15 @@ const EMPTY: PlannerState = { loaded: false, plan: null, progress: null, plannin
 
 /**
  * The plan for `input`, from the store or the rules: a stored plan for this
- * head is used as is; one for an earlier head is laid over the current diff
- * (the rules' plan is simply remade, since it costs nothing); no plan means
- * the rules make one now and store it. Progress follows the plan's step ids.
+ * head is used as is; no plan means the rules make one now and store it. A
+ * plan a push left behind follows the `reviewReplan` setting: in `manual`
+ * mode it is kept and laid over the current diff (hunks it knows stay in
+ * their steps, new ones gather under Everything else) and `behind` says so,
+ * for the notice with its Refresh; in `automatic` mode the rules' plan is
+ * remade (it costs nothing) and a model's plan is replanned once per new
+ * head, with the remap shown meanwhile. Progress follows the step ids.
  */
-export function plannerState(input: PlanInput | null): PlannerState {
+export function plannerState(input: PlanInput | null, settings: GeldSettings | null = null): PlannerState {
   const current = visit;
   if (current === null || !current.loaded) return EMPTY;
   if (input === null) return { ...EMPTY, loaded: true, plan: current.record?.plan ?? null, progress: current.progress, planning: current.planning, error: current.record?.error ?? null, storiesInFlight: current.storiesInFlight };
@@ -110,16 +116,21 @@ export function plannerState(input: PlanInput | null): PlannerState {
   }
   let plan = record.plan;
   if (plan.headSha !== input.headSha) {
-    const delta = planDelta(planSignatures(plan), input);
-    if (plan.producer === 'rules') {
-      // Free to remake: the stored rules plan follows the head, progress carried by step id.
+    const automatic = settings?.reviewReplan === 'automatic';
+    if (plan.producer === 'rules' && automatic) {
       plan = rulesPlan(input, now);
       record = recordWithPlan(record, plan, now);
       current.record = record;
       void savePlanRecord(current.key, record);
     } else {
+      const delta = planDelta(planSignatures(plan), input);
       plan = normalizePlan(input, remapProposals(record.plan, input), { producer: record.plan.producer, model: record.plan.model, madeAt: record.plan.madeAt, fromHeaders: record.plan.fromHeaders });
-      behind = { newHunks: delta.added.length, goneHunks: delta.removed.length };
+      behind = { head: input.headSha, newHunks: delta.added.length, goneHunks: delta.removed.length };
+      if (automatic && settings !== null && !current.planning && current.autoReplanHead !== input.headSha) {
+        current.autoReplanHead = input.headSha;
+        // Outside the pass: the call reads `current.input`, set above, and reports back through `onChange`.
+        void reviewAiReady(settings).then((ready) => (ready ? planWithAi(settings, true) : undefined));
+      }
     }
   }
   current.effective = plan;

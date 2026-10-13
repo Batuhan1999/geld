@@ -3,7 +3,7 @@ import { BUNDLED_CATALOG, CATEGORY_IDS, catalogGroupKeys, isCategoryId, isCustom
 import { CATEGORY_ICON_NAMES, isCategoryIconName } from './category-icons';
 import { globToRegExp } from './glob';
 import type { GeldSettings } from './settings';
-import { COMPACT_TIMELINE_MODES, REPO_CONFIG_MODES, isCompactTimelineMode, isRepoConfigMode, normalizeHost, normalizeSettings, isReviewGrouping, isSuggestedFixMode, REVIEW_GROUPINGS, SUGGESTED_FIX_MODES } from './settings';
+import { COMPACT_TIMELINE_MODES, REPO_CONFIG_MODES, isCompactTimelineMode, isRepoConfigMode, normalizeHost, normalizeSettings, isReviewGrouping, isReviewReplanMode, isSuggestedFixMode, REVIEW_GROUPINGS, REVIEW_REPLAN_MODES, SUGGESTED_FIX_MODES } from './settings';
 import { authorRuleProblem } from './pr-authors';
 import { TEST_PATTERN_GROUP_IDS, isTestPatternGroupId } from './test-patterns';
 
@@ -256,6 +256,9 @@ export function collectSettingsIssues(value: unknown, path = 'settings', catalog
   }
   if (value.suggestedFixes !== undefined && !isSuggestedFixMode(value.suggestedFixes)) {
     issues.push({ path: `${path}.suggestedFixes`, message: `Expected one of ${list(SUGGESTED_FIX_MODES)}, got ${describeValue(value.suggestedFixes)}.` });
+  }
+  if (value.reviewReplan !== undefined && !isReviewReplanMode(value.reviewReplan)) {
+    issues.push({ path: `${path}.reviewReplan`, message: `Expected one of ${list(REVIEW_REPLAN_MODES)}, got ${describeValue(value.reviewReplan)}.` });
   }
   if (value.aiBaseUrl !== undefined && typeof value.aiBaseUrl !== 'string') {
     issues.push({ path: `${path}.aiBaseUrl`, message: `Expected a string, got ${describeValue(value.aiBaseUrl)}.` });

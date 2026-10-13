@@ -20,7 +20,7 @@ export type ListSettingKey = {
 }[keyof GeldSettings];
 
 /** Settings that pick one of a fixed set of string values. */
-export type ChoiceSettingKey = 'repoConfigs' | 'compactTimeline' | 'reviewGrouping' | 'suggestedFixes';
+export type ChoiceSettingKey = 'repoConfigs' | 'compactTimeline' | 'reviewGrouping' | 'suggestedFixes' | 'reviewReplan';
 
 /** Freeform string settings (URLs, model ids). Distinct from {@link ChoiceSettingKey}. */
 export type TextSettingKey = 'aiBaseUrl' | 'aiModel' | 'aiReviewModel';
@@ -410,6 +410,17 @@ export const SETTINGS_SCHEMA: readonly SettingsSection[] = [
           'Adds a Review tab next to Files changed that walks the pull request in steps: each step is one body of work (a feature slice, a fix, a refactor) across the files it touches, with the hunks of other steps folded away. Accept or flag each step and finish with GitHub’s own review form. On its own Geld groups by commit, shared symbols and path; with AI on, the model plans the steps and explains each one.',
         popup: true,
         popupDescription: 'Walk the diff in steps, not files.',
+      },
+      {
+        kind: 'choice',
+        key: 'reviewReplan',
+        label: 'When the pull request changes',
+        description: 'A push can leave the Review tab’s steps behind. `Manual` keeps the steps you are working through and shows a notice with a Refresh control, as GitHub’s files page does. `Automatic` remakes the steps as soon as the new changes are read.',
+        popup: false,
+        options: [
+          { value: 'manual', label: 'Manual', description: 'Keep the steps and say the pull request changed. Refresh when you are ready.' },
+          { value: 'automatic', label: 'Automatic', description: 'Remake the steps on every push (the model is asked again when it planned them).' },
+        ],
       },
       {
         kind: 'choice',

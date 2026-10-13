@@ -6510,6 +6510,39 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   min-width: 0;
 }
 
+/* A push left the steps behind: GitHub's own attention bar (the files page's "changed since" notice), with Refresh at the right. */
+.geld-review-tab__stale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--borderColor-attention-muted, var(--color-attention-muted, rgba(212, 167, 44, 0.4)));
+  border-radius: 6px;
+  background: var(--bgColor-attention-muted, var(--color-attention-subtle, #fff8c5));
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.geld-review-tab__stale > .octicon {
+  flex: none;
+  fill: var(--geld-rt-warn);
+}
+
+.geld-review-tab__stale-words {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.geld-review-tab__stale-words code {
+  font-size: 12px;
+}
+
+.geld-review-tab__stale-refresh {
+  flex: none;
+}
+
 .geld-review-tab__step,
 .geld-review-tab__finish,
 .geld-review-tab__empty {

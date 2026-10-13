@@ -183,7 +183,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
     else if (input.status === 'ready') {
       inputPhase = { kind: 'ready' };
       // Commit file lists still arriving: the rules producer plans once they have (a plan from the store shows meanwhile).
-      state = plannerState(input.commitsPending && plannerState(null).plan === null ? null : input.input);
+      state = plannerState(input.commitsPending && plannerState(null).plan === null ? null : input.input, settings);
       hunksByPath = new Map(diffHunksFor(page.diffUrl, headSha, context.reapply).files.map((file) => [file.path, file] as const));
     }
   }
@@ -222,6 +222,7 @@ export function applyReviewTab(context: ReviewTabContext): void {
     loaded: state.loaded,
     planning: state.planning,
     behind: state.behind,
+    replan: settings.reviewReplan,
     error: state.error,
     aiModel,
     storiesInFlight: state.storiesInFlight,
@@ -387,7 +388,8 @@ function signatureOf(model: ReviewTabModel): string {
     model.input.kind === 'loading' ? (model.input.reason ?? '') : '',
     model.loaded ? 1 : 0,
     model.planning ? 1 : 0,
-    model.behind === null ? '' : `${model.behind.newHunks}/${model.behind.goneHunks}`,
+    model.behind === null ? '' : `${model.behind.head}:${model.behind.newHunks}/${model.behind.goneHunks}`,
+    model.replan,
     model.error ?? '',
     model.aiModel ?? '',
     [...model.storiesInFlight].join(','),
