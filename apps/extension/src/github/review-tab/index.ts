@@ -630,6 +630,8 @@ function makeHandlers(context: ReviewTabContext, current: Visit): ReviewTabHandl
         markStep(step, 'accepted');
         markViewedIfWhole(current, context, step);
       } else unmarkStep(step);
+      // The step stays in view: without a pinned current step the pass would show the next pending one.
+      setCurrentStep(step.id);
       current.finishOpen = false;
       reapply();
     },

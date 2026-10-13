@@ -6728,7 +6728,6 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   display: grid;
   grid-template-columns: repeat(var(--geld-rt-layers, 1), minmax(180px, 1fr));
   gap: 0 56px;
-  min-width: calc(var(--geld-rt-layers, 1) * 180px + (var(--geld-rt-layers, 1) - 1) * 56px);
 }
 
 .geld-review-tab__flow-column {

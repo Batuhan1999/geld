@@ -29,8 +29,8 @@ const MAX_SCOPE_CHARS = 120;
 const MARKDOWN = /\.(md|mdx|markdown|mkd)$/i;
 const HEADING = /^(#{1,6})\s+\S/;
 const FENCE = /^\s*(```|~~~)/;
-/** A line that only closes something, or is a comment, and so encloses nothing by itself. */
-const CLOSER_ONLY = /^(?:[}\])]+;?|end|fi|done|esac|else|\/\/.*|\/\*.*|\*.*|#.*|<!--.*)$/;
+/** A line that only closes or only opens something (`}`, a JSON document's `{`), or is a comment: it names nothing, so it encloses nothing worth saying. */
+const CLOSER_ONLY = /^(?:[}\])]+;?|[{(\[]+,?|end|fi|done|esac|else|\/\/.*|\/\*.*|\*.*|#.*|<!--.*)$/;
 /** A closing line that opens the next part of the same construct: `) {`, `} else {`, `} catch (e) {`, `end).then do`. */
 const CLOSES_THEN_OPENS = /^[}\])]/;
 const OPENS = /[{(\[:]\s*$|\b(?:do|then|=>)\s*$/;

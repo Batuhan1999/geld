@@ -399,7 +399,8 @@ function renderStale(model: ReviewTabModel, handlers: ReviewTabHandlers): HTMLEl
   if (behind.newHunks > 0) counts.push(pluralize(behind.newHunks, 'new hunk', 'new hunks'));
   if (behind.goneHunks > 0) counts.push(`${formatCount(behind.goneHunks)} gone`);
   const words = createElement('span', { class: C('stale-words') }, [createElement('strong', {}, ['This pull request changed since these steps were planned.']), ' ']);
-  words.append(counts.length === 0 ? 'The same changes sit at new places.' : `${counts.join(', ')} at `, ...(counts.length === 0 ? [] : [head, behind.newHunks > 0 ? ', listed under Everything else.' : '.']));
+  if (counts.length === 0) words.append('The same hunks, at a new head (', head, ').');
+  else words.append(`${counts.join(', ')} at `, head, behind.newHunks > 0 ? ', listed under Everything else.' : '.');
   bar.append(svgFromString(ICON_ALERT), words);
   const refresh = button('Refresh', `btn btn-sm ${C('stale-refresh')}`, () => {
     if (model.plan?.producer === 'ai' && model.aiModel !== null) handlers.planWithAi(true);

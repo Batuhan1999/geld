@@ -75,6 +75,13 @@ describe('enclosingScopes', () => {
     expect(enclosingScopes(TS, at(TS, 'return 1;'), 'a.ts').map((scope) => scope.text)).toEqual(['function alone() {']);
   });
 
+  it('leaves out a bare brace: a JSON document, an Allman-style body', () => {
+    const json = '{\n  "name": "x",\n  "dependencies": {\n    "tinyexec": "1.0.0"\n  }\n}\n';
+    expect(enclosingScopes(json, 4, 'package.json').map((scope) => scope.text)).toEqual(['"dependencies": {']);
+    const allman = 'void Foo()\n{\n    Bar();\n}\n';
+    expect(enclosingScopes(allman, 3, 'a.cs').map((scope) => scope.text)).toEqual(['void Foo()']);
+  });
+
   it('encloses nothing at the top level or off the file', () => {
     expect(enclosingScopes(TS, at(TS, 'function alone'), 'a.ts')).toEqual([]);
     expect(enclosingScopes(TS, 1, 'a.ts')).toEqual([]);

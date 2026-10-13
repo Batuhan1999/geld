@@ -145,20 +145,25 @@ export function drawFlowEdges(root: ParentNode): void {
   const flow = root.querySelector<HTMLElement>(`.${C('flow')}`);
   const overlay = flow?.querySelector<SVGSVGElement>(`.${C('flow-edges')}`);
   if (flow === undefined || flow === null || overlay === undefined || overlay === null) return;
+  // The overlay fills the padding box (`inset: 0` on an absolute child), so it is sized and offset from that, not the border box.
   const box = flow.getBoundingClientRect();
-  overlay.setAttribute('width', String(Math.round(box.width)));
-  overlay.setAttribute('height', String(Math.round(box.height)));
-  overlay.setAttribute('viewBox', `0 0 ${Math.round(box.width)} ${Math.round(box.height)}`);
+  const originX = box.left + flow.clientLeft - flow.scrollLeft;
+  const originY = box.top + flow.clientTop;
+  const width = flow.scrollWidth;
+  const height = flow.clientHeight;
+  overlay.setAttribute('width', String(width));
+  overlay.setAttribute('height', String(height));
+  overlay.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const rectOf = (id: string): DOMRect | null => flow.querySelector<HTMLElement>(`[${ATTR_NODE}="${CSS.escape(id)}"]`)?.getBoundingClientRect() ?? null;
   const midpoints = new Map<string, readonly [number, number]>();
   for (const path of overlay.querySelectorAll<SVGPathElement>('path[data-from]')) {
     const from = rectOf(path.getAttribute(ATTR_EDGE_FROM) ?? '');
     const to = rectOf(path.getAttribute(ATTR_EDGE_TO) ?? '');
     if (from === null || to === null) continue;
-    const x1 = from.right - box.left;
-    const y1 = from.top + from.height / 2 - box.top;
-    const x2 = to.left - box.left;
-    const y2 = to.top + to.height / 2 - box.top;
+    const x1 = from.right - originX;
+    const y1 = from.top + from.height / 2 - originY;
+    const x2 = to.left - originX;
+    const y2 = to.top + to.height / 2 - originY;
     const bend = Math.max(24, (x2 - x1) / 2);
     path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
     midpoints.set(`${path.getAttribute(ATTR_EDGE_FROM)}>${path.getAttribute(ATTR_EDGE_TO)}`, [(x1 + x2) / 2, (y1 + y2) / 2]);
