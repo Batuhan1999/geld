@@ -1242,7 +1242,7 @@ function botChip(bot: BotVerdictRecord, model: PanelModel, handlers: PanelHandle
 interface BotRunState {
   readonly health: Health | null;
   readonly word: string;
-  /** Ticked when the menu opens: a failed run, or one on an earlier commit. */
+  /** Ticked when the menu opens: a failed run, one on an earlier commit, or one that had findings (resolved since or not). */
   readonly preselect: boolean;
 }
 
@@ -1255,8 +1255,12 @@ function botRunState(bot: InstalledBot, model: PanelModel): BotRunState {
   // A refused run ("disabled for this repository") is Skipped, and not ticked: asking again changes nothing until
   // the bot's setup does.
   if (record.verdict === 'failed' && record.reason !== undefined) return { health, word: 'Skipped', preselect: false };
-  const word = health === 'bad' ? 'Failed' : health === 'warn' ? 'Findings' : 'Passed';
-  return { health, word, preselect: health === 'bad' };
+  // A run that had findings is worth running again whether or not its threads have been resolved since: the chip
+  // shows the green check once they are, but the bot has not looked at the fixes. The line keeps saying "Findings"
+  // beside that check so the tick explains itself.
+  const findings = record.verdict === 'findings';
+  const word = health === 'bad' ? 'Failed' : findings || health === 'warn' ? 'Findings' : 'Passed';
+  return { health, word, preselect: health === 'bad' || findings };
 }
 
 /** How Geld knows the bot is here, for the line's tooltip. */
@@ -1277,7 +1281,8 @@ function presenceWords(bot: InstalledBot): string {
  * Request a review: a checkbox per bot, with what its last run here said
  * (failed, findings, passed, running, on an earlier commit, not run), so
  * the reader can run only the ones that need it. Failed and stale runs
- * start ticked. Bots with a sign of being here (active on the page,
+ * start ticked, and so does a run that had findings — resolved since or
+ * not, the bot has not seen the fixes. Bots with a sign of being here (active on the page,
  * declared by the repository, configured in it) are listed first; the rest
  * of the registry waits behind "Other bots", since a trigger for a bot that
  * is not installed is a public comment with a handle in it. Run posts one

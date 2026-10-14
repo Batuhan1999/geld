@@ -626,16 +626,17 @@ function firstAnchorIn(node: HTMLElement | null): string | null {
 }
 
 
-function composeMeta(found: ReturnType<typeof findSummaryComment>, crawled: GeldPrMeta): { readonly meta: GeldPrMeta; readonly freshness: PanelModel['freshness'] } {
+/** `complete`: the whole timeline is read, so what the page counts of a run's threads is all of them (see `withLiveRuns`). */
+function composeMeta(found: ReturnType<typeof findSummaryComment>, crawled: GeldPrMeta, complete: boolean): { readonly meta: GeldPrMeta; readonly freshness: PanelModel['freshness'] } {
   if (found === null) return { meta: withAi(crawled), freshness: 'local' };
   const usable = usableMeta(found);
   // A digest the Action wrote with AI is the repository's; nothing this device wrote is layered over it.
   const layer = usable.producer.ai ? (meta: GeldPrMeta): GeldPrMeta => meta : withAi;
   if (found.freshness === 'fresh' && usable.truncated !== true) {
-    // Fresh for the head, yet written at one moment: what runs now is the page's to say.
-    return { meta: layer({ ...usable, bots: withLiveRuns(usable.bots, crawled.bots) }), freshness: 'fresh' };
+    // Fresh for the head, yet written at one moment: what runs now, and what became of the findings, is the page's to say.
+    return { meta: layer({ ...usable, bots: withLiveRuns(usable.bots, crawled.bots, complete) }), freshness: 'fresh' };
   }
-  return { meta: layer(mergeWithCrawler(usable, crawled)), freshness: found.freshness };
+  return { meta: layer(mergeWithCrawler(usable, crawled, complete)), freshness: found.freshness };
 }
 
 /**
@@ -2508,7 +2509,12 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   // Jev first, from its cache: what it has said about the top-level comments decides what is a trigger below.
   const topLevel: CommentToClassify[] = crawledDom.comments.filter((entry) => entry.comment.kind !== 'thread').map((entry) => ({ anchor: entry.comment.anchor, author: entry.author.login, bot: entry.author.bot, body: entry.comment.body }));
   jevNow = phase('jev', () => jevDecisionsFor(settings, topLevel, [], reapplySoon));
-  const composed = phase('cluster', () => composeMeta(found, buildFromComments(crawledDom, settings, headSha, visit.generatedAt, timelineIngesting(settings.compactTimeline !== 'off' && !visit.fullTimeline))));
+  const partial = timelineIngesting(settings.compactTimeline !== 'off' && !visit.fullTimeline);
+  // Every thread is on the page: nothing on its way, and no "Load more" GitHub still folds older items behind (an
+  // open thread is never deferred — GitHub minimizes only reviews whose threads are all resolved — so a thread the
+  // crawl cannot see is a resolved one, or one past that fold).
+  const complete = !partial && !hasLoadMore();
+  const composed = phase('cluster', () => composeMeta(found, buildFromComments(crawledDom, settings, headSha, visit.generatedAt, partial), complete));
   // Then the threads, now that items exist: whether the replies say a thread is done.
   const bodies = new Map(crawledDom.comments.map((entry) => [entry.comment.anchor, { author: entry.author.login, body: entry.comment.body }] as const));
   const threads: ThreadToClassify[] = composed.meta.items
