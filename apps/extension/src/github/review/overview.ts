@@ -34,8 +34,8 @@ import { diffHashOf, isTrimmedPath, resetWholePaths, wholePath } from './whole-p
 import { applyFolds, closureKindOf, collapseDescription, groupBotRuns, groupClosures, groupDoneHumans, groupLeftovers, groupTriggers, isFoldedNode, markSeen, setFullTimeline } from './fold';
 import type { FoldGroup } from './fold';
 import { ATTR_SUMMARY, findSummaryComment, mergeWithCrawler, usableMeta, withLiveRuns } from './meta-source';
-import { ATTR_CTL_SLOT, ATTR_GEAR_SLOT, ATTR_TIME_FOR, batchKey, panelSignature, CHECKS_KEY, foldKey, isVerdict, itemKey, mountPanel, PREVIEWS_KEY, renderBatchView, renderCommentsList, renderReportsList, REPORTS_KEY, reviewerGroups, reviewerStatuses, REVIEWS_KEY, syncSpinners, unmountPanel } from './panel';
-import type { Batch, ReviewEntry, ReviewEntryState, ReviewThreadRef } from './panel';
+import { ATTR_CTL_SLOT, ATTR_GEAR_SLOT, ATTR_TIME_FOR, batchKey, BOTS_KEY, panelSignature, CHECKS_KEY, foldKey, isVerdict, itemKey, mountPanel, PREVIEWS_KEY, renderBatchView, renderBotsList, renderCommentsList, renderReportsList, REPORTS_KEY, reviewerGroups, reviewerStatuses, REVIEWS_KEY, syncSpinners, unmountPanel } from './panel';
+import type { Batch, BotLine, ReviewEntry, ReviewEntryState, ReviewThreadRef } from './panel';
 import { hideHoverCard, setHoverProvider, setReportProvider, setWhoProvider } from './hovercard';
 import type { HoverPreview, ReportCard, WhoCard } from './hovercard';
 import { knownMarkShape } from './mark-shape';
@@ -48,7 +48,7 @@ import type { RepoBotsHint } from './panel-model';
 import { NO_REPO_BOTS, requestableBots } from './panel-model';
 import { outgoingMentions, renderMentionsView, renderQuickView, timeCommitRows } from './quick-view';
 import { chatNeedsRedress, redressComposer, renderChatView, renderCommentChat, sourceFocusKey, threadAnchorOf } from './chat';
-import type { ChatByline, ChatRerun } from './chat';
+import type { ChatByline, ChatRerun, ChatThreadLink } from './chat';
 import { viaBotOf } from './via';
 import type { ChatHandlers, ChatSource } from './chat';
 import { quietClick } from './quiet-click';
@@ -513,6 +513,8 @@ interface AnchorSeat {
 function seatFor(anchor: string, meta: GeldPrMeta, groups: readonly FoldGroup[], batches: readonly Batch[]): AnchorSeat | null {
   const item = meta.items.find((entry) => entry.sources.some((source) => source.anchor === anchor));
   if (item !== undefined) return { key: itemKey(item.id), sub: null };
+  // A bot's latest run summary is a line under the Review bots row, not in its round.
+  if (botLineAnchors.has(anchor)) return { key: BOTS_KEY, sub: anchor };
   const batch = batches.find((entry) => [...entry.comments, ...entry.reviews].some((line) => line.anchor === anchor));
   if (batch !== undefined) return { key: batch.key, sub: anchor };
   const group = groupContaining(groups, anchor);
@@ -1167,6 +1169,8 @@ function openRow(key: string, batches: readonly Batch[], grouping: GeldSettings[
     }
     visit.openSubKey = sub;
   }
+  // A line in the Review bots or Reports list opens inside its row the same way.
+  if (key === BOTS_KEY || key === REPORTS_KEY) visit.openSubKey = sub;
   visit.openKey = key;
 }
 
@@ -1313,7 +1317,9 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
   };
   for (const item of meta.items) place({ node: document.documentElement, kind: 'item', item }, itemNodes(item)[0] ?? null);
   for (const entry of crawled.comments) {
-    if (!botAnchors.has(entry.comment.anchor) || !entry.author.bot) continue;
+    // A bot's latest run summary is the Review bots row's line, not a line in its round (earlier summaries stay
+    // in theirs: the history of that push).
+    if (!botAnchors.has(entry.comment.anchor) || !entry.author.bot || botLineAnchors.has(entry.comment.anchor)) continue;
     const comment: RoundComment = { anchor: entry.comment.anchor, avatar: entry.avatarSrc ?? avatarSrcForLogin(entry.author.login), author: entry.author.login, node: entry.root, body: entry.comment.body, lane: jevNow.lanes.get(entry.comment.anchor) ?? null };
     // A comment that announces a preview (ready, failed, refused) is that preview: it shows as a pill, not a line.
     place({ node: entry.root, kind: previewAnchors.has(entry.comment.anchor) ? 'preview' : 'comment', comment }, entry.root);
@@ -1670,6 +1676,8 @@ interface SourceFacts {
 }
 
 let sourceFacts = new Map<string, SourceFacts>();
+/** The anchors of the Review bots row's lines (each bot's latest summary), for seating: set each pass before the rounds are built. */
+let botLineAnchors = new Set<string>();
 
 /**
  * A bot posts its run summary and its threads moments apart, in either
@@ -1698,6 +1706,67 @@ function botSummaryFor(botId: string, threadAt: number): { readonly anchor: stri
   }
   return best;
 }
+
+/**
+ * The Review bots row's lines: for each bot with a verdict, its newest run
+ * summary on the page (`botSummaryFor`, the comment or review body its chip
+ * would open) and the threads of that run — the threads whose source, read
+ * as the pinned strip reads it (`threadSourceOf`: the review that holds the
+ * thread, else the summary in effect at the thread's time), is that summary.
+ * A summary that is itself inside a thread (a bot whose only word was a
+ * thread comment) is no line to open; its threads still point the way.
+ */
+function buildBotLines(meta: GeldPrMeta): readonly BotLine[] {
+  return meta.bots.map((bot) => {
+    const computed = botSummaryFor(bot.id, NaN);
+    // A summary on loan to the panel (its line open, or pinned in a thread's chat) is read bodiless at home, so
+    // this pass does not count it as a summary and the bot's "latest" falls back to the run before — the line
+    // changed anchor under the reader and its open key was dropped. A bot's latest word only ever gets newer
+    // while the comment stands, so the line last read whole is kept while its comment is still in the document
+    // and nothing newer has been read.
+    const remembered = botLineMemo.get(bot.id);
+    const computedAt = computed === null ? NaN : Date.parse(computed.facts.createdAt);
+    const keep = remembered !== undefined && document.getElementById(remembered.anchor) !== null && (Number.isNaN(computedAt) || computedAt < remembered.at);
+    const anchorFound = keep ? remembered.anchor : computed?.anchor ?? null;
+    const element = anchorFound === null ? null : document.getElementById(anchorFound);
+    const anchor = anchorFound !== null && element !== null && closestAtHome(element, THREAD_SELECTOR) === null ? anchorFound : null;
+    const threads: ReviewThreadRef[] = [];
+    if (keep && remembered !== undefined) {
+      // The run's threads as last read; only their state is current.
+      for (const ref of remembered.threads) {
+        const item = meta.items.find((candidate) => candidate.sources.some((source) => source.anchor === ref.anchor));
+        if (item !== undefined) threads.push({ anchor: ref.anchor, done: !isOpenStatus(item.status) });
+      }
+    } else {
+      for (const item of meta.items) {
+        const source = item.sources.find((candidate) => candidate.bot === bot.id || resolveBotId(candidate.author) === bot.id);
+        if (source === undefined) continue;
+        const threadEl = document.getElementById(source.anchor);
+        const review = threadEl === null ? null : closestAtHome(threadEl, '[id^="pullrequestreview-"]');
+        const at = threadEl === null ? NaN : Date.parse(createdAtOf(threadEl));
+        const owner = review !== null && sourceFacts.get(review.id)?.summary === true ? review.id : (botSummaryFor(bot.id, at)?.anchor ?? null);
+        // With no summary at all every thread of the bot's is the line's way in.
+        if (anchor === null ? computed === null : owner === anchor) threads.push({ anchor: source.anchor, done: !isOpenStatus(item.status) });
+      }
+    }
+    const facts = anchor === null ? undefined : sourceFacts.get(anchor);
+    const line: BotLine = {
+      bot,
+      anchor,
+      author: (keep ? remembered?.login : undefined) ?? facts?.login ?? bot.login,
+      avatarSrc: (keep ? remembered?.avatarSrc : undefined) ?? facts?.avatarSrc ?? (anchor === null ? null : avatarSrcFor(anchor)),
+      preview: (keep ? remembered?.preview : undefined) ?? facts?.preview ?? '',
+      time: anchor === null ? '' : timeTextOf(element, anchor),
+      threads,
+    };
+    if (!keep && anchor !== null && computed !== null && !Number.isNaN(computedAt)) botLineMemo.set(bot.id, { anchor, at: computedAt, login: line.author, avatarSrc: line.avatarSrc, preview: line.preview, threads });
+    else if (!keep && anchor === null) botLineMemo.delete(bot.id);
+    return line;
+  });
+}
+
+/** Each bot's line as last read whole (see `buildBotLines`); the words a loaned summary cannot give. */
+const botLineMemo = new Map<string, { readonly anchor: string; readonly at: number; readonly login: string; readonly avatarSrc: string | null; readonly preview: string; readonly threads: readonly ReviewThreadRef[] }>();
 
 /**
  * The comment a thread was posted from: the body of the review that holds
@@ -2343,7 +2412,7 @@ function subjectOf(): MarkdownSubject | null {
 /** What an open row shows in its slot: the item's thread(s), a fold's nodes, or the merge box's checks. */
 function quickViewFor(key: string, meta: GeldPrMeta, groups: readonly FoldGroup[]): readonly HTMLElement[] {
   // The Reviews and Previews rows render their own lists; the panel itself stands in for "something to show".
-  if (key === REVIEWS_KEY || key === PREVIEWS_KEY || key === REPORTS_KEY || key.startsWith('batch:')) return [document.documentElement];
+  if (key === REVIEWS_KEY || key === PREVIEWS_KEY || key === REPORTS_KEY || key === BOTS_KEY || key.startsWith('batch:')) return [document.documentElement];
   if (key === CHECKS_KEY) {
     const section = checksSection();
     if (section === null) return [];
@@ -2477,6 +2546,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     resetFragments();
     forgetThreads();
     resetEditTimes();
+    botLineMemo.clear();
     visit.manualDone = new Set();
     visit.rerunPending = new Map();
     checksSectionEl = null;
@@ -2530,6 +2600,13 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   );
   jevNow = phase('jev', () => jevDecisionsFor(settings, topLevel, threads, reapplySoon, unknownPreviews));
   const meta = phase('paths', () => withWholePaths(withManualDone(withJevDone(composed.meta, jevNow.done))));
+  // A review's or run summary's threads as chips under its opened bubble, by file, each leading to its row.
+  const threadLinks = (threads: readonly ReviewThreadRef[]): ChatThreadLink[] =>
+    threads.map((thread) => {
+      const root = threadRootOf(thread.anchor);
+      const item = meta.items.find((candidate) => candidate.sources.some((source) => source.anchor === thread.anchor));
+      return { anchor: thread.anchor, path: root === null ? '' : threadPathOf(root, item, meta), ...(item?.line === undefined ? {} : { line: item.line }), preview: firstSentence(bodies.get(thread.anchor)?.body ?? ''), done: thread.done };
+    });
 
   const viewingAnchor = sourceAnchorFromHash(location.hash);
   if (viewingAnchor !== null && document.getElementById(viewingAnchor) === null && visit.loadMoreTries < MAX_LOAD_MORE) {
@@ -2549,6 +2626,9 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   // both fold out of the page, so nothing below is left to reveal or scroll to.
   const reviews = phase('reviews', crawlReviews);
   entryNodes = new Map(reviews.filter((review) => review.comment !== null).map((review) => [review.anchor, review.comment ?? review.root]));
+  // Each bot's latest run summary, as the Review bots row's lines; their anchors seat there, not in a round.
+  const botLines = phase('bot-lines', () => buildBotLines(meta));
+  botLineAnchors = new Set(botLines.flatMap((line) => (line.anchor === null ? [] : [line.anchor])));
   // The sidebar's Reviewers block: every reviewer's latest verdict from the first paint, while the timeline's
   // reviews are still being fetched from its end (see `timelineIngesting`).
   const sidebar = phase('sidebar', crawlSidebarReviewers);
@@ -2602,7 +2682,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   settleAfterResolve(meta, batches);
   reseatOpenLine(batches);
   // A round's bot comment lines and its preview pills both stand for their comments: neither needs a fold row too.
-  const batchedAnchors = new Set(batches.flatMap((batch) => [...batch.comments.map((entry) => entry.anchor), ...batch.previews.map((entry) => entry.anchor)]));
+  const batchedAnchors = new Set([...batches.flatMap((batch) => [...batch.comments.map((entry) => entry.anchor), ...batch.previews.map((entry) => entry.anchor)]), ...botLineAnchors]);
   // By node, not by looking the anchor up: GitHub repeats an id (a review inside its minimized wrapper), and
   // getElementById would answer with whichever copy comes first in the document.
   const batchedRoots = new Set(crawledDom.comments.filter((entry) => batchedAnchors.has(entry.comment.anchor)).map((entry) => entry.root));
@@ -2663,6 +2743,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     folds: foldRows(groups),
     batches,
     requestable,
+    botLines,
     summaryAnchorFor: (botId) => meta.bots.find((bot) => bot.id === botId)?.sourceId ?? null,
     // A running/loading bot's sourceId is the "Starting"/trigger line — contentless, and the same line for every bot
     // one comment asked for at once, so looking a bot up by it opens the wrong bot. Open this bot's own latest
@@ -2956,6 +3037,19 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
       if (visit.openKey === REVIEWS_KEY) {
         // An index of people's reviews; each line points at the round where its conversation opens.
         renderCommentsList(mounted.slot, model, panelHandlers);
+      } else if (visit.openKey === BOTS_KEY) {
+        // Each bot's latest run summary; the open line's stands under it as a one-bubble chat with Rerun on its
+        // byline and the run's threads linked at its foot, each leading to its row in its round.
+        const view = renderBotsList(mounted.slot, model, panelHandlers);
+        const line = view.openLine;
+        const commentNode = line?.anchor === null || line === null ? null : (entryNodes.get(line.anchor) ?? timelineRootOf(line.anchor));
+        if (view.nested !== null && line !== null && line.anchor !== null && commentNode !== null) {
+          const byline = withRerun(dressByline({ login: line.author, bot: true, avatarSrc: line.avatarSrc, time: line.time }, line.anchor), line.author, line.anchor, meta, settings, reapply, panelHandlers.onOpenAnchor);
+          renderCommentChat(view.nested, commentNode, byline, threadLinks(line.threads), panelHandlers.onOpenAnchor);
+        } else if (visit.openSubKey !== null && (line !== null || !model.botLines.some((entry) => entry.anchor === visit.openSubKey))) {
+          // A comment that left the page, or a summary no longer the bot's latest: nothing to keep open.
+          visit.openSubKey = null;
+        }
       } else if (visit.openKey === REPORTS_KEY) {
         // The reporters' latest reports; the open line's comment stands under it as a one-bubble chat (a check's
         // report has no comment: the list shows its detail itself).
@@ -2986,12 +3080,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
           } else if (view.nested !== null && commentNode !== null) {
             const byline = openEntry === null ? null : withRerun(dressByline({ login: openEntry.author, bot: /\[bot\]$/i.test(openEntry.author), avatarSrc: openEntry.avatarSrc, time: openEntry.time }, openEntry.anchor), openEntry.author, openEntry.anchor, meta, settings, reapply, panelHandlers.onOpenAnchor);
             // The threads the review came with, by file, leading to their rows.
-            const links = (openEntry?.threads ?? []).map((thread) => {
-              const root = threadRootOf(thread.anchor);
-              const item = meta.items.find((candidate) => candidate.sources.some((source) => source.anchor === thread.anchor));
-              return { anchor: thread.anchor, path: root === null ? '' : threadPathOf(root, item, meta), ...(item?.line === undefined ? {} : { line: item.line }), preview: firstSentence(bodies.get(thread.anchor)?.body ?? ''), done: thread.done };
-            });
-            renderCommentChat(view.nested, commentNode, byline, links, panelHandlers.onOpenAnchor);
+            renderCommentChat(view.nested, commentNode, byline, threadLinks(openEntry?.threads ?? []), panelHandlers.onOpenAnchor);
           } else if (view.nested !== null && view.openItem !== null) {
             const item = view.openItem;
             renderChatView(view.nested, threadNodes(item), threadHandlers(item, meta, reapply, panelHandlers.onOpenAnchor));

@@ -1924,6 +1924,35 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
   color: var(--fgColor-attention, var(--color-attention-fg, #bf8700));
 }
 
+/* A bot's line under the Review bots row leads with its verdict's light, the chip's colours. */
+.geld-review__status--verdict[data-health='good'] {
+  color: var(--geld-review-done-fg);
+}
+
+.geld-review__status--verdict[data-health='warn'] {
+  color: var(--geld-review-attention-fg);
+}
+
+.geld-review__status--verdict[data-health='bad'] {
+  color: var(--geld-review-danger-fg);
+}
+
+.geld-review__status--verdict[data-health='pending'] {
+  color: var(--geld-review-muted);
+}
+
+/* The verdict's words beside the bot's name ("4/5 · 1 issue"), before the summary's first line. */
+.geld-review__bot-line-detail {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.geld-review__row--bot-line[data-current='false'] .geld-review__bot-line-detail::after {
+  content: ' · earlier commit';
+}
+
 /*
  * The reviewers on the Reviews row, one group per verdict: the verdict's glyph
  * (the same one their lines wear below), their avatars, "2 approved". The
