@@ -241,10 +241,12 @@ const ATTR_AGENT_RERUN = 'data-geld-agent-rerun';
  * A bot's own "view this run on our site" badge inside its comment (Greptile's
  * "View in Greptile", Devin's "Devin Review", CodeRabbit's "Review in Change
  * Stack" — each a linked image, present only when the bot chose to show it).
- * Found Oct 2026 on public pull requests; Bugbot's "Fix All in Cursor" is an
- * action, not a view, and the other bots post none.
+ * A review posted by a Cursor cloud agent (an automation, by `cursor[bot]`)
+ * ends in "Open in Web", the agent's run on cursor.com. Found Oct 2026 on
+ * public pull requests; Bugbot's "Fix All in Cursor" is an action, not a
+ * view, and the other bots post none.
  */
-const AGENT_VIEW_LINKS = ['a[href^="https://app.greptile.com/"]:not([href*="/api/retrigger"])', 'a[href^="https://app.devin.ai/review/"]', 'a[href^="https://app.coderabbit.ai/"]'];
+const AGENT_VIEW_LINKS = ['a[href^="https://app.greptile.com/"]:not([href*="/api/retrigger"])', 'a[href^="https://app.devin.ai/review/"]', 'a[href^="https://app.coderabbit.ai/"]', 'a[href^="https://cursor.com/agents/"]'];
 const ATTR_AGENT_VIEW = 'data-geld-agent-view';
 
 export function hideAgentRerunControls(body: HTMLElement): void {
