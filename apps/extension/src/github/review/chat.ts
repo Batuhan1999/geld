@@ -823,14 +823,19 @@ function installMenuFlip(): void {
   window.addEventListener('resize', replaceOpen, { passive: true });
 }
 
+/** On a minimized comment's <details> the chat opened itself: not the reader's doing, so not an interaction GitHub's refresh must wait for. */
+export const ATTR_OPENED_BY_GELD = 'data-geld-opened';
+
 /** A minimized comment opens here (the row is the reader's choice to look); GitHub's state comes back with the node. */
 export function openMinimized(root: HTMLElement): void {
   // Only the minimizing <details> itself: a comment's ⋯ menu and reaction picker are <details> too.
   for (const details of root.querySelectorAll<HTMLDetailsElement>('.minimized-comment > details, details.minimized-comment')) {
     if (details.open) continue;
     details.open = true;
+    details.setAttribute(ATTR_OPENED_BY_GELD, '');
     onRestore(() => {
       details.open = false;
+      details.removeAttribute(ATTR_OPENED_BY_GELD);
     });
   }
 }
