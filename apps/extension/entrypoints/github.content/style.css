@@ -3933,16 +3933,20 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 
 /* A lone message is the whole view (its byline and picture are the chat's own, outside the message), so the ring
  * goes round the box it sits in — the slot, the white area under its row — not round the chat's content, which
- * stops short of the slot's padding and ran the ring across the picture. */
-.geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]:is(:target, :has(:target))),
-.geld-review__slot:has(.geld-review__chat :target:is([id^='issuecomment-'], [id^='pullrequestreview-'], [id^='discussion_r']) [data-geld-message][data-geld-lone]) {
+ * stops short of the slot's padding and ran the ring across the picture. Only the slot whose own body holds the
+ * chat: a chat nested in a round sits in a slot inside the round's slot, and `:has()` matched the round's slot
+ * too, which drew a second ring from the round's header down — its right edge hidden behind the open line's
+ * header (an open row is `position: relative; z-index: 3`, above the slot's outline) and so read as a ring that
+ * stopped short. */
+.geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]:is(:target, :has(:target))),
+.geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat :target:is([id^='issuecomment-'], [id^='pullrequestreview-'], [id^='discussion_r']) [data-geld-message][data-geld-lone]) {
   outline: 1px solid var(--fgColor-accent, var(--color-accent-fg));
   outline-offset: -1px;
 }
 
 /* When the row the URL points at wears its 2px ring around row and slot together, that ring says it: no second one. */
-.geld-review__row[data-viewing] + .geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]),
-.geld-review__row[data-viewing] + .geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]) .geld-review__chat {
+.geld-review__row[data-viewing] + .geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]),
+.geld-review__row[data-viewing] + .geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]) .geld-review__chat {
   outline: none;
 }
 
