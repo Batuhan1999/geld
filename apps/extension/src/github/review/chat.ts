@@ -873,7 +873,11 @@ function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] 
   // body are only siblings inside `.review-comment-contents`, so that is the message; the stylesheet drops the
   // summary and the card's picture and ⋯ holder left outside it.
   const compact = [...root.querySelectorAll<HTMLElement>(COMPACT_CARD)];
-  const all = [...candidates, ...compact].filter((node) => node.closest('form') === null && node.querySelector(BODY_SELECTOR) !== null && !node.matches(MINIMIZED_WRAPPER) && (node.matches(COMPACT_CARD) || node.querySelector(COMPACT_CARD) === null));
+  // The wrapper of a minimized comment is told by the <details> it holds: a review's own card carries the
+  // `minimized-comment` class too (with `timeline-comment` and `js-comment`, the header a direct child), and read
+  // as a wrapper it had no message at all — the card showed raw in its chat, header and all (server#7851).
+  const minimizedWrapper = (node: HTMLElement): boolean => node.matches(MINIMIZED_WRAPPER) && (node instanceof HTMLDetailsElement || node.querySelector(':scope > details') !== null);
+  const all = [...candidates, ...compact].filter((node) => node.closest('form') === null && node.querySelector(BODY_SELECTOR) !== null && !minimizedWrapper(node) && (node.matches(COMPACT_CARD) || node.querySelector(COMPACT_CARD) === null));
   return all.filter((node) => !all.some((other) => other !== node && other.contains(node)));
 }
 
