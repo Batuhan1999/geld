@@ -93,15 +93,22 @@ function unique(values: readonly string[]): string[] {
  * request), so a finished check could otherwise spin until the Action's next
  * run; but a page that opened after the finish, with no start to judge by,
  * may be reading the summary of the run before, and leaves the Action's word.
+ * What became of a run's findings is the page's too, once the whole timeline
+ * is read (`complete`): threads are resolved on the page after the Action
+ * wrote, so a payload `findings` whose threads the page counts fewer of —
+ * or none open — takes the page's count ("resolved", the green check), the
+ * payload's score and severity staying with the run. Not on a partly read
+ * timeline, where a thread not yet loaded would read as resolved.
  * Every other verdict stands as the Action wrote it.
  */
-export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], crawled: readonly GeldPrMeta['bots'][number][]): GeldPrMeta['bots'] {
+export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], crawled: readonly GeldPrMeta['bots'][number][], complete = false): GeldPrMeta['bots'] {
   const live = new Map(crawled.map((bot) => [bot.id, bot]));
   const out = payload.map((bot) => {
     const now = live.get(bot.id);
     if (now === undefined) return bot;
     if (now.verdict === 'running' && bot.verdict !== 'running') return now;
     if (bot.verdict === 'running' && now.runJudged === true && now.verdict !== 'running' && now.verdict !== 'loading') return now;
+    if (complete && bot.verdict === 'findings' && now.verdict === 'findings' && now.count !== undefined && (bot.count === undefined || now.count < bot.count)) return { ...bot, count: now.count };
     return bot;
   });
   const known = new Set(payload.map((bot) => bot.id));
@@ -109,7 +116,7 @@ export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], cra
 }
 
 /** Combine a (possibly stale or truncated) payload with what the timeline currently shows. */
-export function mergeWithCrawler(payload: GeldPrMeta, crawled: GeldPrMeta): GeldPrMeta {
+export function mergeWithCrawler(payload: GeldPrMeta, crawled: GeldPrMeta, complete = false): GeldPrMeta {
   const seen = new Set(payload.items.flatMap((item) => item.sources.map((source) => source.anchor)));
   const extra = crawled.items.filter((item) => item.sources.some((source) => !seen.has(source.anchor)));
   const stillTruncated = payload.truncated === true && extra.length === 0;
@@ -120,7 +127,7 @@ export function mergeWithCrawler(payload: GeldPrMeta, crawled: GeldPrMeta): Geld
       crawled.headSha !== '' && crawled.headSha !== '0000000000000000000000000000000000000000' ? crawled.headSha : payload.headSha,
     producer: payload.producer,
     items: extra.length === 0 ? payload.items : [...payload.items, ...extra],
-    bots: payload.bots.length > 0 ? withLiveRuns(payload.bots, crawled.bots) : crawled.bots,
+    bots: payload.bots.length > 0 ? withLiveRuns(payload.bots, crawled.bots, complete) : crawled.bots,
     reviewers: payload.reviewers.length > 0 ? payload.reviewers : crawled.reviewers,
     fold: {
       comments: unique([...payload.fold.comments, ...crawled.fold.comments]),

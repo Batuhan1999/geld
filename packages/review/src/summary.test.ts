@@ -230,10 +230,18 @@ describe('buildMeta', () => {
     const human = meta.items.find((item) => item.sources.some((source) => source.author === 'bob'));
     expect(human?.title).toMatch(/why drop the cache/i);
     expect(human?.status).toBe('open');
-    expect(meta.bots.some((bot) => bot.id === 'bugbot' && bot.verdict === 'clean')).toBe(true);
+    // Bugbot's check is green, but its thread is open: the thread is the finding, as the page reads it too.
+    expect(meta.bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
     expect(meta.bots.some((bot) => bot.id === 'greptile')).toBe(true);
     expect(meta.reviewers).toEqual([{ login: 'alice', state: 'commented' }]);
     expect(meta.fold.comments).toContain('issuecomment-88');
+    // The thread resolved: nothing outstanding, and the green check says how the run ended.
+    const pr = fixturePr();
+    const resolved = buildMeta({ ...pr, threads: pr.threads.map((thread, index) => (index === 0 ? { ...thread, isResolved: true } : thread)) }, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' });
+    expect(resolved.bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'clean' });
+    // Without a check to say so, resolved findings read "resolved" (findings, none open) rather than clean.
+    const noCheck = buildMeta({ ...pr, checks: [], threads: pr.threads.map((thread, index) => (index === 0 ? { ...thread, isResolved: true } : thread)) }, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' });
+    expect(noCheck.bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0 });
   });
 
   it('carries done-manual from a ticked previous comment', () => {
@@ -275,6 +283,12 @@ describe('buildMeta', () => {
 });
 
 describe('bots + prompts', () => {
+  it('reads a count through one qualifier ("1 potential issue")', () => {
+    expect(parseBotBody('Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', 'bugbot')).toMatchObject({ count: 1, clean: false });
+    expect(parseBotBody('Found 3 new bugs.', 'bugbot')).toMatchObject({ count: 3 });
+    expect(parseBotBody('Bugbot reviewed your changes and found no new issues!', 'bugbot')).toMatchObject({ count: null, clean: true });
+  });
+
   it('parses greptile scores and known logins', () => {
     expect(looksLikeBotLogin('cursor[bot]')).toBe(true);
     expect(parseBotBody('Greptile 4/5. Found 1 issue.', 'greptile')).toEqual({ count: 1, score: 4, clean: false, severity: null });
@@ -451,6 +465,24 @@ describe('bots + prompts', () => {
     // the request, "5/5" edited into the summary after it, nothing new posted).
     const agentRun = [{ author: 'greptile-apps[bot]', body: 'Confidence Score: 5/5\nNo issues found.\nReviews (3)', anchor: 'issuecomment-1', createdAt: at(60), editedAt: at(0.5) }, { author: 'greptile-apps[bot]', body: 'Unused import', anchor: 'discussion_r1', resolved: true, createdAt: at(30) }, byAgent];
     expect(byId(verdictsFrom([], agentRun, 'aaa', [], now), 'greptile')).toMatchObject({ verdict: 'clean', score: 5, sourceId: 'issuecomment-1' });
+  });
+
+  it('weighs the earlier run\u2019s threads again when a request for the bot went unanswered', () => {
+    const now = Date.UTC(2026, 9, 13, 19, 0);
+    const at = (minutesAgo: number): string => new Date(now - minutesAgo * 60_000).toISOString();
+    // mint#12803: Bugbot's review ("found 1 potential issue") and its one thread, resolved since; then "bugbot run"
+    // an hour ago that Bugbot never answered (no check on the repository). The run that stands is the earlier
+    // one, threads and all: resolved, not "1 issue".
+    const comments = [
+      { author: 'cursor[bot]', body: 'Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', anchor: 'pullrequestreview-1', createdAt: at(1300) },
+      { author: 'cursor[bot]', body: 'Remote schema fetch type mismatch', anchor: 'discussion_r1', resolved: true, createdAt: at(1300) },
+      { author: 'brandonmcconnell', body: '@greptileai bugbot run', anchor: 'issuecomment-3', createdAt: at(70) },
+    ];
+    expect(verdictsFrom([], comments, 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    // Still open: the finding stands as before the request.
+    expect(verdictsFrom([], comments.map((c) => ('resolved' in c ? { ...c, resolved: false } : c)), 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
+    // A request a minute old: running, as before.
+    expect(verdictsFrom([], [...comments.slice(0, 2), { ...comments[2], createdAt: at(1) }], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('running');
   });
 
   it('does not keep a bot running on a status line that aged with nothing after it', () => {

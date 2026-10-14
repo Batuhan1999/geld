@@ -7,7 +7,7 @@ import type { AddressedEvidence, GeldPrMeta, ProducerRecord, ReviewItem, ReviewS
 import { parsePreviews, previewDocFromMarkdown } from './previews';
 import { META_VERSION, PAYLOAD_BUDGET, STATUS_RANK, truncateMeta } from './model';
 import { isTriggerComment, looksLikeBotLogin, resolveBotId, verdictsFrom } from './bots';
-import type { RawCheckRun } from './bots';
+import type { BotComment, RawCheckRun } from './bots';
 import type { RawComment } from './cluster';
 import { clusterComments, isBotOnly } from './cluster';
 import { applyAddressedAll } from './addressed';
@@ -239,10 +239,22 @@ export function buildMeta(pr: RawPullRequest, options: BuildOptions): GeldPrMeta
     items = [...items].sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]).slice(0, maxItems);
   }
 
-  const botComments = [
-    ...pr.comments.map((comment) => ({ author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...(comment.editedAt === undefined ? {} : { editedAt: comment.editedAt }) })),
-    ...pr.reviews.map((review) => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...(review.submittedAt === null ? {} : { createdAt: review.submittedAt }) })),
-  ];
+  // Every word a verdict is read from, in timeline order: the comments, the review bodies and the review threads
+  // (a bot's thread is a finding until someone resolves it, see `verdictsFrom`). A review and its threads carry
+  // the same moment; the body goes first, as it stands on the page, so the threads are read as that run's.
+  const botComments: BotComment[] = [
+    ...pr.comments.map((comment): BotComment => ({ author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...(comment.editedAt === undefined ? {} : { editedAt: comment.editedAt }) })),
+    ...pr.reviews.map((review): BotComment => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...(review.submittedAt === null ? {} : { createdAt: review.submittedAt }) })),
+    ...pr.threads.flatMap((thread): BotComment[] => {
+      const first = thread.comments[0];
+      return first === undefined ? [] : [{ author: first.author, body: first.body, anchor: `discussion_r${first.databaseId}`, createdAt: first.createdAt, resolved: thread.isResolved }];
+    }),
+  ].sort((a, b) => {
+    const at = Date.parse(a.createdAt ?? '');
+    const bt = Date.parse(b.createdAt ?? '');
+    if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt;
+    return Number(a.resolved !== undefined) - Number(b.resolved !== undefined);
+  });
   const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now());
   const previews = pr.comments.flatMap((comment) => parsePreviews(previewDocFromMarkdown(comment.author, `issuecomment-${comment.databaseId}`, comment.body, comment.createdAt)));
   const meta: GeldPrMeta = {

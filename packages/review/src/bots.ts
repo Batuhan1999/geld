@@ -199,10 +199,11 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const text = body.replace(/\r\n/g, '\n');
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== undefined ? Number.parseFloat(scoreMatch[1]) : null;
+  // "found 1 potential issue", "2 new bugs": one qualifier between the number and the noun is allowed through.
   const countMatch =
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
-      : /(\d+)\s+(?:issue|finding|bug|problem)s?\b/i.exec(text);
+      : /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text);
   const count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
   // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through.
@@ -670,7 +671,15 @@ export function verdictsFrom(
       continue;
     }
     if (existing.checkName === undefined) {
-      if (!stale) byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, sourceId: anchor });
+      if (!stale) {
+        byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, sourceId: anchor });
+        continue;
+      }
+      // The earlier run stands whole: its threads too, which the request had set aside, so a run whose findings
+      // were all resolved reads "resolved" below, not as its summary's count from before they were (mint#12803: a
+      // "bugbot run" Bugbot never answered left the chip amber over one resolved thread).
+      const prior = runsBeforeAsk.get(id);
+      if (prior !== undefined && !threadRuns.has(id)) threadRuns.set(id, prior);
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? 'running';
