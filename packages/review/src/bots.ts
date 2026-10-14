@@ -428,8 +428,9 @@ export function isStatusLineComment(body: string): boolean {
   // CodeRabbit's "Currently processing new changes in this PR. This may take a few minutes, please wait..." sits in
   // a note above its run configuration, so the comment is long; its first sentence is the status line — behind
   // "[!NOTE]" in the markdown, behind the "Note" heading GitHub renders it as on the page (`blockText` keeps it,
-  // on its own line, no full stop).
-  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? '');
+  // on its own line, no full stop). The whole first sentence must be that line: one that merely begins with the
+  // words ("Currently processing changes this way is slow. Found 2 issues…") is a review, not a status.
+  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
