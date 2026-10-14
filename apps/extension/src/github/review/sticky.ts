@@ -9,6 +9,7 @@
  * its content with `is-stuck`, measured the same way.
  */
 export function stickyHeaderBottomAt(scrollY: number): number {
+  // Either shape of GitHub's class names (`use-sticky-header-module__stickyHeader--x` before Oct 2026, `stickyHeader__x` since).
   const react = document.querySelector<HTMLElement>('[class*="use-sticky-header-module__stickyHeader"], [class*="stickyHeader"][class*="PageHeader"]');
   const sentinel = document.querySelector<HTMLElement>('[class*="stickyHeaderActivationThreshold"]');
   if (react !== null && sentinel !== null) {

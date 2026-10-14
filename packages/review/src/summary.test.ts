@@ -5,7 +5,7 @@ import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parse
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
 import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
-import type { DerivedBotVerdict } from './bots';
+import type { BotComment, DerivedBotVerdict } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
 const PRODUCER = { kind: 'action' as const, version: '0.1.0', ai: false };
@@ -230,10 +230,33 @@ describe('buildMeta', () => {
     const human = meta.items.find((item) => item.sources.some((source) => source.author === 'bob'));
     expect(human?.title).toMatch(/why drop the cache/i);
     expect(human?.status).toBe('open');
-    expect(meta.bots.some((bot) => bot.id === 'bugbot' && bot.verdict === 'clean')).toBe(true);
+    // Bugbot's check is green, but its thread is open: the thread is the finding, as the page reads it too.
+    expect(meta.bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
     expect(meta.bots.some((bot) => bot.id === 'greptile')).toBe(true);
     expect(meta.reviewers).toEqual([{ login: 'alice', state: 'commented' }]);
     expect(meta.fold.comments).toContain('issuecomment-88');
+    // The thread resolved: nothing outstanding — "resolved" (findings, none open), with or without the green check,
+    // since the check passing is not the bot looking again.
+    const pr = fixturePr();
+    const resolvedThreads = pr.threads.map((thread, index) => (index === 0 ? { ...thread, isResolved: true } : thread));
+    expect(buildMeta({ ...pr, threads: resolvedThreads }, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' }).bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0 });
+    expect(buildMeta({ ...pr, checks: [], threads: resolvedThreads }, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' }).bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0 });
+  });
+
+  it('reads a review body before the threads it was pending with, whatever their timestamps', () => {
+    // A bot drafts its inline comments, then submits the review: the thread comments predate the body's submit.
+    // Read in that order the body would set the threads aside; the body goes first, as it stands on the page.
+    const pr: RawPullRequest = {
+      ...fixturePr(),
+      checks: [],
+      reviews: [{ databaseId: 70, author: 'cursor[bot]', state: 'COMMENTED', body: 'Cursor Bugbot has reviewed your changes and found 1 potential issue.', submittedAt: '2026-09-18T10:00:30.000Z', commitOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }],
+      threads: [{ path: 'src/diff.ts', line: 42, isResolved: true, isOutdated: false, comments: [{ databaseId: 71, author: 'cursor[bot]', body: 'Null check missing in parseDiff.', createdAt: '2026-09-18T10:00:00.000Z' }] }],
+      comments: [],
+    };
+    expect(buildMeta(pr, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' }).bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r71' });
+    // Still open: the thread is the finding.
+    const open = { ...pr, threads: pr.threads.map((thread) => ({ ...thread, isResolved: false })) };
+    expect(buildMeta(open, { producer: PRODUCER, generatedAt: '2026-09-18T12:00:00.000Z' }).bots.find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r71' });
   });
 
   it('carries done-manual from a ticked previous comment', () => {
@@ -275,6 +298,32 @@ describe('buildMeta', () => {
 });
 
 describe('bots + prompts', () => {
+  it('reads a count through one qualifier ("1 potential issue")', () => {
+    expect(parseBotBody('Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', 'bugbot')).toMatchObject({ count: 1, clean: false });
+    expect(parseBotBody('Found 3 new bugs.', 'bugbot')).toMatchObject({ count: 3 });
+    expect(parseBotBody('Bugbot reviewed your changes and found no new issues!', 'bugbot')).toMatchObject({ count: null, clean: true });
+  });
+
+  it('reads CodeRabbit\u2019s review words', () => {
+    // geld#36: the summary comment, edited in place from "Currently processing…" to this, is the clean word.
+    expect(parseBotBody('No actionable comments were generated in the recent review. \u{1F389}\n\n<details><summary>Recent review info</summary></details>', 'coderabbit')).toMatchObject({ clean: true });
+    // geld#37: each review body counts its findings the other way round.
+    expect(parseBotBody('**Actionable comments posted: 1**\n---\nPrompt to fix review comments', 'coderabbit')).toMatchObject({ count: 1, clean: false });
+    expect(parseBotBody('**Actionable comments posted: 0**', 'coderabbit')).toMatchObject({ count: 0, clean: true });
+    const now = Date.UTC(2026, 9, 14, 16, 0);
+    const at = (minutesAgo: number): string => new Date(now - minutesAgo * 60_000).toISOString();
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: 'No actionable comments were generated in the recent review. \u{1F389}', anchor: 'issuecomment-1', createdAt: at(60) }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'clean', sourceId: 'issuecomment-1' });
+    // The same comment as first posted, a note over the run configuration: a status line, however long the comment.
+    const processing = '> [!NOTE]\n> Currently processing new changes in this PR. This may take a few minutes, please wait...\n> \n> <details>\n> <summary><strong>Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `4ba79fb3-4c73-48d2-8735-290eee0536a9`\n> </details>\n> <details><summary>Commits</summary>Reviewing files that changed from the base of the PR and between 26a5bac and a9885e3.</details>';
+    expect(isStatusLineComment(processing)).toBe(true);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: processing, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+    // As the page reads it: GitHub renders the alert with a "Note" heading, which the crawl's block text keeps on a
+    // line of its own before the sentence, and the run configuration's lines follow.
+    const rendered = 'Note\nCurrently processing new changes in this PR. This may take a few minutes, please wait...\nRun configuration\nConfiguration used: defaults\nReview profile: CHILL\nPlan: Advanced\nRun ID: 4ba79fb3-4c73-48d2-8735-290eee0536a9\nCommits\nReviewing files that changed from the base of the PR and between 26a5bac and a9885e3.\nFiles selected for processing: 1\napps/extension/entrypoints/github.content/style.css';
+    expect(isStatusLineComment(rendered)).toBe(true);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: rendered, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+  });
+
   it('parses greptile scores and known logins', () => {
     expect(looksLikeBotLogin('cursor[bot]')).toBe(true);
     expect(parseBotBody('Greptile 4/5. Found 1 issue.', 'greptile')).toEqual({ count: 1, score: 4, clean: false, severity: null });
@@ -453,6 +502,38 @@ describe('bots + prompts', () => {
     expect(byId(verdictsFrom([], agentRun, 'aaa', [], now), 'greptile')).toMatchObject({ verdict: 'clean', score: 5, sourceId: 'issuecomment-1' });
   });
 
+  it('weighs the earlier run\u2019s threads again when a request for the bot went unanswered', () => {
+    const now = Date.UTC(2026, 9, 13, 19, 0);
+    const at = (minutesAgo: number): string => new Date(now - minutesAgo * 60_000).toISOString();
+    // mint#12803: Bugbot's review ("found 1 potential issue") and its one thread, resolved since; then "bugbot run"
+    // an hour ago that Bugbot never answered (no check on the repository). The run that stands is the earlier
+    // one, threads and all: resolved, not "1 issue".
+    const summary: BotComment = { author: 'cursor[bot]', body: 'Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', anchor: 'pullrequestreview-1', createdAt: at(1300) };
+    const thread: BotComment = { author: 'cursor[bot]', body: 'Remote schema fetch type mismatch', anchor: 'discussion_r1', resolved: true, createdAt: at(1300) };
+    const request: BotComment = { author: 'brandonmcconnell', body: '@greptileai bugbot run', anchor: 'issuecomment-3', createdAt: at(70) };
+    const bugbot = (comments: readonly BotComment[], when = now): DerivedBotVerdict | undefined => verdictsFrom([], comments, 'aaa', [], when).find((bot) => bot.id === 'bugbot');
+    expect(bugbot([summary, thread, request])).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    // Still open: the finding stands as before the request.
+    expect(bugbot([summary, { ...thread, resolved: false }, request])).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
+    // A request a minute old: running, as before.
+    expect(bugbot([summary, thread, { ...request, createdAt: at(1) }])?.verdict).toBe('running');
+    // A bot that only ever posted threads (no summary, no check): the same, not "failed" for the silence.
+    expect(bugbot([thread, request])).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    expect(bugbot([{ ...thread, resolved: false }, request])).toMatchObject({ verdict: 'findings', count: 1 });
+    // While the timeline is still being read the answer may not have loaded: the earlier threads are not final
+    // yet (a bot with nothing else reads loading, as an unanswered request does on a partial timeline).
+    expect(verdictsFrom([], [thread, request], 'aaa', [], now, { partial: true }).find((bot) => bot.id === 'bugbot')?.verdict).toBe('loading');
+    expect(verdictsFrom([], [summary, { ...thread, resolved: false }, request], 'aaa', [], now, { partial: true }).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'pullrequestreview-1' });
+    // A check speaks for the requested run only when it began after the request. The earlier run's check, green,
+    // does not turn an open finding clean while the request goes unanswered: running, then the earlier run again.
+    const earlierCheck = { name: 'Cursor Bugbot', status: 'completed', conclusion: 'success', sha: 'aaa', startedAt: at(1310), completedAt: at(1290) };
+    expect(verdictsFrom([earlierCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1 });
+    expect(verdictsFrom([earlierCheck], [summary, { ...thread, resolved: false }, { ...request, createdAt: at(1) }], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('running');
+    // One that began after the request is its answer.
+    const answerCheck = { ...earlierCheck, startedAt: at(60), completedAt: at(50) };
+    expect(verdictsFrom([answerCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
+  });
+
   it('does not keep a bot running on a status line that aged with nothing after it', () => {
     const t = (minutesAgo: number): string => new Date(Date.UTC(2026, 8, 25, 5, 40) - minutesAgo * 60_000).toISOString();
     const now = Date.UTC(2026, 8, 25, 5, 40) + 4 * 24 * 3_600_000;
@@ -488,8 +569,10 @@ describe('bots + prompts', () => {
     // ...and the run's score stays with it: the score is what Greptile is read for.
     expect(verdictsFrom([], resolved, 'aaa')[0]).toMatchObject({ verdict: 'findings', count: 0, score: 4, sourceId: 'discussion_r2' });
     expect(verdictsFrom([], open, 'aaa')[0]?.score).toBe(4);
-    // With a check to go by, the check says how that run ended.
-    expect(verdictsFrom([{ name: 'Greptile', status: 'completed', conclusion: 'success', sha: 'aaa' }], resolved, 'aaa')[0]?.verdict).toBe('clean');
+    // A check that passed does not make resolved findings a run that found nothing: still "resolved", score kept.
+    expect(verdictsFrom([{ name: 'Greptile', status: 'completed', conclusion: 'success', sha: 'aaa' }], resolved, 'aaa')[0]).toMatchObject({ verdict: 'findings', count: 0, score: 4 });
+    // One that failed, or is still running, says so.
+    expect(verdictsFrom([{ name: 'Greptile', status: 'completed', conclusion: 'failure', sha: 'aaa' }], resolved, 'aaa')[0]?.verdict).toBe('failed');
     // A clean summary after resolved threads is the latest word; threads after a summary belong to that summary's run.
     const later = [...resolved, { author: 'greptile-apps[bot]', body: 'No findings outside the diff remain.', anchor: 'issuecomment-9' }];
     expect(verdictsFrom([], later, 'aaa')[0]).toMatchObject({ verdict: 'clean', sourceId: 'issuecomment-9' });
