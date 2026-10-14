@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { messagesIn } from './chat';
+import { hideAgentRerunControls, messagesIn, takeAgentViewLink } from './chat';
 
 /**
  * Two shapes carry the `minimized-comment` class. A review's own body card
@@ -77,5 +77,49 @@ describe('messagesIn', () => {
     details.classList.add('minimized-comment', 'js-comment');
     wrapper.replaceWith(details);
     expect(messagesIn(group, false)).toEqual([group.querySelector('.review-comment-contents')]);
+  });
+});
+
+describe('takeAgentViewLink', () => {
+  const GREPTILE = `<div><h2><a href="https://app.greptile.com/api/retrigger?id=1"><picture><img alt="Retrigger" src="r.svg"></picture></a><a href="https://app.greptile.com/org/github/o/r/-/pull/9"><picture><img alt="View in Greptile" src="v.svg"></picture></a>Confidence Score: 5/5</h2><p>Safe.</p></div>`;
+  const GREPTILE_PARAGRAPH = `<div><p><a href="https://app.greptile.com/api/retrigger?id=1"><picture><img alt="Retrigger" src="r.svg"></picture></a><a href="https://app.greptile.com/org/github/o/r/-/pull/9"><picture><img alt="View in Greptile" src="v.svg"></picture></a><br clear="all"></p><p>Safe.</p></div>`;
+  const DEVIN = `<div><h2>Devin Review: No Issues Found</h2><p><a href="https://app.devin.ai/review/o/r/pull/9" target="_blank"><picture><img src="d.svg" alt="Devin Review"></picture></a></p></div>`;
+  const CODERABBIT = `<div><p><a href="https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x"><img src="c.svg" alt="Review in Change Stack →"></a></p><p>Actionable comments posted: 0</p></div>`;
+
+  it("takes Greptile's view badge and leaves the heading it shares with words", () => {
+    const body = parse(GREPTILE);
+    expect(takeAgentViewLink(body)).toEqual({ href: 'https://app.greptile.com/org/github/o/r/-/pull/9', label: 'View in Greptile' });
+    expect(body.querySelector('a[href*="/pull/9"]')?.hasAttribute('data-geld-agent-view')).toBe(true);
+    expect(body.querySelector('h2')?.hasAttribute('data-geld-agent-rerun')).toBe(false);
+    // Taken once: the second look finds the same link, already marked.
+    expect(takeAgentViewLink(body)?.label).toBe('View in Greptile');
+  });
+
+  it('hides the paragraph both Greptile badges share once both are taken', () => {
+    const body = parse(GREPTILE_PARAGRAPH);
+    hideAgentRerunControls(body);
+    expect(body.querySelector('p')?.hasAttribute('data-geld-agent-rerun')).toBe(false);
+    takeAgentViewLink(body);
+    expect(body.querySelector('p')?.hasAttribute('data-geld-agent-rerun')).toBe(true);
+    expect(body.querySelectorAll('p')[1]?.hasAttribute('data-geld-agent-rerun')).toBe(false);
+  });
+
+  it("reads Devin's and CodeRabbit's badges, arrow dropped, and none where there is none", () => {
+    const devin = parse(DEVIN);
+    expect(takeAgentViewLink(devin)).toEqual({ href: 'https://app.devin.ai/review/o/r/pull/9', label: 'Devin Review' });
+    expect(devin.querySelector('p')?.hasAttribute('data-geld-agent-rerun')).toBe(true);
+    expect(takeAgentViewLink(parse(CODERABBIT))).toEqual({ href: 'https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x', label: 'Review in Change Stack' });
+    expect(takeAgentViewLink(parse('<div><p>Nothing to see.</p></div>'))).toBeNull();
+    // A text link to the bot's site before its badge is not the badge: the badge is the linked image on the run's path.
+    const textFirst = parse('<div><p>Change your <a href="https://app.coderabbit.ai/settings/repository">review settings</a>.</p><p><a href="https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x"><img src="c.svg" alt="Review in Change Stack →"></a></p></div>');
+    expect(takeAgentViewLink(textFirst)?.href).toBe('https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x');
+    expect(textFirst.querySelector('a[href*="settings"]')?.hasAttribute('data-geld-agent-view')).toBe(false);
+    // A linked image to the site that is not a run (a logo linking home) is left alone too.
+    expect(takeAgentViewLink(parse('<div><p><a href="https://app.greptile.com/"><img alt="Greptile" src="g.svg"></a> reviewed this.</p></div>'))).toBeNull();
+    // A Cursor cloud agent's review ends in "Open in Web" beside "View Automation": the run is the view, and the
+    // other button stays, so the block holding both keeps showing.
+    const cursor = parse('<div><div><a href="https://cursor.com/agents/bc-1?cursor_ref=pr_footer" rel="nofollow"><picture><img alt="Open in Web" src="o.png"></picture></a> <a href="https://cursor.com/automations/au-1"><picture><img alt="View Automation" src="a.png"></picture></a></div></div>');
+    expect(takeAgentViewLink(cursor)).toEqual({ href: 'https://cursor.com/agents/bc-1?cursor_ref=pr_footer', label: 'Open in Web' });
+    expect(cursor.querySelector('div > div')?.hasAttribute('data-geld-agent-rerun')).toBe(false);
   });
 });
