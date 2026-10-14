@@ -500,6 +500,18 @@ describe('bots + prompts', () => {
     // A bot that only ever posted threads (no summary, no check): the same, not "failed" for the silence.
     expect(bugbot([thread, request])).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
     expect(bugbot([{ ...thread, resolved: false }, request])).toMatchObject({ verdict: 'findings', count: 1 });
+    // While the timeline is still being read the answer may not have loaded: the earlier threads are not final
+    // yet (a bot with nothing else reads loading, as an unanswered request does on a partial timeline).
+    expect(verdictsFrom([], [thread, request], 'aaa', [], now, { partial: true }).find((bot) => bot.id === 'bugbot')?.verdict).toBe('loading');
+    expect(verdictsFrom([], [summary, { ...thread, resolved: false }, request], 'aaa', [], now, { partial: true }).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'pullrequestreview-1' });
+    // A check speaks for the requested run only when it began after the request. The earlier run's check, green,
+    // does not turn an open finding clean while the request goes unanswered: running, then the earlier run again.
+    const earlierCheck = { name: 'Cursor Bugbot', status: 'completed', conclusion: 'success', sha: 'aaa', startedAt: at(1310), completedAt: at(1290) };
+    expect(verdictsFrom([earlierCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1 });
+    expect(verdictsFrom([earlierCheck], [summary, { ...thread, resolved: false }, { ...request, createdAt: at(1) }], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('running');
+    // One that began after the request is its answer.
+    const answerCheck = { ...earlierCheck, startedAt: at(60), completedAt: at(50) };
+    expect(verdictsFrom([answerCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
   });
 
   it('does not keep a bot running on a status line that aged with nothing after it', () => {

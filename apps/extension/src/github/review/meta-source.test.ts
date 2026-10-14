@@ -136,6 +136,13 @@ describe('withLiveRuns', () => {
     // A payload with no count (the Action read the summary alone) takes the page's count too; the score stays.
     const unscored: GeldPrMeta['bots'][number] = { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, score: 4 };
     expect(withLiveRuns([unscored], live, true)).toEqual([{ ...unscored, count: 1 }]);
+    // The page's count must be the same run's: hanging on a thread (as above), or on the summary the Action read.
+    const summarised: GeldPrMeta['bots'][number] = { ...greptile, sourceId: 'issuecomment-1' };
+    expect(withLiveRuns([summarised], [{ ...summarised, count: 1 }], true)).toEqual([{ ...summarised, count: 1 }]);
+    // A page verdict on a different summary is a newer report on the same head (the bot ran again): taken whole,
+    // not as a new count under the earlier run's score and severity.
+    const rerun: GeldPrMeta['bots'][number] = { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, count: 1, score: 5, sourceId: 'issuecomment-9' };
+    expect(withLiveRuns([{ ...summarised, severity: 'high' }], [rerun], true)).toEqual([rerun]);
     // Not while the timeline is still being read (a thread not loaded yet would count as resolved), and never
     // upward: a count the page has more of than the Action is a run the Action has not written yet.
     expect(withLiveRuns(payload, live)).toEqual(payload);
