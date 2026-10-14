@@ -1752,11 +1752,17 @@ function buildBotLines(meta: GeldPrMeta): readonly BotLine[] {
       }
     } else {
       // Every thread source of the bot's, not an item's first: an item can merge several of one bot's threads
-      // (cluster.ts), from one run or from different runs, and each is read for its own summary.
+      // (cluster.ts), from one run or from different runs, and each is read for its own summary. A bot's reply in
+      // a thread is a source too, with the same kind: one chip per thread container, under its first comment.
+      const containers = new Set<Element>();
       for (const item of meta.items) {
         for (const source of item.sources) {
           if (source.kind !== 'thread' || (source.bot !== bot.id && resolveBotId(source.author) !== bot.id)) continue;
-          if (threads.some((ref) => ref.anchor === source.anchor)) continue;
+          const container = threadRootOf(source.anchor);
+          if (container !== null) {
+            if (containers.has(container)) continue;
+            containers.add(container);
+          } else if (threads.some((ref) => ref.anchor === source.anchor)) continue;
           const threadEl = document.getElementById(source.anchor);
           const review = threadEl === null ? null : closestAtHome(threadEl, '[id^="pullrequestreview-"]');
           const at = threadEl === null ? NaN : Date.parse(createdAtOf(threadEl));
