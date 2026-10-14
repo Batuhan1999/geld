@@ -4863,9 +4863,26 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   transform: scaleX(-1);
 }
 
-/* A bot's own re-trigger badge inside its comment: Geld's Rerun stands for it (chat.ts, `AGENT_RERUN_CONTROLS`). */
-.geld-review__chat [data-geld-agent-rerun] {
+/* A bot's own badges inside its comment: Geld's Rerun stands for its re-trigger badge (chat.ts,
+   `AGENT_RERUN_CONTROLS`) and View for its "View in <bot>" badge (`AGENT_VIEW_LINKS`). */
+.geld-review__chat [data-geld-agent-rerun],
+.geld-review__chat [data-geld-agent-view] {
   display: none !important;
+}
+
+/* Two controls on one byline (View, then Rerun / See latest): the first wears the gap to the name, the next stand
+   6px apart. View is a link in the button's clothes. */
+.geld-review__rerun-wrap ~ .geld-review__rerun-wrap {
+  margin-left: 6px;
+}
+
+a.geld-review__rerun {
+  text-decoration: none;
+}
+
+a.geld-review__rerun:hover {
+  text-decoration: none;
+  color: var(--fgColor-default, var(--color-fg-default));
 }
 
 .geld-review__dialog-text {
