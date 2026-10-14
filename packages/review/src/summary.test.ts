@@ -326,7 +326,9 @@ describe('bots + prompts', () => {
     // status line for the long-comment rule to take it.
     const review = `Currently processing changes in this PR file by file was slow, so here is the review in one go. ${'Found 2 issues, both in the parser. '.repeat(8)}`;
     expect(isStatusLineComment(review)).toBe(false);
-    expect(isStatusLineComment(review.replace(/^Currently processing changes in this PR[^.]*\./, 'Currently processing changes in this PR.'))).toBe(true);
+    // The line whole, then only the run's metadata (as the note reads without the alert wrapper): a status line.
+    const metadata = 'Run configuration. Configuration used: defaults. Review profile: CHILL. Plan: Advanced. Run ID: 59ebdae6-47fb-4c41-81ea-3fd58656c897. Commits: reviewing files that changed between ee33672 and aed3212. Files selected for processing: 3.';
+    expect(isStatusLineComment(`Currently processing changes in this PR. ${metadata}`)).toBe(true);
   });
 
   it('parses greptile scores and known logins', () => {
