@@ -19484,7 +19484,7 @@ function isStatusLineComment(body) {
   const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
   if (text === "") return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== "");
-  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? "");
+  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? "");
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
   const stated = /^(?:review|analysis|scan)\s+(?:in progress|started|queued|has started)\b/i;
   const promise2 = /\b(?:will|I'?ll)\s+(?:post|comment|report|reply|start|begin|review)\b.*\b(?:when|once|shortly|soon)\b/i;
