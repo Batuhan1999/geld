@@ -317,6 +317,11 @@ describe('bots + prompts', () => {
     const processing = '> [!NOTE]\n> Currently processing new changes in this PR. This may take a few minutes, please wait...\n> \n> <details>\n> <summary><strong>Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `4ba79fb3-4c73-48d2-8735-290eee0536a9`\n> </details>\n> <details><summary>Commits</summary>Reviewing files that changed from the base of the PR and between 26a5bac and a9885e3.</details>';
     expect(isStatusLineComment(processing)).toBe(true);
     expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: processing, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+    // As the page reads it: GitHub renders the alert with a "Note" heading, which the crawl's block text keeps on a
+    // line of its own before the sentence, and the run configuration's lines follow.
+    const rendered = 'Note\nCurrently processing new changes in this PR. This may take a few minutes, please wait...\nRun configuration\nConfiguration used: defaults\nReview profile: CHILL\nPlan: Advanced\nRun ID: 4ba79fb3-4c73-48d2-8735-290eee0536a9\nCommits\nReviewing files that changed from the base of the PR and between 26a5bac and a9885e3.\nFiles selected for processing: 1\napps/extension/entrypoints/github.content/style.css';
+    expect(isStatusLineComment(rendered)).toBe(true);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: rendered, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
   });
 
   it('parses greptile scores and known logins', () => {
