@@ -200,15 +200,18 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== undefined ? Number.parseFloat(scoreMatch[1]) : null;
   // "found 1 potential issue", "2 new bugs": one qualifier between the number and the noun is allowed through.
+  // CodeRabbit counts the other way round: "Actionable comments posted: 1" on each review.
   const countMatch =
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
-      : /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text);
+      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text));
   const count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
   // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
-  // vary by bot and by run, so a few are allowed through.
+  // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
+  // generated in the recent review".
   const clean =
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
+    /\bno actionable comments\b/i.test(text) ||
     /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
     (count === 0 && score === null);
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
@@ -420,9 +423,14 @@ export function isStatusLineComment(body: string): boolean {
     .replace(/[`*_>~#]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (text === '' || text.length > 240) return false;
+  if (text === '') return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== '');
-  if (sentences.length > 2) return false;
+  // CodeRabbit's "Currently processing new changes in this PR. This may take a few minutes, please wait..." sits in
+  // a note above its run configuration, so the comment is long; its first sentence is the status line — behind
+  // "[!NOTE]" in the markdown, behind the "Note" heading GitHub renders it as on the page (`blockText` keeps it,
+  // on its own line, no full stop). The whole first sentence must be that line: one that merely begins with the
+  // words ("Currently processing changes this way is slow. Found 2 issues…") is a review, not a status.
+  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;

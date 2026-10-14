@@ -304,6 +304,33 @@ describe('bots + prompts', () => {
     expect(parseBotBody('Bugbot reviewed your changes and found no new issues!', 'bugbot')).toMatchObject({ count: null, clean: true });
   });
 
+  it('reads CodeRabbit\u2019s review words', () => {
+    // geld#36: the summary comment, edited in place from "Currently processing…" to this, is the clean word.
+    expect(parseBotBody('No actionable comments were generated in the recent review. \u{1F389}\n\n<details><summary>Recent review info</summary></details>', 'coderabbit')).toMatchObject({ clean: true });
+    // geld#37: each review body counts its findings the other way round.
+    expect(parseBotBody('**Actionable comments posted: 1**\n---\nPrompt to fix review comments', 'coderabbit')).toMatchObject({ count: 1, clean: false });
+    expect(parseBotBody('**Actionable comments posted: 0**', 'coderabbit')).toMatchObject({ count: 0, clean: true });
+    const now = Date.UTC(2026, 9, 14, 16, 0);
+    const at = (minutesAgo: number): string => new Date(now - minutesAgo * 60_000).toISOString();
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: 'No actionable comments were generated in the recent review. \u{1F389}', anchor: 'issuecomment-1', createdAt: at(60) }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'clean', sourceId: 'issuecomment-1' });
+    // The same comment as first posted, a note over the run configuration: a status line, however long the comment.
+    const processing = '> [!NOTE]\n> Currently processing new changes in this PR. This may take a few minutes, please wait...\n> \n> <details>\n> <summary><strong>Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `4ba79fb3-4c73-48d2-8735-290eee0536a9`\n> </details>\n> <details><summary>Commits</summary>Reviewing files that changed from the base of the PR and between 26a5bac and a9885e3.</details>';
+    expect(isStatusLineComment(processing)).toBe(true);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: processing, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+    // As the page reads it: GitHub renders the alert with a "Note" heading, which the crawl's block text keeps on a
+    // line of its own before the sentence, and the run configuration's lines follow.
+    const rendered = 'Note\nCurrently processing new changes in this PR. This may take a few minutes, please wait...\nRun configuration\nConfiguration used: defaults\nReview profile: CHILL\nPlan: Advanced\nRun ID: 4ba79fb3-4c73-48d2-8735-290eee0536a9\nCommits\nReviewing files that changed from the base of the PR and between 26a5bac and a9885e3.\nFiles selected for processing: 1\napps/extension/entrypoints/github.content/style.css';
+    expect(isStatusLineComment(rendered)).toBe(true);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: rendered, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+    // A long review whose first sentence only begins with those words is a review: the whole sentence must be the
+    // status line for the long-comment rule to take it.
+    const review = `Currently processing changes in this PR file by file was slow, so here is the review in one go. ${'Found 2 issues, both in the parser. '.repeat(8)}`;
+    expect(isStatusLineComment(review)).toBe(false);
+    // The line whole, then only the run's metadata (as the note reads without the alert wrapper): a status line.
+    const metadata = 'Run configuration. Configuration used: defaults. Review profile: CHILL. Plan: Advanced. Run ID: 59ebdae6-47fb-4c41-81ea-3fd58656c897. Commits: reviewing files that changed between ee33672 and aed3212. Files selected for processing: 3.';
+    expect(isStatusLineComment(`Currently processing changes in this PR. ${metadata}`)).toBe(true);
+  });
+
   it('parses greptile scores and known logins', () => {
     expect(looksLikeBotLogin('cursor[bot]')).toBe(true);
     expect(parseBotBody('Greptile 4/5. Found 1 issue.', 'greptile')).toEqual({ count: 1, score: 4, clean: false, severity: null });
