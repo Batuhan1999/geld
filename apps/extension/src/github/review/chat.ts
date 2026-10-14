@@ -833,7 +833,16 @@ export function openMinimized(root: HTMLElement): void {
     if (details.open) continue;
     details.open = true;
     details.setAttribute(ATTR_OPENED_BY_GELD, '');
+    // The reader closing it takes it over: from then on its state is theirs, and an open one counts as an
+    // interaction again. (The `toggle` our own open fires has `open` true and passes.)
+    const taken = (): void => {
+      if (details.open) return;
+      details.removeAttribute(ATTR_OPENED_BY_GELD);
+      details.removeEventListener('toggle', taken);
+    };
+    details.addEventListener('toggle', taken);
     onRestore(() => {
+      details.removeEventListener('toggle', taken);
       details.open = false;
       details.removeAttribute(ATTR_OPENED_BY_GELD);
     });
