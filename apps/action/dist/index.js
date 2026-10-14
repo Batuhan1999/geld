@@ -19505,7 +19505,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const verdict = running ? "running" : failed ? "failed" : "clean";
     checkVerdict.set(bot.id, verdict);
     const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
-    if (!Number.isNaN(started)) checkStartedAt.set(bot.id, started);
+    if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
+    else checkStartedAt.set(bot.id, started);
     const record3 = {
       id: bot.id,
       login,
