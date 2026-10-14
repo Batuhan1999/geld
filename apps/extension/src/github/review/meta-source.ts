@@ -97,8 +97,13 @@ function unique(values: readonly string[]): string[] {
  * is read (`complete`): threads are resolved on the page after the Action
  * wrote, so a payload `findings` whose threads the page counts fewer of —
  * or none open — takes the page's count ("resolved", the green check), the
- * payload's score and severity staying with the run. Not on a partly read
- * timeline, where a thread not yet loaded would read as resolved.
+ * payload's score and severity staying with the run. That is a count of the
+ * same run's threads (the page's verdict then hangs on a thread, or on the
+ * same summary the Action read); a page verdict hanging on a *different*
+ * summary is a newer report of the bot's on the same head, which the Action
+ * has not written yet, and is taken whole — its own score and severity, not
+ * the earlier run's under a new count. Not on a partly read timeline, where
+ * a thread not yet loaded would read as resolved.
  * Every other verdict stands as the Action wrote it.
  */
 export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], crawled: readonly GeldPrMeta['bots'][number][], complete = false): GeldPrMeta['bots'] {
@@ -108,7 +113,10 @@ export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], cra
     if (now === undefined) return bot;
     if (now.verdict === 'running' && bot.verdict !== 'running') return now;
     if (bot.verdict === 'running' && now.runJudged === true && now.verdict !== 'running' && now.verdict !== 'loading') return now;
-    if (complete && bot.verdict === 'findings' && now.verdict === 'findings' && now.count !== undefined && (bot.count === undefined || now.count < bot.count)) return { ...bot, count: now.count };
+    if (complete && bot.verdict === 'findings' && now.verdict === 'findings' && now.count !== undefined && (bot.count === undefined || now.count < bot.count)) {
+      const onThread = now.sourceId?.startsWith('discussion_r') === true;
+      return onThread || now.sourceId === bot.sourceId ? { ...bot, count: now.count } : now;
+    }
     return bot;
   });
   const known = new Set(payload.map((bot) => bot.id));
