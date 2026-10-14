@@ -120,7 +120,9 @@ export function isTeleported(node: Element): boolean {
  * loaned node.
  */
 function tell(parent: Node, type: 'geld:portal-lend' | 'geld:portal-return'): void {
-  parent.dispatchEvent(new Event(type, { bubbles: true }));
+  // An event on a detached parent (a home GitHub refreshed away, see `dropOrphanedLoans`) reaches no listener;
+  // the portal's is on the document, and on a return it also lets go of every parent that has left the page.
+  (parent.isConnected ? parent : document).dispatchEvent(new Event(type, { bubbles: true }));
 }
 
 /* ---- moving ---------------------------------------------------------------- */
