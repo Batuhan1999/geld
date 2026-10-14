@@ -1741,9 +1741,9 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 }
 
 /* GitHub's expanded checks draw their own top rule; the slot's is enough. */
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableContent'],
-.geld-review__slot[data-kind='checks'] [class*='ExpandedChecks-module__checksContainer'],
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableWrapper'] {
+.geld-review__slot[data-kind='checks'] [class*='expandableContent'],
+.geld-review__slot[data-kind='checks'] [class*='checksContainer'],
+.geld-review__slot[data-kind='checks'] [class*='expandableWrapper'] {
   border-top: 0 !important;
 }
 
@@ -3158,7 +3158,8 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 .geld-review__qv [data-testid='comment-viewer-outer-box'],
 .geld-review__qv [class*='IssueCommentViewer'],
 .geld-review__qv [class*='CommentBox-module'],
-.geld-review__qv [class*='Comment-module__container'] {
+.geld-review__qv [class*='Comment-module__container'],
+.geld-review__qv [data-testid='comment-container'] {
   margin: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -3501,11 +3502,15 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   padding: 0;
 }
 
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxSectionHeader-module__wrapper'] {
+/* The section's own header ("Some checks were not successful", the ring, the chevron) repeats the row: hidden when
+ * the whole section is in the slot. GitHub's class names changed shape in Oct 2026 (`MergeBoxSectionHeader-module__
+ * wrapper--x` became `wrapper__x wrapperCanExpand__y`), so the header is known by its Collapse/Expand button. */
+.geld-review__slot[data-kind='checks'] [class*='MergeBoxSectionHeader-module__wrapper'],
+.geld-review__slot[data-kind='checks'] section[aria-label='Checks'] > :has(> button[aria-label$='checks' i]) {
   display: none !important;
 }
 
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableWrapper'] {
+.geld-review__slot[data-kind='checks'] [class*='expandableWrapper'] {
   visibility: visible !important;
 }
 
@@ -3517,7 +3522,7 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 /* Grouped by status, each group's heading is a 28px button; with no grouping the "12 checks" heading is a bare 20px
  * line, so it sat 4px higher and the list 8px higher than in the other mode, and switching modes shifted the list.
  * The bare heading takes the button's box, its text centred, so both modes start at the same lines. */
-.geld-review__slot[data-kind='checks'] [class*='ExpandedChecks-module__totalChecksCountText'] {
+.geld-review__slot[data-kind='checks'] [class*='totalChecksCountText'] {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -3703,7 +3708,8 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 .geld-review__chat-body .react-issue-comment,
 .geld-review__chat-body [data-testid='comment-viewer-outer-box'],
 .geld-review__chat-body [class*='IssueCommentViewer'],
-.geld-review__chat-body [class*='Comment-module__container'] {
+.geld-review__chat-body [class*='Comment-module__container'],
+.geld-review__chat-body [data-testid='comment-container'] {
   margin: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;

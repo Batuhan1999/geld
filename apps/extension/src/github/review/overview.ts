@@ -2350,9 +2350,11 @@ function quickViewFor(key: string, meta: GeldPrMeta, groups: readonly FoldGroup[
   if (key === CHECKS_KEY) {
     const section = checksSection();
     if (section === null) return [];
-    // The React merge box: GitHub renders the check list only once expanded, and its
-    // section header repeats what the row says, so the expandable content is shown alone.
-    const content = section.querySelector<HTMLElement>('[class*="MergeBoxExpandable-module__expandableWrapper"]');
+    // The React merge box: GitHub renders the check list only once expanded, and its section header repeats what
+    // the row says, so the expandable content is shown alone. Matched on the bare name: GitHub's CSS-module classes
+    // went from `MergeBoxExpandable-module__expandableWrapper--x` to `expandableWrapper__x` in Oct 2026, and with
+    // the old hook the whole section came into the slot, header and all.
+    const content = section.querySelector<HTMLElement>('[class*="expandableWrapper"]');
     return [content ?? section];
   }
   if (key.startsWith('fold:')) return groups.find((group) => foldKey(group.key) === key)?.nodes ?? [];
