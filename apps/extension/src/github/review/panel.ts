@@ -167,6 +167,26 @@ export interface ReviewThreadRef {
   readonly done: boolean;
 }
 
+/**
+ * One line under the Review bots row: a bot's latest word on the pull
+ * request — its newest run summary (a comment or a review body), with the
+ * threads that run opened. A bot that wrote no summary (threads only, or
+ * nothing yet) has a line with no comment to open; with threads it points at
+ * the first.
+ */
+export interface BotLine {
+  readonly bot: BotVerdictRecord;
+  /** The summary's anchor; null when the bot has posted no summary on the page. */
+  readonly anchor: string | null;
+  readonly author: string;
+  readonly avatarSrc: string | null;
+  /** The summary's first line; '' without one. */
+  readonly preview: string;
+  readonly time: string;
+  /** The threads of the run the summary reports on, each a row in its round. */
+  readonly threads: readonly ReviewThreadRef[];
+}
+
 /** A check row's avatar: GitHub rounds a user's or an OAuth App's, squares a GitHub App's or an organisation's. */
 export interface CheckAvatar {
   readonly src: string;
@@ -312,6 +332,8 @@ export interface PanelModel {
   readonly folds: readonly FoldRow[];
   readonly batches: readonly Batch[];
   readonly requestable: readonly InstalledBot[];
+  /** The Review bots row's list: each bot's latest run summary, in the chips' order. */
+  readonly botLines: readonly BotLine[];
   /** Bot run summaries (verdict comments) an open item can link to, by bot id. */
   readonly summaryAnchorFor: (botId: string) => string | null;
   /** What this bot's chip opens: its own source, or — while it runs (its source is then the shared trigger line) — its latest real summary, else nothing. */
@@ -450,6 +472,8 @@ export const REVIEWS_KEY = 'reviews';
 export const PREVIEWS_KEY = 'previews';
 /** Row key for the Reports row; its slot lists the reporter bots' latest reports, each opening in place. */
 export const REPORTS_KEY = 'reports';
+/** Row key for the Review bots row; its slot lists each bot's latest run summary, each opening in place. */
+export const BOTS_KEY = 'bots';
 /** The Reports row's label, long and short. */
 export const REPORTS_LABEL: readonly [string, string] = ['Reports', 'Reports'];
 const NUDGE_CLASS = 'geld-review-nudge';
@@ -1680,15 +1704,6 @@ function alarmTone(health: Health): Tone | null {
   return toneOf(health) === 'bad' ? 'bad' : null;
 }
 
-function statusRow(label: [string, string], lead: Node, content: Node[], right: Node[], extra: Readonly<Record<string, string>> = {}, fit = false): HTMLElement {
-  return createElement('li', { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--status`, ...extra }, [
-    createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--muted`, 'aria-hidden': 'true' }, [lead]),
-    rowLabel(label[0], label[1]),
-    createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(fit ? { [ATTR_FIT]: '' } : {}) }, content),
-    createElement('span', { class: `${PANEL_CLASS}__right` }, right),
-  ]);
-}
-
 /**
  * The status rows, in the order a reader triages a pull request: who has
  * reviewed (people), what the review bots said, what the reporters found,
@@ -1763,18 +1778,31 @@ function statusRows(model: PanelModel, handlers: PanelHandlers): HTMLElement | n
   }
   if (model.meta.bots.length > 0 || model.requestable.length > 0) {
     const worst: Health = model.meta.bots.map(botHealth).reduce<Health>((acc, health) => (acc === 'bad' || health === 'bad' ? 'bad' : acc === 'warn' || health === 'warn' ? 'warn' : acc === 'pending' || health === 'pending' ? 'pending' : 'good'), 'good');
+    const health: Health = model.meta.bots.length === 0 ? 'pending' : worst;
     const chips = model.meta.bots.map((bot) => botChip(bot, model, handlers));
     const menu = requestMenu(model, handlers);
-    rows.append(
-      statusRow(
-        ['Review bots', 'Bots'],
-        icon(HEALTH_ICON[model.meta.bots.length === 0 ? 'pending' : worst]),
-        chips.length === 0 ? [createElement('span', { class: `${PANEL_CLASS}__status-text` }, [model.ingesting ? 'Reading reviews…' : 'No reviews yet']), ...(model.ingesting ? [ingestingMark('Still reading the timeline: bot reviews are on their way')] : [])] : chips,
-        menu === null ? [] : [menu],
-        { 'data-health': model.meta.bots.length === 0 ? 'pending' : worst, ...toneAttr(alarmTone(model.meta.bots.length === 0 ? 'pending' : worst)) },
-        chips.length > 0,
-      ),
-    );
+    const content: Node[] = chips.length === 0 ? [createElement('span', { class: `${PANEL_CLASS}__status-text` }, [model.ingesting ? 'Reading reviews…' : 'No reviews yet']), ...(model.ingesting ? [ingestingMark('Still reading the timeline: bot reviews are on their way')] : [])] : chips;
+    // The row opens, as Reviews and Reports do, to a line per bot — its latest run summary, which opens in place
+    // with the run's threads linked under it. With no bot line to show there is nothing to open.
+    const opens = model.botLines.length > 0;
+    const open = opens && model.openKey === BOTS_KEY;
+    const toggle = (): void => handlers.onToggle(BOTS_KEY);
+    const main = opens
+      ? createElement('button', { type: 'button', class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--status`, 'aria-expanded': String(open), [ATTR_FOCUS]: `main:${BOTS_KEY}`, 'aria-label': plural(model.botLines.length, 'review bot') }, [createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(chips.length > 0 ? { [ATTR_FIT]: '' } : {}) }, content)])
+      : createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(chips.length > 0 ? { [ATTR_FIT]: '' } : {}) }, content);
+    if (opens) mainClickToggles(main, toggle);
+    const right: Node[] = menu === null ? [] : [menu];
+    if (opens) right.push(chevron(open, toggle));
+    const row = createElement('li', { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--status`, 'data-health': health, ...toneAttr(alarmTone(health)) }, [
+      createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--muted`, 'aria-hidden': 'true' }, [icon(HEALTH_ICON[health])]),
+      rowLabel('Review bots', 'Bots'),
+      main,
+      createElement('span', { class: `${PANEL_CLASS}__right` }, right),
+    ]);
+    if (open) row.setAttribute('data-open', '');
+    if (opens) rowClickToggles(row, toggle);
+    rows.append(row);
+    if (open) rows.append(slotRow(BOTS_KEY, null, 'list'));
   }
   if (model.reports.latest.length > 0) rows.append(...reportsRow(model, handlers));
   if (model.checks !== null) {
@@ -2056,6 +2084,85 @@ function reportAvatar(entry: Report, model: PanelModel): CheckAvatar | null {
 }
 
 /**
+ * One bot as a line under the Review bots row: the verdict's light, the
+ * bot's mark, its name and detail ("4/5 · 1 issue"), the summary's first
+ * line and how many threads the run opened, the time, the comment's own ⋯
+ * and a chevron; open (`openSubKey` is its anchor) the summary stands under
+ * it as a one-bubble chat with the run's threads linked at its foot. A bot
+ * without a summary but with threads points at its first thread, as a
+ * wordless review does; one with neither is a line with nothing to open.
+ */
+function botLine(line: BotLine, model: PanelModel, handlers: PanelHandlers, reserveChevron: boolean): { readonly row: HTMLElement; readonly open: boolean } {
+  const { bot } = line;
+  const health = botHealth(bot);
+  const current = isCurrent(bot, model.meta.headSha);
+  const label = `${verdictLabel(bot)}${current ? '' : ' (earlier commit)'}`;
+  const lead = createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--verdict`, 'data-health': health, role: 'img', 'aria-label': label, title: label }, [icon(bot.verdict === 'failed' ? ICON_ALERT : HEALTH_ICON[health])]);
+  const iconSrc = model.botIconFor(bot.id) ?? line.avatarSrc;
+  const picture = avatarStack(iconSrc === null ? [] : [{ src: iconSrc, bot: true, login: bot.login }], botTitle(bot.id, bot.login), true);
+  const opens = line.anchor !== null;
+  const firstThread = line.threads[0]?.anchor ?? null;
+  const goes = !opens && firstThread !== null;
+  const open = opens && model.openSubKey === line.anchor;
+  const act = (): void => {
+    if (opens && line.anchor !== null) handlers.onToggleSub(line.anchor);
+    else if (firstThread !== null) handlers.onOpenAnchor(firstThread);
+  };
+  const mainChildren: Node[] = [
+    createElement('span', { class: `${PANEL_CLASS}__name` }, [botTitle(bot.id, bot.login)]),
+    createElement('span', { class: `${PANEL_CLASS}__bot-detail ${PANEL_CLASS}__bot-line-detail` }, [botDetail(bot)]),
+  ];
+  if (line.preview !== '') mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(line.preview)));
+  if (line.threads.length > 0) mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__pill` }, [plural(line.threads.length, 'thread')]));
+  const focusKey = goes ? `main:ptr:bot:${bot.id}` : `main:sub:${line.anchor ?? `bot:${bot.id}`}`;
+  const main =
+    opens || goes
+      ? createElement('button', { type: 'button', class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--entry`, ...(opens ? { 'aria-expanded': String(open) } : {}), [ATTR_FOCUS]: focusKey }, mainChildren)
+      : createElement('span', { class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--entry ${PANEL_CLASS}__main--static`, [ATTR_FOCUS]: focusKey }, mainChildren);
+  if (opens || goes) mainClickToggles(main, act);
+  const right = createElement('span', { class: `${PANEL_CLASS}__right` });
+  if (line.time !== '' && line.anchor !== null) right.append(createElement('span', { class: `${PANEL_CLASS}__time`, [ATTR_TIME_FOR]: line.anchor }, [line.time]));
+  const spacer = (): HTMLElement => createElement('span', { class: `${PANEL_CLASS}__spacer`, 'aria-hidden': 'true' });
+  if (opens && line.anchor !== null) right.append(controlSlot(line.anchor, true), chevron(open, act));
+  else if (goes) {
+    if (reserveChevron) right.append(spacer());
+    right.append(pointerChevron(act));
+  } else if (reserveChevron) right.append(spacer(), spacer());
+  const row = createElement(
+    'li',
+    { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--sub ${PANEL_CLASS}__row--bot-line`, 'data-geld-sub': line.anchor ?? `bot:${bot.id}`, 'data-health': health, ...(current ? {} : { 'data-current': 'false' }), ...(goes ? { 'data-pointer': '' } : {}) },
+    [lead, picture, main, right],
+  );
+  if (open) row.setAttribute('data-open', '');
+  if (line.anchor !== null && model.viewingAnchor === line.anchor) row.setAttribute('data-viewing', '');
+  if (opens || goes) rowClickToggles(row, act);
+  return { row, open };
+}
+
+/**
+ * The Review bots row's list: one line per bot, in the chips' order. The
+ * open line's summary renders in the returned slot (`openComment` names it;
+ * `openLine` is its line, for the threads to link).
+ */
+export function renderBotsList(slot: HTMLElement, model: PanelModel, handlers: PanelHandlers): { readonly nested: HTMLElement | null; readonly openLine: BotLine | null } {
+  const list = createElement('ul', { class: `${PANEL_CLASS}__rows ${PANEL_CLASS}__rows--sub`, role: 'list' });
+  let nested: HTMLElement | null = null;
+  let openLine: BotLine | null = null;
+  const reserve = model.botLines.some((line) => line.anchor !== null);
+  for (const line of model.botLines) {
+    const { row, open } = botLine(line, model, handlers, reserve);
+    list.append(row);
+    if (!open) continue;
+    const sub = nestedSlot();
+    list.append(sub.item);
+    nested = sub.body;
+    openLine = line;
+  }
+  slot.replaceChildren(list);
+  return { nested, openLine };
+}
+
+/**
  * The Reports row's list: one line per latest report. An open check report
  * shows its detail here; an open comment report's comment renders in the
  * returned slot (`openComment` names it; null when the open line is a check's).
@@ -2295,6 +2402,7 @@ function signatureOf(model: PanelModel): string {
     openPreviews: [...model.openPreviews].sort(),
     reports: model.reports.latest.map((entry) => `${entry.anchor}${entry.state}${entry.headline}${entry.project ?? ''}${(entry.short ?? []).map((part) => part.text).join('|')}`),
     requestable: model.requestable.map((bot) => `${bot.id}:${bot.presence}:${model.botIconFor(bot.id) ?? ''}`),
+    botLines: model.botLines.map((line) => `${line.bot.id}:${line.anchor ?? ''}:${line.preview}:${line.time}:${line.avatarSrc ?? ''}:${line.threads.map((thread) => `${thread.anchor}${thread.done ? 'd' : 'o'}`).join('|')}`),
     checks: model.checks,
     requiredFailing: model.requiredFailing,
     previews: [...model.previews.latest, ...model.previews.archived].map((entry) => `${entry.anchor}:${entry.host}:${entry.project}:${entry.status}:${entry.url ?? ''}:${model.avatarForAnchor(entry.anchor) ?? ''}`),
