@@ -246,7 +246,7 @@ const ATTR_AGENT_RERUN = 'data-geld-agent-rerun';
  * public pull requests; Bugbot's "Fix All in Cursor" is an action, not a
  * view, and the other bots post none.
  */
-const AGENT_VIEW_LINKS = ['a[href^="https://app.greptile.com/"]:not([href*="/api/retrigger"])', 'a[href^="https://app.devin.ai/review/"]', 'a[href^="https://app.coderabbit.ai/"]', 'a[href^="https://cursor.com/agents/"]'];
+const AGENT_VIEW_LINKS = ['a[href^="https://app.greptile.com/"][href*="/pull/"]:not([href*="/api/retrigger"])', 'a[href^="https://app.devin.ai/review/"]', 'a[href^="https://app.coderabbit.ai/change-stack/"]', 'a[href^="https://cursor.com/agents/"]'];
 const ATTR_AGENT_VIEW = 'data-geld-agent-view';
 
 export function hideAgentRerunControls(body: HTMLElement): void {
@@ -275,7 +275,9 @@ interface AgentViewLink {
 
 /** The bot's view badge in its comment, hidden there and handed back so the byline can wear it as View. Exported for its test. */
 export function takeAgentViewLink(body: HTMLElement): AgentViewLink | null {
-  const link = body.querySelector<HTMLAnchorElement>(AGENT_VIEW_LINKS.join(', '));
+  // The badge is a linked image on the run's own path; a text link to the same site earlier in the comment (a
+  // settings or support link) is neither, and stays where it is.
+  const link = [...body.querySelectorAll<HTMLAnchorElement>(AGENT_VIEW_LINKS.join(', '))].find((candidate) => candidate.querySelector('img') !== null) ?? null;
   if (link === null) return null;
   hideAgentBadge(link, ATTR_AGENT_VIEW);
   const words = (link.querySelector('img')?.getAttribute('alt') ?? link.textContent ?? '').replace(/\s*(?:\u2192|->)\s*$/, '').replace(/\s+/g, ' ').trim();
