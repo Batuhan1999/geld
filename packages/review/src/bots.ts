@@ -426,8 +426,10 @@ export function isStatusLineComment(body: string): boolean {
   if (text === '') return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== '');
   // CodeRabbit's "Currently processing new changes in this PR. This may take a few minutes, please wait..." sits in
-  // a note above its run configuration, so the comment is long; its first sentence is the status line.
-  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? '');
+  // a note above its run configuration, so the comment is long; its first sentence is the status line — behind
+  // "[!NOTE]" in the markdown, behind the "Note" heading GitHub renders it as on the page (`blockText` keeps it,
+  // on its own line, no full stop).
+  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
@@ -504,7 +506,8 @@ export const RERUN_EDIT_GAP_MS = 5 * 60 * 1000;
  * A review thread the bot opened is a finding whatever its wording, and it
  * stays one only until someone resolves it: a run whose threads are all
  * resolved has nothing outstanding, so it reads `findings` with `count: 0`
- * ("resolved"), or as its check ended when it has one. Threads posted before
+ * ("resolved") — a check that failed or still runs says so instead, one that
+ * passed does not make it a run that found nothing. Threads posted before
  * the bot's next summary comment belong to the run that summary reports on,
  * and a summary rewritten `RERUN_EDIT_GAP_MS` after a run's last thread
  * reports a later run — the bot's latest word, with all threads resolved.
@@ -670,21 +673,25 @@ export function verdictsFrom(
     // Announced long ago, nothing since, no check to say how it went: the run never reported. What the bot said
     // before that stands (from that earlier run); a bot that never said anything else did not review this.
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
+    // A request that aged unanswered, with no check to say how the run went: the earlier run stands whole, its
+    // threads included — the request had set them aside — so a run whose findings were all resolved reads
+    // "resolved" below, not as its summary's count from before they were, and a bot that only ever posted threads
+    // keeps them rather than reading as failed (mint#12803: a "bugbot run" Bugbot never answered left the chip
+    // amber over one resolved thread).
+    if (stale && existing?.checkName === undefined) {
+      const prior = runsBeforeAsk.get(id);
+      if (prior !== undefined && !threadRuns.has(id)) {
+        threadRuns.set(id, prior);
+        continue;
+      }
+    }
     if (existing === undefined) {
       // With the timeline still loading, an old request and silence is not yet a verdict on the bot.
       byId.set(id, { id, login, verdict: stale ? (options.partial === true ? 'loading' : 'failed') : 'running', reviewedSha: headSha, sourceId: anchor });
       continue;
     }
     if (existing.checkName === undefined) {
-      if (!stale) {
-        byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, sourceId: anchor });
-        continue;
-      }
-      // The earlier run stands whole: its threads too, which the request had set aside, so a run whose findings
-      // were all resolved reads "resolved" below, not as its summary's count from before they were (mint#12803: a
-      // "bugbot run" Bugbot never answered left the chip amber over one resolved thread).
-      const prior = runsBeforeAsk.get(id);
-      if (prior !== undefined && !threadRuns.has(id)) threadRuns.set(id, prior);
+      if (!stale) byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, sourceId: anchor });
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? 'running';
@@ -711,9 +718,12 @@ export function verdictsFrom(
     // one the verdict was read from.
     const edited = existing?.sourceId === undefined ? undefined : editedAtOf.get(existing.sourceId);
     if (existing?.sourceId !== undefined && (existing.verdict === 'clean' || existing.verdict === 'findings') && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
+    // A check that failed or is still running says so; one that passed does not turn resolved findings into a run
+    // that found nothing — the bot has not looked again — so they read "resolved" (findings, none open), which
+    // the request menu still offers a rerun for.
     const fromCheck = checkName === undefined ? null : checkVerdict.get(id) ?? null;
-    if (fromCheck !== null) {
-      byId.set(id, { id, login: run.login, verdict: fromCheck, ...(fromCheck === 'clean' ? scored : {}), reviewedSha, ...named, sourceId: run.lastAnchor });
+    if (fromCheck !== null && fromCheck !== 'clean') {
+      byId.set(id, { id, login: run.login, verdict: fromCheck, reviewedSha, ...named, sourceId: run.lastAnchor });
       continue;
     }
     byId.set(id, { id, login: run.login, verdict: 'findings', count: 0, ...scored, reviewedSha, ...named, sourceId: run.lastAnchor });

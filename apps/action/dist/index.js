@@ -19484,7 +19484,7 @@ function isStatusLineComment(body) {
   const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
   if (text === "") return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== "");
-  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? "");
+  if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes\b/i.test(sentences[0] ?? "");
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
   const stated = /^(?:review|analysis|scan)\s+(?:in progress|started|queued|has started)\b/i;
   const promise2 = /\b(?:will|I'?ll)\s+(?:post|comment|report|reply|start|begin|review)\b.*\b(?:when|once|shortly|soon)\b/i;
@@ -19600,17 +19600,19 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const edited = lastEditBy.get(id);
     if (existing !== void 0 && at !== null && edited !== void 0 && edited > at) continue;
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
+    if (stale && existing?.checkName === void 0) {
+      const prior = runsBeforeAsk.get(id);
+      if (prior !== void 0 && !threadRuns.has(id)) {
+        threadRuns.set(id, prior);
+        continue;
+      }
+    }
     if (existing === void 0) {
       byId.set(id, { id, login, verdict: stale ? options.partial === true ? "loading" : "failed" : "running", reviewedSha: headSha, sourceId: anchor2 });
       continue;
     }
     if (existing.checkName === void 0) {
-      if (!stale) {
-        byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, sourceId: anchor2 });
-        continue;
-      }
-      const prior = runsBeforeAsk.get(id);
-      if (prior !== void 0 && !threadRuns.has(id)) threadRuns.set(id, prior);
+      if (!stale) byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, sourceId: anchor2 });
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? "running";
@@ -19630,8 +19632,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const edited = existing?.sourceId === void 0 ? void 0 : editedAtOf.get(existing.sourceId);
     if (existing?.sourceId !== void 0 && (existing.verdict === "clean" || existing.verdict === "findings") && edited !== void 0 && run2.lastAt !== null && edited > run2.lastAt + RERUN_EDIT_GAP_MS) continue;
     const fromCheck = checkName === void 0 ? null : checkVerdict.get(id) ?? null;
-    if (fromCheck !== null) {
-      byId.set(id, { id, login: run2.login, verdict: fromCheck, ...fromCheck === "clean" ? scored : {}, reviewedSha, ...named, sourceId: run2.lastAnchor });
+    if (fromCheck !== null && fromCheck !== "clean") {
+      byId.set(id, { id, login: run2.login, verdict: fromCheck, reviewedSha, ...named, sourceId: run2.lastAnchor });
       continue;
     }
     byId.set(id, { id, login: run2.login, verdict: "findings", count: 0, ...scored, reviewedSha, ...named, sourceId: run2.lastAnchor });
@@ -20935,19 +20937,24 @@ function buildMeta(pr, options) {
   if (maxItems !== void 0 && items.length > maxItems) {
     items = [...items].sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]).slice(0, maxItems);
   }
-  const botComments = [
-    ...pr.comments.map((comment) => ({ author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...comment.editedAt === void 0 ? {} : { editedAt: comment.editedAt } })),
-    ...pr.reviews.map((review) => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...review.submittedAt === null ? {} : { createdAt: review.submittedAt } })),
+  const submits = pr.reviews.filter((review) => review.submittedAt !== null).map((review) => ({ author: review.author.toLowerCase(), at: Date.parse(review.submittedAt ?? "") })).filter((review) => !Number.isNaN(review.at)).sort((a, b) => a.at - b.at);
+  const momentOf = (author, createdAt) => {
+    const created = Date.parse(createdAt);
+    const review = submits.find((entry2) => entry2.author === author.toLowerCase() && entry2.at >= created);
+    return review === void 0 ? created : review.at;
+  };
+  const ordered = [
+    ...pr.comments.map((comment) => ({ comment: { author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...comment.editedAt === void 0 ? {} : { editedAt: comment.editedAt } }, at: Date.parse(comment.createdAt), rank: 0 })),
+    ...pr.reviews.map((review) => ({ comment: { author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...review.submittedAt === null ? {} : { createdAt: review.submittedAt } }, at: Date.parse(review.submittedAt ?? ""), rank: 0 })),
     ...pr.threads.flatMap((thread) => {
       const first = thread.comments[0];
-      return first === void 0 ? [] : [{ author: first.author, body: first.body, anchor: `discussion_r${first.databaseId}`, createdAt: first.createdAt, resolved: thread.isResolved }];
+      return first === void 0 ? [] : [{ comment: { author: first.author, body: first.body, anchor: `discussion_r${first.databaseId}`, createdAt: first.createdAt, resolved: thread.isResolved }, at: momentOf(first.author, first.createdAt), rank: 1 }];
     })
-  ].sort((a, b) => {
-    const at = Date.parse(a.createdAt ?? "");
-    const bt = Date.parse(b.createdAt ?? "");
-    if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt;
-    return Number(a.resolved !== void 0) - Number(b.resolved !== void 0);
-  });
+  ];
+  const botComments = ordered.sort((a, b) => {
+    if (!Number.isNaN(a.at) && !Number.isNaN(b.at) && a.at !== b.at) return a.at - b.at;
+    return a.rank - b.rank;
+  }).map((entry2) => entry2.comment);
   const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now());
   const previews = pr.comments.flatMap((comment) => parsePreviews(previewDocFromMarkdown(comment.author, `issuecomment-${comment.databaseId}`, comment.body, comment.createdAt)));
   const meta3 = {
