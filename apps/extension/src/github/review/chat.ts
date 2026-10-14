@@ -25,15 +25,11 @@ import { inlineText } from './inline-text';
 import { armViaHovercard } from './via';
 import type { ViaBot } from './via';
 import type { RevisionView } from './edit-times';
-import { absoluteTimeText, relativeFineText, relativeTimeElement } from './time';
+import { absoluteTimeText, relativeTimeElement } from './time';
 import { stickyHeaderBottomAt } from './sticky';
 
 /** On a message: `meta` (author line), `bubble` (the body), `edit` (GitHub's edit form), `reactions`. */
 export const ATTR_PART = 'data-geld-part';
-/** On the edited clock: the ISO moment of the edit; with `ATTR_POSTED_AT`, what its words are built from (`rewordEditedMarks`). */
-const ATTR_EDITED_AT = 'data-geld-edited-at';
-/** On the edited clock: the ISO moment the comment was first posted, when known. */
-const ATTR_POSTED_AT = 'data-geld-posted-at';
 const ATTR_MESSAGE = 'data-geld-message';
 const ATTR_MINE = 'data-geld-mine';
 /** Where a message stands in a run of one author's messages: `only`, `first`, `mid`, `last`. */
@@ -311,8 +307,10 @@ let editedIds = 0;
  * A comment edited after it was posted: a clock beside the byline's time.
  * The byline says the edit's time, since the bubble is the comment as it
  * reads now; the clock's words say when it was first posted ("Originally
- * posted 2 hours ago · Oct 8, 2026, 5:08 PM"), or, when the page has not
- * said that, when it was edited. The words come up in GitHub's own tooltip
+ * posted Oct 8, 2026, 5:08 PM"), or, when the page has not said that, when
+ * it was edited. The moment is absolute only: a relative age would need
+ * re-wording while the chat stays open, and with the date beside it the
+ * tooltip ran to two lines. The words come up in GitHub's own tooltip
  * (`tool-tip`, instant and styled like the page's; where the page does not
  * define it they are the title) and are read aloud as the mark's label.
  */
@@ -320,8 +318,7 @@ function editedMark(editedAt: string, postedAt: string | null): HTMLElement {
   editedIds += 1;
   const id = `geld-edited-${editedIds}`;
   const words = editedWords(editedAt, postedAt);
-  // Both moments stay on the element so the time refresh can re-word "N minutes ago" while the chat is left open.
-  const mark = createElement('span', { id, class: 'geld-review__edited', role: 'img', 'aria-label': words, [ATTR_EDITED_AT]: editedAt, ...(postedAt === null ? {} : { [ATTR_POSTED_AT]: postedAt }) }, [icon(ICON_HISTORY)]);
+  const mark = createElement('span', { id, class: 'geld-review__edited', role: 'img', 'aria-label': words }, [icon(ICON_HISTORY)]);
   // The content script's world has no `customElements` to ask (Chrome leaves it null there); a page that defines
   // `tool-tip` has rendered some of its own by now (the header's), so their presence stands for the definition.
   if (document.querySelector('tool-tip') === null) {
@@ -334,28 +331,10 @@ function editedMark(editedAt: string, postedAt: string | null): HTMLElement {
   return createElement('span', { class: 'geld-review__edited-wrap' }, [mark, tip]);
 }
 
+/** "Originally posted Oct 8, 2026, 5:08 PM"; "Edited Oct 8, 2026, 5:08 PM" when the posting time is not known. */
 function editedWords(editedAt: string, postedAt: string | null): string {
-  const at = postedAt ?? editedAt;
-  const absolute = absoluteTimeText(at);
-  return `${postedAt === null ? 'Edited' : 'Originally posted'} ${relativeFineText(at)}${absolute === '' ? '' : ` · ${absolute}`}`;
-}
-
-/**
- * Re-word every edited clock's "N minutes ago" (its tooltip and label) for
- * the time refresh: a one-off label no live element upgrades, so a chat
- * left open would otherwise keep saying the old age.
- */
-export function rewordEditedMarks(): void {
-  for (const mark of document.querySelectorAll<HTMLElement>(`[${ATTR_EDITED_AT}]`)) {
-    const editedAt = mark.getAttribute(ATTR_EDITED_AT);
-    if (editedAt === null || editedAt === '') continue;
-    const words = editedWords(editedAt, mark.getAttribute(ATTR_POSTED_AT));
-    if (mark.getAttribute('aria-label') === words) continue;
-    mark.setAttribute('aria-label', words);
-    if (mark.hasAttribute('title')) mark.setAttribute('title', words);
-    const tip = mark.id === '' ? null : mark.parentElement?.querySelector(`tool-tip[for="${CSS.escape(mark.id)}"]`);
-    if (tip !== null && tip !== undefined) tip.textContent = words;
-  }
+  const absolute = absoluteTimeText(postedAt ?? editedAt);
+  return `${postedAt === null ? 'Edited' : 'Originally posted'}${absolute === '' ? '' : ` ${absolute}`}`;
 }
 
 /**

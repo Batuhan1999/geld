@@ -47,7 +47,7 @@ import type { Avatar, CheckAvatar, FoldRow, GroupId, PanelHandlers, PanelModel }
 import type { RepoBotsHint } from './panel-model';
 import { NO_REPO_BOTS, requestableBots } from './panel-model';
 import { outgoingMentions, renderMentionsView, renderQuickView, timeCommitRows } from './quick-view';
-import { chatNeedsRedress, redressComposer, renderChatView, renderCommentChat, rewordEditedMarks, sourceFocusKey, threadAnchorOf } from './chat';
+import { chatNeedsRedress, redressComposer, renderChatView, renderCommentChat, sourceFocusKey, threadAnchorOf } from './chat';
 import type { ChatByline, ChatRerun } from './chat';
 import { viaBotOf } from './via';
 import type { ChatHandlers, ChatSource } from './chat';
@@ -2024,9 +2024,6 @@ export function refreshReviewTimes(): number {
     cell.textContent = text;
     changed += 1;
   }
-  // The edited clock's "Originally posted N minutes ago" is a one-off label no live element upgrades; re-worded here
-  // so a chat left open does not keep saying the old age (the exact timestamp in it does not change).
-  rewordEditedMarks();
   return changed;
 }
 
