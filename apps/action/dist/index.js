@@ -19307,7 +19307,7 @@ function parseBotBody(body, botId) {
   const text = body.replace(/\r\n/g, "\n");
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== void 0 ? Number.parseFloat(scoreMatch[1]) : null;
-  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /(\d+)\s+(?:issue|finding|bug|problem)s?\b/i.exec(text);
+  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text);
   const count = countMatch?.[1] !== void 0 ? Number.parseInt(countMatch[1], 10) : null;
   const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || count === 0 && score === null;
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
@@ -19491,6 +19491,7 @@ function isStatusLineComment(body) {
   return underWay.test(text) || stated.test(text) || promise2.test(text);
 }
 var STATUS_LINE_STALE_MS = 45 * 60 * 1e3;
+var RERUN_EDIT_GAP_MS = 5 * 60 * 1e3;
 function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.now(), options = {}) {
   const byId = /* @__PURE__ */ new Map();
   const checkVerdict = /* @__PURE__ */ new Map();
@@ -19515,6 +19516,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const threadRuns = /* @__PURE__ */ new Map();
   const runsBeforeAsk = /* @__PURE__ */ new Map();
   const lastEditBy = /* @__PURE__ */ new Map();
+  const editedAtOf = /* @__PURE__ */ new Map();
   const lastWordBy = /* @__PURE__ */ new Map();
   const reported = (id, comment) => {
     for (const at of [comment.createdAt, comment.editedAt]) {
@@ -19526,21 +19528,24 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const id = reviewBotIdFor(comment.author, extraLogins);
     if (id !== null && comment.editedAt !== void 0) {
       const edited = Date.parse(comment.editedAt);
-      if (!Number.isNaN(edited) && edited > (lastEditBy.get(id) ?? Number.NEGATIVE_INFINITY)) lastEditBy.set(id, edited);
+      if (!Number.isNaN(edited)) {
+        editedAtOf.set(comment.anchor, edited);
+        if (edited > (lastEditBy.get(id) ?? Number.NEGATIVE_INFINITY)) lastEditBy.set(id, edited);
+      }
     }
-    if (id === null) {
-      if (comment.resolved === void 0 && isTriggerComment(comment.body, extraLogins)) {
-        const at = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
-        for (const asked of botsTriggeredBy(comment.body, extraLogins)) {
-          if (!Number.isNaN(at) && now - at > ACK_GRACE_MS && botById(asked.id)?.acknowledges === "reaction" && !reactedBy(comment, asked.id)) continue;
-          const prior = threadRuns.get(asked.id);
-          if (prior !== void 0) runsBeforeAsk.set(asked.id, prior);
-          threadRuns.delete(asked.id);
-          statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at });
-        }
+    if (comment.resolved === void 0 && isTriggerComment(comment.body, extraLogins)) {
+      const at = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
+      for (const asked of botsTriggeredBy(comment.body, extraLogins)) {
+        if (asked.id === id) continue;
+        if (!Number.isNaN(at) && now - at > ACK_GRACE_MS && botById(asked.id)?.acknowledges === "reaction" && !reactedBy(comment, asked.id)) continue;
+        const prior = threadRuns.get(asked.id);
+        if (prior !== void 0) runsBeforeAsk.set(asked.id, prior);
+        threadRuns.delete(asked.id);
+        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at });
       }
       continue;
     }
+    if (id === null) continue;
     if (comment.resolved !== void 0) {
       reported(id, comment);
       statusOnly.delete(id);
@@ -19548,10 +19553,11 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       const run2 = threadRuns.get(id);
       const open2 = (run2?.open ?? 0) + (comment.resolved ? 0 : 1);
       const openAnchor = run2?.openAnchor ?? (comment.resolved ? null : comment.anchor);
-      threadRuns.set(id, { login: comment.author, open: open2, openAnchor, lastAnchor: comment.anchor });
+      const at = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
+      const lastAt = Number.isNaN(at) ? run2?.lastAt ?? null : Math.max(at, run2?.lastAt ?? Number.NEGATIVE_INFINITY);
+      threadRuns.set(id, { login: comment.author, open: open2, openAnchor, lastAnchor: comment.anchor, lastAt });
       continue;
     }
-    if (isTriggerComment(comment.body, extraLogins)) continue;
     const refusal = refusalReason(comment.body);
     if (refusal !== null) {
       reported(id, comment);
@@ -19599,7 +19605,12 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       continue;
     }
     if (existing.checkName === void 0) {
-      if (!stale) byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, sourceId: anchor2 });
+      if (!stale) {
+        byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, sourceId: anchor2 });
+        continue;
+      }
+      const prior = runsBeforeAsk.get(id);
+      if (prior !== void 0 && !threadRuns.has(id)) threadRuns.set(id, prior);
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? "running";
@@ -19616,6 +19627,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       byId.set(id, { id, login: run2.login, verdict: "findings", count: run2.open, ...scored, ...severity, reviewedSha, ...named, sourceId: run2.openAnchor ?? run2.lastAnchor });
       continue;
     }
+    const edited = existing?.sourceId === void 0 ? void 0 : editedAtOf.get(existing.sourceId);
+    if (existing?.sourceId !== void 0 && (existing.verdict === "clean" || existing.verdict === "findings") && edited !== void 0 && run2.lastAt !== null && edited > run2.lastAt + RERUN_EDIT_GAP_MS) continue;
     const fromCheck = checkName === void 0 ? null : checkVerdict.get(id) ?? null;
     if (fromCheck !== null) {
       byId.set(id, { id, login: run2.login, verdict: fromCheck, ...fromCheck === "clean" ? scored : {}, reviewedSha, ...named, sourceId: run2.lastAnchor });
@@ -20924,8 +20937,17 @@ function buildMeta(pr, options) {
   }
   const botComments = [
     ...pr.comments.map((comment) => ({ author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...comment.editedAt === void 0 ? {} : { editedAt: comment.editedAt } })),
-    ...pr.reviews.map((review) => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...review.submittedAt === null ? {} : { createdAt: review.submittedAt } }))
-  ];
+    ...pr.reviews.map((review) => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...review.submittedAt === null ? {} : { createdAt: review.submittedAt } })),
+    ...pr.threads.flatMap((thread) => {
+      const first = thread.comments[0];
+      return first === void 0 ? [] : [{ author: first.author, body: first.body, anchor: `discussion_r${first.databaseId}`, createdAt: first.createdAt, resolved: thread.isResolved }];
+    })
+  ].sort((a, b) => {
+    const at = Date.parse(a.createdAt ?? "");
+    const bt = Date.parse(b.createdAt ?? "");
+    if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt;
+    return Number(a.resolved !== void 0) - Number(b.resolved !== void 0);
+  });
   const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now());
   const previews = pr.comments.flatMap((comment) => parsePreviews(previewDocFromMarkdown(comment.author, `issuecomment-${comment.databaseId}`, comment.body, comment.createdAt)));
   const meta3 = {
