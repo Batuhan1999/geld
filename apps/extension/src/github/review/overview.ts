@@ -513,8 +513,10 @@ interface AnchorSeat {
 function seatFor(anchor: string, meta: GeldPrMeta, groups: readonly FoldGroup[], batches: readonly Batch[]): AnchorSeat | null {
   const item = meta.items.find((entry) => entry.sources.some((source) => source.anchor === anchor));
   if (item !== undefined) return { key: itemKey(item.id), sub: null };
-  // A bot's latest run summary is a line under the Review bots row, not in its round.
+  // A bot's latest run summary is a line under the Review bots row, a reporter's latest report one under Reports:
+  // neither is in its round.
   if (botLineAnchors.has(anchor)) return { key: BOTS_KEY, sub: anchor };
+  if (reportLineAnchors.has(anchor)) return { key: REPORTS_KEY, sub: anchor };
   const batch = batches.find((entry) => [...entry.comments, ...entry.reviews].some((line) => line.anchor === anchor));
   if (batch !== undefined) return { key: batch.key, sub: anchor };
   const group = groupContaining(groups, anchor);
@@ -1325,7 +1327,7 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
     // A bot's latest run summary is the Review bots row's line, not a line in its round (earlier summaries stay in
     // theirs: the history of that push) — but it still landed between two pushes, so it still bounds the rounds:
     // a push, a clean summary, a push are two rounds, as they read before the summary moved.
-    const kind = previewAnchors.has(entry.comment.anchor) ? 'preview' : botLineAnchors.has(entry.comment.anchor) ? 'elsewhere' : 'comment';
+    const kind = previewAnchors.has(entry.comment.anchor) ? 'preview' : botLineAnchors.has(entry.comment.anchor) || reportLineAnchors.has(entry.comment.anchor) ? 'elsewhere' : 'comment';
     place({ node: entry.root, kind, comment }, entry.root);
   }
   const itemAnchors = new Set(meta.items.flatMap((item) => item.sources.map((source) => source.anchor)));
@@ -1691,6 +1693,8 @@ interface SourceFacts {
 let sourceFacts = new Map<string, SourceFacts>();
 /** The anchors of the Review bots row's lines (each bot's latest summary), for seating: set each pass before the rounds are built. */
 let botLineAnchors = new Set<string>();
+/** The anchors of the Reports row's lines (each reporter's latest report comment), seated there the same way. */
+let reportLineAnchors = new Set<string>();
 
 /**
  * A bot posts its run summary and its threads moments apart, in either
@@ -2669,6 +2673,10 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     ...reportsFrom(crawledDom.comments.filter((entry) => entry.author.bot).map((entry) => ({ author: entry.author.login, body: entry.comment.body, anchor: entry.comment.anchor, ...(entry.comment.createdAt === '' ? {} : { createdAt: entry.comment.createdAt }) }))),
     ...reportsFromChecks(crawlCheckRuns(document, headSha)),
   ]);
+  const reports = latestReports(allReports);
+  // A reporter's latest report is the Reports row's line, as a bot's latest summary is the Review bots row's: seated
+  // there, not in its round (earlier reports stay in theirs).
+  reportLineAnchors = new Set(reports.latest.filter((entry) => entry.url === undefined).map((entry) => entry.anchor));
   const foldTargets: FoldGroup[] = [...groups];
   if (hidingTimeline) {
     for (const item of meta.items) foldTargets.push({ key: itemKey(item.id), label: item.title, author: null, nodes: itemNodes(item) });
@@ -2705,7 +2713,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   settleAfterResolve(meta, batches);
   reseatOpenLine(batches);
   // A round's bot comment lines and its preview pills both stand for their comments: neither needs a fold row too.
-  const batchedAnchors = new Set([...batches.flatMap((batch) => [...batch.comments.map((entry) => entry.anchor), ...batch.previews.map((entry) => entry.anchor)]), ...botLineAnchors]);
+  const batchedAnchors = new Set([...batches.flatMap((batch) => [...batch.comments.map((entry) => entry.anchor), ...batch.previews.map((entry) => entry.anchor)]), ...botLineAnchors, ...reportLineAnchors]);
   // By node, not by looking the anchor up: GitHub repeats an id (a review inside its minimized wrapper), and
   // getElementById would answer with whichever copy comes first in the document.
   const batchedRoots = new Set(crawledDom.comments.filter((entry) => batchedAnchors.has(entry.comment.anchor)).map((entry) => entry.root));
@@ -2782,7 +2790,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     checks: checkCountsFrom(checksSectionText() ?? boxText),
     requiredFailing: requiredFailingIn(checksSection()),
     previews: latestPreviews(allPreviews),
-    reports: latestReports(allReports),
+    reports,
     grouping: settings.reviewGrouping,
     openCommits: visit.openCommits,
     openPreviews: visit.openPreviews,

@@ -129,6 +129,22 @@ describe('security reporters', () => {
 
 **🚮 Removed packages:** [npm/reflect-metadata@0.2.1](https://socket.dev/npm/package/reflect-metadata/overview/0.2.1)`;
     expect(readReport({ author: 'socket-security[bot]', body: overview, anchor: 'c' })).toMatchObject({ state: 'info', count: 2, short: [{ text: '2 new packages' }] });
+    // The dependency diff (mintlify/server#9268), as the page's text reads it: one table row per changed package, the
+    // reference written with zero-width spaces, the Diff glyph an image with no text (an empty first cell).
+    const diff = `Review the following changes in direct dependencies. Learn more about Socket for GitHub.
+| Diff | Package | Supply ChainSecurity | Vulnerability | Quality | Maintenance | License |
+|  | npm/\u200b@\u200bmintlify/\u200bmodels@\u200b0.0.373 | 100 | 100 | 100 | 100 | 100 |
+|  | npm/\u200b@\u200bmintlify/\u200bcommon@\u200b1.0.1238 \u23f5 1.0.1239 | 100 | 100 | 100 | 100 | 100 |
+|  | npm/\u200b@\u200bmintlify/\u200blink-rot@\u200b3.0.1453 \u23f5 3.0.1458 +1 +1 | 100 | 100 | 100 | 100 | 100 |
+View full report`;
+    expect(readReport({ author: 'socket-security[bot]', body: diff, anchor: 'd' })).toMatchObject({ state: 'info', headline: 'Changes in direct dependencies', count: 3, short: [{ text: '3 packages' }] });
+    // ...and as the raw Markdown writes it, the references linked.
+    const diffMarkdown = `**Review the following changes in direct dependencies.** Learn more about [Socket for GitHub](https://socket.dev?utm_medium=gh).
+| Diff | Package | Supply Chain<br>Security |
+|---|---|---|
+| [![Added](https://github-app-statics.socket.dev/diff-added.svg)](https://socket.dev/x) | [npm/@mintlify/models@0.0.373](https://socket.dev/x) | 100 |
+| [![Updated](https://github-app-statics.socket.dev/diff-updated.svg)](https://socket.dev/y) | [npm/@mintlify/common@1.0.1238 ⏵ 1.0.1239](https://socket.dev/y) | 100 |`;
+    expect(readReport({ author: 'socket-security[bot]', body: diffMarkdown, anchor: 'e' })).toMatchObject({ state: 'info', count: 2 });
   });
 
   it('reads the same Socket reports from the page text (bold as **, cells glued per row)', () => {
