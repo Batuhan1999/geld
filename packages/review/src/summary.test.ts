@@ -532,6 +532,10 @@ describe('bots + prompts', () => {
     // One that began after the request is its answer.
     const answerCheck = { ...earlierCheck, startedAt: at(60), completedAt: at(50) };
     expect(verdictsFrom([answerCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
+    // Two checks for one bot, the later with no start of its own: its verdict is the one kept, so the start kept
+    // is its (none) — not the earlier check's, which would read the later verdict as the earlier run's.
+    const { startedAt: _started, completedAt: _completed, ...undatedCheck } = earlierCheck;
+    expect(verdictsFrom([earlierCheck, undatedCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
   });
 
   it('does not keep a bot running on a status line that aged with nothing after it', () => {

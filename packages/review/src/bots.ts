@@ -544,8 +544,11 @@ export function verdictsFrom(
     const failed = check.conclusion === 'failure' || check.conclusion === 'timed_out' || check.conclusion === 'cancelled';
     const verdict = running ? 'running' : failed ? 'failed' : 'clean';
     checkVerdict.set(bot.id, verdict);
+    // The start goes with the verdict: a later check for the same bot with no start of its own must not keep
+    // the earlier one's, or its verdict would be read as the earlier run's below.
     const started = check.startedAt === undefined ? NaN : Date.parse(check.startedAt);
-    if (!Number.isNaN(started)) checkStartedAt.set(bot.id, started);
+    if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
+    else checkStartedAt.set(bot.id, started);
     const record: DerivedBotVerdict = {
       id: bot.id,
       login,
