@@ -322,6 +322,11 @@ describe('bots + prompts', () => {
     const rendered = 'Note\nCurrently processing new changes in this PR. This may take a few minutes, please wait...\nRun configuration\nConfiguration used: defaults\nReview profile: CHILL\nPlan: Advanced\nRun ID: 4ba79fb3-4c73-48d2-8735-290eee0536a9\nCommits\nReviewing files that changed from the base of the PR and between 26a5bac and a9885e3.\nFiles selected for processing: 1\napps/extension/entrypoints/github.content/style.css';
     expect(isStatusLineComment(rendered)).toBe(true);
     expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: rendered, anchor: 'issuecomment-1', createdAt: at(2) }], 'aaa', [], now)[0]?.verdict).toBe('running');
+    // A long review whose first sentence only begins with those words is a review: the whole sentence must be the
+    // status line for the long-comment rule to take it.
+    const review = `Currently processing changes in this PR file by file was slow, so here is the review in one go. ${'Found 2 issues, both in the parser. '.repeat(8)}`;
+    expect(isStatusLineComment(review)).toBe(false);
+    expect(isStatusLineComment(review.replace(/^Currently processing changes in this PR[^.]*\./, 'Currently processing changes in this PR.'))).toBe(true);
   });
 
   it('parses greptile scores and known logins', () => {
