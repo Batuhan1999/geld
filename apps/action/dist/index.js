@@ -19495,6 +19495,7 @@ var RERUN_EDIT_GAP_MS = 5 * 60 * 1e3;
 function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.now(), options = {}) {
   const byId = /* @__PURE__ */ new Map();
   const checkVerdict = /* @__PURE__ */ new Map();
+  const checkStartedAt = /* @__PURE__ */ new Map();
   for (const check2 of checks) {
     const bot = botByCheckName(check2.name);
     if (bot === null) continue;
@@ -19503,6 +19504,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled";
     const verdict = running ? "running" : failed ? "failed" : "clean";
     checkVerdict.set(bot.id, verdict);
+    const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
+    if (!Number.isNaN(started)) checkStartedAt.set(bot.id, started);
     const record3 = {
       id: bot.id,
       login,
@@ -19600,7 +19603,9 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const edited = lastEditBy.get(id);
     if (existing !== void 0 && at !== null && edited !== void 0 && edited > at) continue;
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
-    if (stale && existing?.checkName === void 0) {
+    const started = checkStartedAt.get(id);
+    const checkIsThisRun = existing?.checkName !== void 0 && !(started !== void 0 && at !== null && started < at);
+    if (stale && !checkIsThisRun && options.partial !== true) {
       const prior = runsBeforeAsk.get(id);
       if (prior !== void 0 && !threadRuns.has(id)) {
         threadRuns.set(id, prior);
@@ -19611,12 +19616,12 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       byId.set(id, { id, login, verdict: stale ? options.partial === true ? "loading" : "failed" : "running", reviewedSha: headSha, sourceId: anchor2 });
       continue;
     }
-    if (existing.checkName === void 0) {
-      if (!stale) byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, sourceId: anchor2 });
+    if (!checkIsThisRun) {
+      if (!stale) byId.set(id, { id, login, verdict: "running", reviewedSha: existing.reviewedSha, ...existing.checkName === void 0 ? {} : { checkName: existing.checkName }, sourceId: anchor2 });
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? "running";
-    byId.set(id, { id, login, verdict: fromCheck, reviewedSha: existing.reviewedSha, checkName: existing.checkName, sourceId: anchor2 });
+    byId.set(id, { id, login, verdict: fromCheck, reviewedSha: existing.reviewedSha, ...existing.checkName === void 0 ? {} : { checkName: existing.checkName }, sourceId: anchor2 });
   }
   for (const [id, run2] of threadRuns) {
     const existing = byId.get(id);

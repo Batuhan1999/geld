@@ -533,6 +533,8 @@ export function verdictsFrom(
   const byId = new Map<string, DerivedBotVerdict>();
   /** What each bot's check alone said, for a run its comments have not spoken about. */
   const checkVerdict = new Map<string, 'clean' | 'failed' | 'running'>();
+  /** When each bot's check began (epoch ms), when the page or the API said: which run a finished check belongs to. */
+  const checkStartedAt = new Map<string, number>();
 
   for (const check of checks) {
     const bot = botByCheckName(check.name);
@@ -542,6 +544,8 @@ export function verdictsFrom(
     const failed = check.conclusion === 'failure' || check.conclusion === 'timed_out' || check.conclusion === 'cancelled';
     const verdict = running ? 'running' : failed ? 'failed' : 'clean';
     checkVerdict.set(bot.id, verdict);
+    const started = check.startedAt === undefined ? NaN : Date.parse(check.startedAt);
+    if (!Number.isNaN(started)) checkStartedAt.set(bot.id, started);
     const record: DerivedBotVerdict = {
       id: bot.id,
       login,
@@ -673,12 +677,18 @@ export function verdictsFrom(
     // Announced long ago, nothing since, no check to say how it went: the run never reported. What the bot said
     // before that stands (from that earlier run); a bot that never said anything else did not review this.
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
-    // A request that aged unanswered, with no check to say how the run went: the earlier run stands whole, its
-    // threads included — the request had set them aside — so a run whose findings were all resolved reads
-    // "resolved" below, not as its summary's count from before they were, and a bot that only ever posted threads
-    // keeps them rather than reading as failed (mint#12803: a "bugbot run" Bugbot never answered left the chip
-    // amber over one resolved thread).
-    if (stale && existing?.checkName === undefined) {
+    // The check speaks for this run only when it is this run's: one that began before the request is the earlier
+    // run's, and says nothing about whether the bot answered. With no start to go by, the check is taken as the
+    // run's, as before.
+    const started = checkStartedAt.get(id);
+    const checkIsThisRun = existing?.checkName !== undefined && !(started !== undefined && at !== null && started < at);
+    // A request that aged unanswered, with no check of its own to say how the run went: the earlier run stands
+    // whole, its threads included — the request had set them aside — so a run whose findings were all resolved
+    // reads "resolved" below, not as its summary's count from before they were, and a bot that only ever posted
+    // threads keeps them rather than reading as failed (mint#12803: a "bugbot run" Bugbot never answered left the
+    // chip amber over one resolved thread). Not while the timeline is still being read: the answer may simply not
+    // have loaded yet, and the earlier findings are not final until it has.
+    if (stale && !checkIsThisRun && options.partial !== true) {
       const prior = runsBeforeAsk.get(id);
       if (prior !== undefined && !threadRuns.has(id)) {
         threadRuns.set(id, prior);
@@ -690,12 +700,12 @@ export function verdictsFrom(
       byId.set(id, { id, login, verdict: stale ? (options.partial === true ? 'loading' : 'failed') : 'running', reviewedSha: headSha, sourceId: anchor });
       continue;
     }
-    if (existing.checkName === undefined) {
-      if (!stale) byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, sourceId: anchor });
+    if (!checkIsThisRun) {
+      if (!stale) byId.set(id, { id, login, verdict: 'running', reviewedSha: existing.reviewedSha, ...(existing.checkName === undefined ? {} : { checkName: existing.checkName }), sourceId: anchor });
       continue;
     }
     const fromCheck = checkVerdict.get(id) ?? 'running';
-    byId.set(id, { id, login, verdict: fromCheck, reviewedSha: existing.reviewedSha, checkName: existing.checkName, sourceId: anchor });
+    byId.set(id, { id, login, verdict: fromCheck, reviewedSha: existing.reviewedSha, ...(existing.checkName === undefined ? {} : { checkName: existing.checkName }), sourceId: anchor });
   }
   // The bot's latest word is a set of review threads: the ones still open are its outstanding findings. With
   // every one resolved nothing is outstanding, and the check (when there is one) says how that run ended.
