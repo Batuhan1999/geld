@@ -5,7 +5,7 @@ import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parse
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
 import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
-import type { DerivedBotVerdict } from './bots';
+import type { BotComment, DerivedBotVerdict } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
 const PRODUCER = { kind: 'action' as const, version: '0.1.0', ai: false };
@@ -488,20 +488,18 @@ describe('bots + prompts', () => {
     // mint#12803: Bugbot's review ("found 1 potential issue") and its one thread, resolved since; then "bugbot run"
     // an hour ago that Bugbot never answered (no check on the repository). The run that stands is the earlier
     // one, threads and all: resolved, not "1 issue".
-    const comments = [
-      { author: 'cursor[bot]', body: 'Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', anchor: 'pullrequestreview-1', createdAt: at(1300) },
-      { author: 'cursor[bot]', body: 'Remote schema fetch type mismatch', anchor: 'discussion_r1', resolved: true, createdAt: at(1300) },
-      { author: 'brandonmcconnell', body: '@greptileai bugbot run', anchor: 'issuecomment-3', createdAt: at(70) },
-    ];
-    expect(verdictsFrom([], comments, 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    const summary: BotComment = { author: 'cursor[bot]', body: 'Cursor Bugbot has reviewed your changes using default effort and found 1 potential issue.', anchor: 'pullrequestreview-1', createdAt: at(1300) };
+    const thread: BotComment = { author: 'cursor[bot]', body: 'Remote schema fetch type mismatch', anchor: 'discussion_r1', resolved: true, createdAt: at(1300) };
+    const request: BotComment = { author: 'brandonmcconnell', body: '@greptileai bugbot run', anchor: 'issuecomment-3', createdAt: at(70) };
+    const bugbot = (comments: readonly BotComment[], when = now): DerivedBotVerdict | undefined => verdictsFrom([], comments, 'aaa', [], when).find((bot) => bot.id === 'bugbot');
+    expect(bugbot([summary, thread, request])).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
     // Still open: the finding stands as before the request.
-    expect(verdictsFrom([], comments.map((c) => ('resolved' in c ? { ...c, resolved: false } : c)), 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
+    expect(bugbot([summary, { ...thread, resolved: false }, request])).toMatchObject({ verdict: 'findings', count: 1, sourceId: 'discussion_r1' });
     // A request a minute old: running, as before.
-    expect(verdictsFrom([], [...comments.slice(0, 2), { ...comments[2], createdAt: at(1) }], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('running');
+    expect(bugbot([summary, thread, { ...request, createdAt: at(1) }])?.verdict).toBe('running');
     // A bot that only ever posted threads (no summary, no check): the same, not "failed" for the silence.
-    const threadsOnly = [comments[1], comments[2]];
-    expect(verdictsFrom([], threadsOnly, 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
-    expect(verdictsFrom([], threadsOnly.map((c) => ('resolved' in c ? { ...c, resolved: false } : c)), 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1 });
+    expect(bugbot([thread, request])).toMatchObject({ verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    expect(bugbot([{ ...thread, resolved: false }, request])).toMatchObject({ verdict: 'findings', count: 1 });
   });
 
   it('does not keep a bot running on a status line that aged with nothing after it', () => {
