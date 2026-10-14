@@ -862,9 +862,9 @@ function loadDeferredReplies(thread: HTMLElement): void {
  * The messages inside a moved node, outermost first: in a thread, each
  * `discussion_r` comment (its comments are siblings, but GitHub repeats ids
  * on wrappers and permalinks); elsewhere the comment cards. A message holds
- * a body and is not part of a form.
+ * a body and is not part of a form. Exported for its test only.
  */
-function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] {
+export function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] {
   const selector = thread ? '[id^="discussion_r"], [data-testid="review-thread-comment"]' : MESSAGE_SELECTOR;
   const candidates = [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll<HTMLElement>(selector)];
   // A minimized comment is wrapped in a `.minimized-comment.js-comment` holding a <details> (the "This comment has
