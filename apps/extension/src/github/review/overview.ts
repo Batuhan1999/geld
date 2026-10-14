@@ -1302,11 +1302,13 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
     /** A host's preview comments: the round's previews (pills), never bot comment lines. */
     readonly previewComments: RoundComment[];
     readonly reviews: ReviewEntry[];
+    /** A bot's latest summary, listed under the Review bots row: content that bounds the round, shown nowhere in it. */
+    readonly seatedElsewhere: RoundComment[];
   }
   type Entry =
     | { readonly node: Element; readonly kind: 'commit' }
     | { readonly node: Element; readonly kind: 'item'; readonly item: ReviewItem }
-    | { readonly node: Element; readonly kind: 'comment' | 'preview'; readonly comment: RoundComment }
+    | { readonly node: Element; readonly kind: 'comment' | 'preview' | 'elsewhere'; readonly comment: RoundComment }
     | { readonly node: Element; readonly kind: 'review'; readonly review: ReviewEntry };
   const previewAnchors = new Set(previewsAll.map((entry) => entry.anchor));
   const entries: Entry[] = commitRoots.map((node) => ({ node, kind: 'commit' as const }));
@@ -1317,12 +1319,14 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
   };
   for (const item of meta.items) place({ node: document.documentElement, kind: 'item', item }, itemNodes(item)[0] ?? null);
   for (const entry of crawled.comments) {
-    // A bot's latest run summary is the Review bots row's line, not a line in its round (earlier summaries stay
-    // in theirs: the history of that push).
-    if (!botAnchors.has(entry.comment.anchor) || !entry.author.bot || botLineAnchors.has(entry.comment.anchor)) continue;
+    if (!botAnchors.has(entry.comment.anchor) || !entry.author.bot) continue;
     const comment: RoundComment = { anchor: entry.comment.anchor, avatar: entry.avatarSrc ?? avatarSrcForLogin(entry.author.login), author: entry.author.login, node: entry.root, body: entry.comment.body, lane: jevNow.lanes.get(entry.comment.anchor) ?? null };
     // A comment that announces a preview (ready, failed, refused) is that preview: it shows as a pill, not a line.
-    place({ node: entry.root, kind: previewAnchors.has(entry.comment.anchor) ? 'preview' : 'comment', comment }, entry.root);
+    // A bot's latest run summary is the Review bots row's line, not a line in its round (earlier summaries stay in
+    // theirs: the history of that push) — but it still landed between two pushes, so it still bounds the rounds:
+    // a push, a clean summary, a push are two rounds, as they read before the summary moved.
+    const kind = previewAnchors.has(entry.comment.anchor) ? 'preview' : botLineAnchors.has(entry.comment.anchor) ? 'elsewhere' : 'comment';
+    place({ node: entry.root, kind, comment }, entry.root);
   }
   const itemAnchors = new Set(meta.items.flatMap((item) => item.sources.map((source) => source.anchor)));
   for (const review of reviewEntriesAll) {
@@ -1334,8 +1338,8 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
   seatRewrittenCommits(entries, pushRoots);
   const rounds: Round[] = [];
   let current: Round | null = null;
-  const fresh = (): Round => ({ commits: [], items: [], comments: [], previewComments: [], reviews: [] });
-  const hasContent = (round: Round): boolean => round.items.length + round.comments.length + round.previewComments.length + round.reviews.length > 0;
+  const fresh = (): Round => ({ commits: [], items: [], comments: [], previewComments: [], reviews: [], seatedElsewhere: [] });
+  const hasContent = (round: Round): boolean => round.items.length + round.comments.length + round.previewComments.length + round.reviews.length + round.seatedElsewhere.length > 0;
   for (const entry of entries) {
     if (entry.kind === 'commit') {
       // A commit after content closes that round and opens the next; consecutive commits share one round.
@@ -1353,6 +1357,7 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
     if (entry.kind === 'item') current.items.push(entry.item);
     else if (entry.kind === 'comment') current.comments.push(entry.comment);
     else if (entry.kind === 'preview') current.previewComments.push(entry.comment);
+    else if (entry.kind === 'elsewhere') current.seatedElsewhere.push(entry.comment);
     else if (entry.kind === 'review') current.reviews.push(entry.review);
   }
   // Whatever the page could not place (not loaded yet) goes with the latest round.
@@ -1363,6 +1368,7 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
       if (entry.kind === 'item') last.items.push(entry.item);
       else if (entry.kind === 'comment') last.comments.push(entry.comment);
       else if (entry.kind === 'preview') last.previewComments.push(entry.comment);
+      else if (entry.kind === 'elsewhere') last.seatedElsewhere.push(entry.comment);
       else if (entry.kind === 'review') last.reviews.push(entry.review);
     }
   }
@@ -1402,7 +1408,7 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
         const element = document.getElementById(anchor);
         return element === null ? Number.NaN : Date.parse(createdAtOf(element));
       };
-      const content = [...round.comments.map((comment) => Date.parse(createdAtOf(comment.node))), ...round.reviews.map((review) => at(review.anchor)), ...round.items.flatMap((item) => item.sources.map((source) => at(source.anchor)))].filter((time) => !Number.isNaN(time));
+      const content = [...[...round.comments, ...round.seatedElsewhere].map((comment) => Date.parse(createdAtOf(comment.node))), ...round.reviews.map((review) => at(review.anchor)), ...round.items.flatMap((item) => item.sources.map((source) => at(source.anchor)))].filter((time) => !Number.isNaN(time));
       return content.length === 0 ? null : Math.min(...content);
     };
     const starts = rounds.map(startOf);
@@ -1430,6 +1436,13 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
       if (entry !== undefined && entry.commits.length === 0 && !hasContent(entry)) rounds.splice(round, 1);
     }
   }
+  // A round with no push and nothing of its own to show (only a summary seated under the Review bots row) would be
+  // an empty row: it bounded its neighbours, which is all it was for.
+  const shows = (round: Round): boolean => round.items.length + round.comments.length + round.previewComments.length + round.reviews.length > 0;
+  for (let round = rounds.length - 1; round >= 0; round -= 1) {
+    const entry = rounds[round];
+    if (entry !== undefined && entry.commits.length === 0 && !shows(entry)) rounds.splice(round, 1);
+  }
   // A round is known by the push that opened it (the first commit row's anchor, `commits-pushed-<sha>`, or the
   // force-push event's id), else by its first comment; only a round with neither falls back to its position.
   const identity = (round: Round, position: number): string => {
@@ -1439,7 +1452,7 @@ function buildBatches(meta: GeldPrMeta, crawled: Crawled, settings: GeldSettings
       const sha = /\/commits\/([0-9a-f]{7,40})/.exec(row.querySelector('a[href*="/commits/"]')?.getAttribute('href') ?? '')?.[1];
       if (sha !== undefined) return `commit-${sha}`;
     }
-    const first = round.comments[0]?.anchor ?? round.items[0]?.sources[0]?.anchor ?? round.reviews[0]?.anchor ?? round.previewComments[0]?.anchor;
+    const first = round.comments[0]?.anchor ?? round.items[0]?.sources[0]?.anchor ?? round.reviews[0]?.anchor ?? round.previewComments[0]?.anchor ?? round.seatedElsewhere[0]?.anchor;
     return first ?? `at-${position + 1}`;
   };
   return rounds.map((round, position) => {
@@ -1738,15 +1751,19 @@ function buildBotLines(meta: GeldPrMeta): readonly BotLine[] {
         if (item !== undefined) threads.push({ anchor: ref.anchor, done: !isOpenStatus(item.status) });
       }
     } else {
+      // Every thread source of the bot's, not an item's first: an item can merge several of one bot's threads
+      // (cluster.ts), from one run or from different runs, and each is read for its own summary.
       for (const item of meta.items) {
-        const source = item.sources.find((candidate) => candidate.bot === bot.id || resolveBotId(candidate.author) === bot.id);
-        if (source === undefined) continue;
-        const threadEl = document.getElementById(source.anchor);
-        const review = threadEl === null ? null : closestAtHome(threadEl, '[id^="pullrequestreview-"]');
-        const at = threadEl === null ? NaN : Date.parse(createdAtOf(threadEl));
-        const owner = review !== null && sourceFacts.get(review.id)?.summary === true ? review.id : (botSummaryFor(bot.id, at)?.anchor ?? null);
-        // With no summary at all every thread of the bot's is the line's way in.
-        if (anchor === null ? computed === null : owner === anchor) threads.push({ anchor: source.anchor, done: !isOpenStatus(item.status) });
+        for (const source of item.sources) {
+          if (source.kind !== 'thread' || (source.bot !== bot.id && resolveBotId(source.author) !== bot.id)) continue;
+          if (threads.some((ref) => ref.anchor === source.anchor)) continue;
+          const threadEl = document.getElementById(source.anchor);
+          const review = threadEl === null ? null : closestAtHome(threadEl, '[id^="pullrequestreview-"]');
+          const at = threadEl === null ? NaN : Date.parse(createdAtOf(threadEl));
+          const owner = review !== null && sourceFacts.get(review.id)?.summary === true ? review.id : (botSummaryFor(bot.id, at)?.anchor ?? null);
+          // With no summary at all every thread of the bot's is the line's way in.
+          if (anchor === null ? computed === null : owner === anchor) threads.push({ anchor: source.anchor, done: !isOpenStatus(item.status) });
+        }
       }
     }
     const facts = anchor === null ? undefined : sourceFacts.get(anchor);
