@@ -110,5 +110,10 @@ describe('takeAgentViewLink', () => {
     expect(devin.querySelector('p')?.hasAttribute('data-geld-agent-rerun')).toBe(true);
     expect(takeAgentViewLink(parse(CODERABBIT))).toEqual({ href: 'https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x', label: 'Review in Change Stack' });
     expect(takeAgentViewLink(parse('<div><p>Nothing to see.</p></div>'))).toBeNull();
+    // A Cursor cloud agent's review ends in "Open in Web" beside "View Automation": the run is the view, and the
+    // other button stays, so the block holding both keeps showing.
+    const cursor = parse('<div><div><a href="https://cursor.com/agents/bc-1?cursor_ref=pr_footer" rel="nofollow"><picture><img alt="Open in Web" src="o.png"></picture></a> <a href="https://cursor.com/automations/au-1"><picture><img alt="View Automation" src="a.png"></picture></a></div></div>');
+    expect(takeAgentViewLink(cursor)).toEqual({ href: 'https://cursor.com/agents/bc-1?cursor_ref=pr_footer', label: 'Open in Web' });
+    expect(cursor.querySelector('div > div')?.hasAttribute('data-geld-agent-rerun')).toBe(false);
   });
 });
