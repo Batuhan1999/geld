@@ -195,7 +195,10 @@ export function forgetLoan(node: HTMLElement): void {
  * Dropped here, before a pass reads anything: removed from the document and
  * from tracking, the portal told as for a return. Only a loan that still
  * stands inside the panel: one that another Geld instance has already sent
- * home is not ours any more. Returns how many went.
+ * home is not ours any more. The loans nested in a dropped one (the chat
+ * moves a thread's reaction pickers, ⋯ menus and Resolve form out of it,
+ * with their placeholders inside it) leave the document with it and are
+ * forgotten in the same sweep. Returns how many went.
  */
 export function dropOrphanedLoans(panel: Element): number {
   let dropped = 0;
@@ -206,6 +209,14 @@ export function dropOrphanedLoans(panel: Element): number {
     entry.node.remove();
     if (entry.root !== null) tell(entry.parent, 'geld:portal-return');
     dropped += 1;
+  }
+  if (dropped === 0) return 0;
+  // Nested loans went out with their outer node: their placeholders and the nodes themselves are detached now.
+  for (const [key, entry] of [...moved]) {
+    if (entry.placeholder.isConnected || entry.node.isConnected) continue;
+    moved.delete(key);
+    entry.mark?.remove();
+    if (entry.root !== null) tell(entry.parent, 'geld:portal-return');
   }
   return dropped;
 }
