@@ -110,6 +110,12 @@ describe('takeAgentViewLink', () => {
     expect(devin.querySelector('p')?.hasAttribute('data-geld-agent-rerun')).toBe(true);
     expect(takeAgentViewLink(parse(CODERABBIT))).toEqual({ href: 'https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x', label: 'Review in Change Stack' });
     expect(takeAgentViewLink(parse('<div><p>Nothing to see.</p></div>'))).toBeNull();
+    // A text link to the bot's site before its badge is not the badge: the badge is the linked image on the run's path.
+    const textFirst = parse('<div><p>Change your <a href="https://app.coderabbit.ai/settings/repository">review settings</a>.</p><p><a href="https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x"><img src="c.svg" alt="Review in Change Stack →"></a></p></div>');
+    expect(takeAgentViewLink(textFirst)?.href).toBe('https://app.coderabbit.ai/change-stack/o/r/pull/9?scope=x');
+    expect(textFirst.querySelector('a[href*="settings"]')?.hasAttribute('data-geld-agent-view')).toBe(false);
+    // A linked image to the site that is not a run (a logo linking home) is left alone too.
+    expect(takeAgentViewLink(parse('<div><p><a href="https://app.greptile.com/"><img alt="Greptile" src="g.svg"></a> reviewed this.</p></div>'))).toBeNull();
     // A Cursor cloud agent's review ends in "Open in Web" beside "View Automation": the run is the view, and the
     // other button stays, so the block holding both keeps showing.
     const cursor = parse('<div><div><a href="https://cursor.com/agents/bc-1?cursor_ref=pr_footer" rel="nofollow"><picture><img alt="Open in Web" src="o.png"></picture></a> <a href="https://cursor.com/automations/au-1"><picture><img alt="View Automation" src="a.png"></picture></a></div></div>');
