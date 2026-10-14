@@ -4224,6 +4224,13 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   padding: 6px 8px 0 0;
 }
 
+/* The column is a stacking context (positioned, z-index 2), so a menu or picker opened inside it, whatever its own
+ * z-index, paints under the rail and target-ring overlays (`::after`, z-index 5) that run down the slot's edges: the
+ * ring's line crossed the open menu. While one of its popups is open the column stands above the overlays. */
+.geld-review__chat [data-geld-message] > .geld-review__msg-side:has(details[open], :popover-open) {
+  z-index: 6;
+}
+
 /* A lone message spans its row (no empty side, and no row container to measure one in): its controls straddle its
  * top edge at the right, as a card's would, hover-only as everywhere; its bubble keeps 9px above the text so the
  * controls' lower half (12px deep) stays off the first line's glyphs. */
