@@ -132,4 +132,4 @@ Geld never moves GitHub's DOM nodes around (that would break the React view). In
 
 ## License
 
-[GNU AGPL v3.0](LICENSE). You can use, change and redistribute Geld, including inside your own tools, as long as what you distribute — or run for others over a network — is released under the same license with its source. Copyright © 2026 Brandon McConnell.
+[GNU AGPL v3.0](LICENSE). You can use, change and redistribute Geld, including inside your own tools, under the same license: recipients of a copy get its source, and users who interact with a modified version over a network must be offered that version's source (section 13). The license text governs; this is only a summary. Copyright © 2026 Brandon McConnell.
