@@ -103,6 +103,10 @@ describe('withLiveRuns', () => {
       { id: 'codex', login: 'chatgpt-codex-connector[bot]', verdict: 'clean', reviewedSha: sha },
     ];
     expect(withLiveRuns(settled, live).map((bot) => bot.id)).toEqual(['bugbot', 'greptile', 'devin']);
+    // ...or with no word: asked after the Action wrote, never answered, and the pull request closed since. The page's
+    // `unknown` contradicts nothing the Action knew, and without it the bot had no chip at all.
+    const silent: GeldPrMeta['bots'] = [{ id: 'capy', login: 'capy-ai[bot]', verdict: 'unknown', reviewedSha: sha, sourceId: 'issuecomment-7' }];
+    expect(withLiveRuns(settled, silent).map((bot) => `${bot.id}:${bot.verdict}`)).toEqual(['bugbot:clean', 'greptile:findings', 'capy:unknown']);
   });
 
   it('ends a run the Action saw running only when the page judged the run against its start', () => {
