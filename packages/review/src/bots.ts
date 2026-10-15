@@ -422,8 +422,23 @@ function isBareAdvice(body: string, text: string): boolean {
 
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
 const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
-/** A statement that is advice all the same: it says who must act ("An administrator must grant access") or what is needed. */
-const ADVICE_MARK = /\b(?:must|should|needs? to|has to|have to|will need|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+/**
+ * A statement that is advice all the same: it says who must act to get the
+ * review running ("An administrator must grant access") or what must be done
+ * for it ("The app must be installed") — an obligation on a person with a say
+ * over the installation, or an obligation to grant, enable, install,
+ * configure, upgrade, authorise or retry. "The guard should allow members"
+ * is an obligation on the code, and a finding.
+ */
+const ADVICE_MARK = new RegExp(
+  [
+    /\b(?:admin(?:istrator)?|owner|maintainer)s?\s+(?:must|should|needs? to|has to|have to|will need to|can)\b/,
+    /\b(?:must|should|needs? to|has to|have to|will need to)\s+(?:be\s+|first\s+)?(?:grant|enabl|install|configur|add|upgrad|authori[sz]|approv|connect|reconnect|re-?run|retr|renew|allow access)\w*/,
+  ]
+    .map((part) => part.source)
+    .join('|'),
+  'i',
+);
 
 /**
  * A sentence that refuses: it holds a refusal phrase, and it is about the bot
@@ -439,9 +454,13 @@ function isRefusalSentence(sentence: string): boolean {
   if (match === null) return false;
   if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
   // Or the money word is what the phrase is said of — the word right before it: "Billing is not configured",
-  // "Credits are unavailable" — not a modifier further back ("the billing worker … has reached their usage limit").
+  // "Credits are unavailable for this run" — not a modifier further back ("the billing worker … has reached their
+  // usage limit"), and with nothing after the phrase but refusal vocabulary: "Credits are unavailable because the
+  // new query excludes paid users" is about the code.
   const before = sentence.slice(0, match.index).trim().split(/\s+/);
-  return REFUSAL_MONEY.test(before[before.length - 1] ?? '');
+  if (!REFUSAL_MONEY.test(before[before.length - 1] ?? '')) return false;
+  const after = sentence.slice(match.index + match[0].length).replace(/[.!?,;:]+$/, '').trim();
+  return after === '' || after.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, '')));
 }
 
 /**
@@ -460,7 +479,7 @@ const BARE_REFUSAL_WORDS = new Set([
   'installation', 'app', 'github', 'token', 'tokens', 'credentials', 'key', 'secret', 'permission', 'permissions', 'access', 'scope', 'scopes', 'rights',
   'account', 'organization', 'org', 'team', 'workspace', 'project', 'plan', 'subscription', 'trial', 'quota', 'limit', 'credits', 'usage', 'seats', 'settings', 'dashboard',
   'remaining', 'left', 'available', 'exceeded', 'expired', 'invalid', 'missing', 'required', 'needed', 'right', 'now', 'currently', 'moment', 'time',
-  'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade',
+  'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade', 'run', 'review',
   '',
 ]);
 
