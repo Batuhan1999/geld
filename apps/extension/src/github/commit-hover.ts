@@ -47,8 +47,31 @@ let armed: Target | null = null;
 let presented: DiffFetchState | null = null;
 /** Where the pointer rests on the hovered link (viewport y); null when it was reached by focus. A wrapped link's tooltip hangs under that line. */
 let pointer: TooltipPoint | null = null;
-/** The one listener a link gets while armed: the pointer crossing to another of its lines moves the tooltip. */
+/** The one listener the hovered link gets: where the pointer is on it, so the tooltip opens under — and moves to — the line it is on. */
 let pointerWatch: { readonly link: HTMLAnchorElement; readonly onMove: (event: MouseEvent) => void } | null = null;
+
+/**
+ * Follow the pointer across the hovered link's lines from the moment it is
+ * hovered: it may cross to another line during the hover-intent wait (the
+ * tooltip then opens under the right one) or after the tooltip is up (it
+ * moves under the new line), and a link focused first and hovered after has
+ * a pointer to follow from then on. Only the line is read from the pointer.
+ */
+function watchPointer(link: HTMLAnchorElement): void {
+  if (pointerWatch?.link === link) return;
+  unwatchPointer();
+  const onMove = (event: MouseEvent): void => {
+    pointer = { y: event.clientY };
+    if (armed?.link === link) moveTooltipPointer(link, event.clientY);
+  };
+  link.addEventListener('mousemove', onMove, { passive: true });
+  pointerWatch = { link, onMove };
+}
+
+function unwatchPointer(): void {
+  if (pointerWatch !== null) pointerWatch.link.removeEventListener('mousemove', pointerWatch.onMove);
+  pointerWatch = null;
+}
 
 /** The commit a link names, unless GitHub already explains it with a hovercard (which Geld rewrites instead). */
 function targetOf(node: EventTarget | null): Target | null {
@@ -97,8 +120,7 @@ function disarm(): void {
     if (tooltipHost() === armed.link) hideTooltip();
     releaseTitle(armed.link);
   }
-  if (pointerWatch !== null) pointerWatch.link.removeEventListener('mousemove', pointerWatch.onMove);
-  pointerWatch = null;
+  unwatchPointer();
   armed = null;
   presented = null;
 }
@@ -144,29 +166,26 @@ function arm(): void {
   armed = hovered;
   presented = null;
   holdTitle(armed.link);
-  // Only a pointer that is there moves the tooltip between lines; a focused link has no pointer to follow.
-  if (pointer !== null) {
-    const { link } = armed;
-    const onMove = (event: MouseEvent): void => {
-      pointer = { y: event.clientY };
-      moveTooltipPointer(link, event.clientY);
-    };
-    link.addEventListener('mousemove', onMove, { passive: true });
-    pointerWatch = { link, onMove };
-  }
   present();
 }
 
 function enter(target: Target, immediate: boolean, at: TooltipPoint | null): void {
   if (hovered?.link === target.link) {
-    // Still the same link, another of its children under the pointer: only where the pointer is has changed.
-    if (at !== null) pointer = at;
+    // Still the same link — another of its children under the pointer, or a pointer arriving on a link that was
+    // focused first: where the pointer is has changed, and from now on it is followed across the link's lines.
+    if (at !== null) {
+      pointer = at;
+      watchPointer(target.link);
+      if (armed?.link === target.link) moveTooltipPointer(target.link, at.y);
+    }
     return;
   }
   if (armed !== null && armed.link !== target.link) disarm();
   else clearIntent();
   hovered = target;
   pointer = at;
+  if (at !== null) watchPointer(target.link);
+  else unwatchPointer();
   if (immediate) arm();
   else intentTimer = setTimeout(arm, HOVER_INTENT_MS);
 }
@@ -174,6 +193,7 @@ function enter(target: Target, immediate: boolean, at: TooltipPoint | null): voi
 function leave(): void {
   hovered = null;
   pointer = null;
+  unwatchPointer();
   disarm();
 }
 
