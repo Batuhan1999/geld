@@ -445,7 +445,7 @@ function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: st
     headSha,
     settings.reviewBots,
     Date.now(),
-    { partial },
+    { partial, closed: pullRequestClosed() },
   );
   return {
     v: 1,
@@ -1582,6 +1582,7 @@ function botTitleFor(login: string): string {
 function botCardLine(record: BotVerdictRecord): string {
   if (record.verdict === 'running') return 'Reviewing this pull request now';
   if (record.verdict === 'loading') return 'Still reading this pull request\u2019s timeline for its review';
+  if (record.verdict === 'unknown') return 'Asked to review, and never answered here; the pull request is closed and its checks are gone, so there is no word either way';
   if (record.verdict === 'failed') return record.reason === undefined ? 'Its review of this pull request failed' : `Did not review this pull request: ${record.reason}`;
   const scored = record.score === undefined ? '' : `Scored this pull request ${record.score}/5`;
   if (record.verdict === 'clean') return scored === '' ? 'Found nothing on this pull request' : `${scored} and found nothing`;
@@ -2428,6 +2429,18 @@ function hoverPreviewFor(row: HTMLElement, meta: GeldPrMeta, groups: readonly Fo
   };
 }
 
+/**
+ * Whether the pull request is merged or closed, from the header's state label
+ * (the React header's `[data-component="StateLabel"]`, the classic `.State`).
+ * GitHub shows none of a closed pull request's checks, so a bot's silence
+ * there is no verdict (`VerdictOptions.closed`).
+ */
+function pullRequestClosed(): boolean {
+  const label = document.querySelector('[data-component="StateLabel"], .gh-header-meta .State, .State[title]');
+  const words = (label?.getAttribute('title') ?? label?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return /^(?:status:\s*)?(?:merged|closed)$/i.test(words);
+}
+
 function subjectOf(): MarkdownSubject | null {
   const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(location.pathname);
   if (match === null) return null;
@@ -2780,7 +2793,8 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     // one comment asked for at once, so looking a bot up by it opens the wrong bot. Open this bot's own latest
     // summary instead (none → inert chip, no blind scroll). Settled verdicts open their own source (a thread, a
     // refusal, a summary).
-    botOpenAnchor: (bot) => (bot.verdict === 'running' || bot.verdict === 'loading' ? botSummaryFor(bot.id, NaN)?.anchor ?? null : bot.sourceId ?? null),
+    // A bot with no word (`unknown`) has nothing to open: its source is the request it never answered.
+    botOpenAnchor: (bot) => (bot.verdict === 'unknown' ? null : bot.verdict === 'running' || bot.verdict === 'loading' ? botSummaryFor(bot.id, NaN)?.anchor ?? null : bot.sourceId ?? null),
     // A bot's mark, from wherever the page shows it: an avatar captioned with one of its logins (Bugbot's review
     // comments are by cursor[bot]; unambiguous, so first), its run summary's avatar when the summary is the bot's
     // own comment (a `running` verdict's source is the trigger comment, whose avatar is the person who asked),

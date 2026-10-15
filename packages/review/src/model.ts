@@ -57,7 +57,8 @@ export const STATUS_RANK: Readonly<Record<ReviewItemStatus, number>> = {
  * an old request for it). The Action reads the whole timeline and never
  * produces it.
  */
-export const BOT_VERDICTS = ['clean', 'findings', 'failed', 'running', 'loading'] as const;
+/** `unknown`: a run asked for on a pull request since merged or closed, which the bot never answered in a comment — GitHub no longer shows the checks of the time, so there is no word either way. */
+export const BOT_VERDICTS = ['clean', 'findings', 'failed', 'running', 'loading', 'unknown'] as const;
 export type BotVerdict = (typeof BOT_VERDICTS)[number];
 
 export const REVIEWER_STATES = ['approved', 'changes_requested', 'commented', 'pending'] as const;

@@ -10,6 +10,8 @@
  * is read by Codex but written for every agent, so it says nothing.
  */
 
+import type { BotVerdict } from './model';
+
 export interface ReviewBot {
   readonly id: string;
   readonly title: string;
@@ -254,7 +256,7 @@ export interface RawCheckRun {
 export interface DerivedBotVerdict {
   readonly id: string;
   readonly login: string;
-  readonly verdict: 'clean' | 'findings' | 'failed' | 'running' | 'loading';
+  readonly verdict: BotVerdict;
   readonly count?: number;
   readonly score?: number;
   readonly severity?: FindingSeverity;
@@ -529,6 +531,13 @@ export interface VerdictOptions {
    * then `loading`, not `failed`: the bot's answer may simply not be here yet.
    */
   readonly partial?: boolean;
+  /**
+   * The pull request is merged or closed. GitHub then shows none of the
+   * checks that ran on it, so a request the bot never answered in a comment
+   * is no word either way: `unknown`, not `failed` — the run may well have
+   * passed as a check the reader can no longer see.
+   */
+  readonly closed?: boolean;
 }
 
 export function verdictsFrom(
@@ -709,7 +718,8 @@ export function verdictsFrom(
     }
     if (existing === undefined) {
       // With the timeline still loading, an old request and silence is not yet a verdict on the bot.
-      byId.set(id, { id, login, verdict: stale ? (options.partial === true ? 'loading' : 'failed') : 'running', reviewedSha: headSha, sourceId: anchor });
+      // ...and on a merged or closed pull request the silence is no verdict at all: the checks of the time are gone.
+      byId.set(id, { id, login, verdict: stale ? (options.partial === true ? 'loading' : options.closed === true ? 'unknown' : 'failed') : 'running', reviewedSha: headSha, sourceId: anchor });
       continue;
     }
     if (!checkIsThisRun) {

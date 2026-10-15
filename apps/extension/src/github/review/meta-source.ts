@@ -104,7 +104,10 @@ function unique(values: readonly string[]): string[] {
  * has not written yet, and is taken whole — its own score and severity, not
  * the earlier run's under a new count. Not on a partly read timeline, where
  * a thread not yet loaded would read as resolved.
- * Every other verdict stands as the Action wrote it.
+ * Every other verdict stands as the Action wrote it. A bot the payload does
+ * not list joins from the page when the page sees it running — or with no
+ * word (`unknown`: asked after the Action wrote, never answered, the pull
+ * request since closed), which contradicts nothing the Action knew.
  */
 export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], crawled: readonly GeldPrMeta['bots'][number][], complete = false): GeldPrMeta['bots'] {
   const live = new Map(crawled.map((bot) => [bot.id, bot]));
@@ -120,7 +123,7 @@ export function withLiveRuns(payload: readonly GeldPrMeta['bots'][number][], cra
     return bot;
   });
   const known = new Set(payload.map((bot) => bot.id));
-  return [...out, ...crawled.filter((bot) => bot.verdict === 'running' && !known.has(bot.id))];
+  return [...out, ...crawled.filter((bot) => (bot.verdict === 'running' || bot.verdict === 'unknown') && !known.has(bot.id))];
 }
 
 /** Combine a (possibly stale or truncated) payload with what the timeline currently shows. */

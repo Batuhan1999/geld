@@ -149,7 +149,7 @@ export type VerdictTone = 'success' | 'attention' | 'danger' | 'neutral';
 export function verdictTone(bot: BotVerdictRecord): VerdictTone {
   if (bot.verdict === 'clean' || allResolved(bot)) return 'success';
   if (bot.verdict === 'failed') return bot.reason === undefined ? 'danger' : 'attention';
-  if (bot.verdict === 'running' || bot.verdict === 'loading') return 'neutral';
+  if (bot.verdict === 'running' || bot.verdict === 'loading' || bot.verdict === 'unknown') return 'neutral';
   return 'attention';
 }
 
@@ -169,6 +169,7 @@ export function verdictLabel(bot: BotVerdictRecord): string {
   const title = botTitle(bot.id, bot.login);
   if (bot.verdict === 'running') return `${title} running`;
   if (bot.verdict === 'loading') return `${title}: still reading the timeline`;
+  if (bot.verdict === 'unknown') return `${title}: no word on this pull request`;
   if (bot.verdict === 'failed') return bot.reason === undefined ? `${title} failed` : `${title} skipped: ${bot.reason}`;
   return `${title} ${botDetail(bot)}`;
 }
@@ -289,7 +290,9 @@ export function authorLabels(item: ReviewItem): readonly string[] {
 export type Health = 'good' | 'warn' | 'bad' | 'pending';
 
 export function botHealth(bot: BotVerdictRecord): Health {
-  if (bot.verdict === 'running' || bot.verdict === 'loading') return 'pending';
+  // No word either way (asked on a pull request since merged or closed, no comment, the checks gone): grey, like a run
+  // not yet settled — not red, nothing says it failed.
+  if (bot.verdict === 'running' || bot.verdict === 'loading' || bot.verdict === 'unknown') return 'pending';
   // A run the bot refused ("disabled for this repository") is a warning, not a failure: nothing is wrong with the
   // pull request, the bot's setup is. A run that broke with no word is a failure.
   if (bot.verdict === 'failed') return bot.reason === undefined ? 'bad' : 'warn';
@@ -303,6 +306,7 @@ export function botHealth(bot: BotVerdictRecord): Health {
 export function botDetail(bot: BotVerdictRecord): string {
   if (bot.verdict === 'running') return 'running';
   if (bot.verdict === 'loading') return 'loading';
+  if (bot.verdict === 'unknown') return 'no word';
   // A run the bot refused ("disabled for this repository") is skipped, in its word; a run that broke is failed.
   if (bot.verdict === 'failed') return bot.reason === undefined ? 'failed' : 'skipped';
   // A scored run shows its score whatever became of its findings, and the open count beside it while threads are
