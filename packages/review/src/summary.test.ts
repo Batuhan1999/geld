@@ -351,6 +351,23 @@ describe('bots + prompts', () => {
     // (A scored summary with no Findings section counts as none found; this one-liner has none, so it is clean with its score.)
     expect(parseBotBody('Confidence Score: 4/5 [Medium risk] The implementation has no established behavioral blocker, but tests are required.', 'greptile')).toEqual({ count: 0, score: 4, clean: true, severity: 'medium' });
     expect(parseBotBody('No critical issues. 2 issues found.', 'bugbot').severity).toBeNull();
+    // Survey of public pull requests, Oct 2026 — wordings that read as findings and are not:
+    // Devin: two qualifiers before the noun ("1 new potential issue").
+    expect(parseBotBody('**Devin Review** found 1 new potential issue. <a href="https://app.devin.ai/review/o/r/pull/1"><img alt="Devin Review"></a>', 'devin')).toMatchObject({ count: 1, clean: false });
+    // Codex: "Didn't find any major issues".
+    expect(parseBotBody("Codex Review: Didn't find any major issues. Great work!", 'codex')).toMatchObject({ clean: true });
+    // ...but not beside a count of findings: the count is the word.
+    expect(parseBotBody("Didn't find any major issues. Found 2 minor issues.", 'codex')).toMatchObject({ clean: false, count: 2 });
+    expect(parseBotBody('Verdict: approve. Found 1 minor issue worth a look.', 'bugbot')).toMatchObject({ clean: false, count: 1 });
+    // ...and a finding whose title begins with the word is not the verdict word.
+    expect(parseBotBody('Approved users can edit another tenant\u2019s settings because the guard checks the role, not the tenant.', 'bugbot')).toMatchObject({ clean: false });
+    expect(parseBotBody('Approved: Cursor Bugbot is skipped after a usage-limit failure, so that automated-review signal is omitted rather than treated as findings.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('**Approved**. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('**Approved**', 'bugbot')).toMatchObject({ clean: true });
+    // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null });
     // A deploy bot's comment is not a review verdict.
     expect(verdictsFrom([], [{ author: 'vercel[bot]', body: 'Deployment ready', anchor: 'issuecomment-5' }], 'aaa')).toEqual([]);
     expect(verdictsFrom([], [{ author: 'acme[bot]', body: 'Found 2 issues', anchor: 'issuecomment-6' }], 'aaa', ['acme[bot]'])[0]?.count).toBe(2);
@@ -682,6 +699,56 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Greptile is not enabled for this repo. Enable it in the dashboard.')).toBe('Greptile is not enabled for this repo');
     expect(refusalReason('You have no credits remaining. Upgrade your plan to continue.')).toBe('You have no credits remaining');
     expect(refusalReason('Could not access the repository: permission denied.')).toBe('Could not access the repository: permission denied');
+    // Notices headed by their reason over a long explanation (Bugbot, raw and as the page reads the heading), and
+    // Codex's usage-limit line: all skips of the run, none of them findings.
+    expect(refusalReason('<h3>Bugbot couldn\'t run - usage limit reached</h3>\nBugbot is counted against Cursor usage for this user or team, and this run hit a usage or spend limit. An admin can raise the limit or enable on-demand usage in the dashboard; then re-run Bugbot with `bugbot run`. Learn more about [usage](https://cursor.com/docs) and [Bugbot billing](https://cursor.com/docs/bugbot).')).toBe("Bugbot couldn't run - usage limit reached");
+    expect(refusalReason("Bugbot couldn't run - usage limit reached\nBugbot is counted against Cursor usage for this user or team, and this run hit a usage or spend limit.")).toBe("Bugbot couldn't run - usage limit reached");
+    expect(refusalReason('<h3>Bugbot needs on-demand usage enabled</h3>\nBugbot uses usage-based billing for this team and requires on-demand usage to be enabled. A team admin can enable it in the dashboard, after which Bugbot runs on this pull request as usual; until then every run is skipped and this notice is posted again on each push to the branch so nobody is left waiting on a review that is not coming.')).toBe('Bugbot needs on-demand usage enabled');
+    expect(refusalReason('Codex usage limits have been reached for code reviews. Please check with the admins of this repo to increase the limits by adding credits. Repo admins can do so in the Codex settings.')).toBe('Codex usage limits have been reached for code reviews');
+    // A heading about the code, not the bot, is a finding's: no refusal.
+    expect(refusalReason('<h3>Cannot run migrations on a fresh database</h3>\nThe new migration references a table created two migrations later, so `db migrate` fails from scratch while an existing database upgrades fine. Reorder the files or add the dependency.')).toBeNull();
+    expect(refusalReason('### Config needs the flag enabled\nThe worker reads `FEATURE_X` but nothing in the deploy manifest sets it, so the branch below is dead in production.')).toBeNull();
+    expect(refusalReason('<h3>Cannot run review tests on a fresh checkout</h3>\nThe fixtures under `test/review/` assume a seeded database, so the suite fails on a clean clone until `make seed` has run; add it to the test target.')).toBeNull();
+    // A finding that mentions this pull request is about the code, not the bot's run.
+    expect(refusalReason('The worker added in this PR cannot access `session` because the caller drops it before the handoff.')).toBeNull();
+    // A soft-wrapped Markdown sentence is one sentence; only a blank line or a heading ends one.
+    expect(refusalReason('Bugbot is not\nenabled for this repository. Visit the dashboard to enable it.')).toBe('Bugbot is not enabled for this repository');
+    expect(refusalReason('Skipping Bugbot: Bugbot is disabled\nfor this repository.\n\nVisit the [Bugbot dashboard](https://cursor.com/dashboard/bugbot) to update your settings.')).toBe('Bugbot is disabled for this repository');
+    // A heading inside a blockquote ends its block too.
+    expect(refusalReason('> ### Permission denied\n> Check the token and retry.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied:\n\nCheck the token and retry.')).toBe('Permission denied');
+    // A run-failure heading about the code, with a usage word in it, is still a finding's; a usage heading needs no bot name.
+    expect(refusalReason('<h3>Cannot run quota migrations on a fresh database</h3>\nThe quota table is created two migrations later, so `db migrate` fails from scratch.')).toBeNull();
+    expect(refusalReason('<h3>Usage limit reached</h3>\nThis run hit the team\u2019s spend limit; an admin can raise it in the dashboard, after which reviews resume on the next push to this branch without any further action here.')).toBe('Usage limit reached');
+    // The limit named the other way round.
+    expect(refusalReason('Bugbot has reached its usage limit for this billing period.')).toBe('Bugbot has reached its usage limit for this billing period');
+    expect(refusalReason('The usage limit was reached for code reviews; try again next month.')).toBe('The usage limit was reached for code reviews; try again next month');
+    // A limit the code handles, not one the bot hit; a money word in the sentence is no subject for it.
+    expect(refusalReason('The billing worker retries forever after the customer has reached their usage limit.')).toBeNull();
+    expect(refusalReason('The billing job exceeded the retry limit and gave up.')).toBeNull();
+    expect(refusalReason('Insufficient quota for this run; add credits to continue.')).toBe('Insufficient quota for this run; add credits to continue');
+    // A finding headed "Permission denied:" keeps its explanation — a statement about the code is not advice.
+    expect(refusalReason('Permission denied:\n\nThe new guard rejects every request because the role check is reversed.')).toBeNull();
+    expect(refusalReason('Permission denied. The app must be installed for this organization.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. An administrator must grant access before retrying.')).toBe('Permission denied');
+    expect(refusalReason('Billing is not configured. Please add a payment method.')).toBe('Billing is not configured');
+    expect(refusalReason('Credits are unavailable for this run.')).toBe('Credits are unavailable for this run');
+    // An obligation on the code is a finding; so is a money word followed by what the code does.
+    expect(refusalReason('Permission denied. The guard should allow members but rejects every request.')).toBeNull();
+    expect(refusalReason('Credits are unavailable because the new query excludes paid users.')).toBeNull();
+    expect(refusalReason('Permission denied. The token must have the required scopes.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The GitHub app must be installed for this organization.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. These credentials must have the required scopes.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The newly generated token must have the required scopes.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The guard drops permissions on every request.')).toBeNull();
+    expect(refusalReason('Permission denied. The token currently lacks the required scopes.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The repository is private.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The bot needs access to this repository.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The review needs read access to the repository.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The new permissions now require an administrator for every read, breaking existing member access.')).toBeNull();
+    expect(refusalReason('Permission denied. The guard rejects members because it checks the wrong permissions.')).toBeNull();
+    expect(refusalReason('Billing is not configured for this integration. Please add a payment method.')).toBe('Billing is not configured for this integration');
+    expect(refusalReason('Credits are unavailable until the next billing cycle.')).toBe('Credits are unavailable until the next billing cycle');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';

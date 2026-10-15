@@ -19202,13 +19202,17 @@ var REVIEW_BOTS = [
     acknowledges: "reaction"
   },
   {
+    // Devin is a coding agent as well as a reviewer, under the same login: on a pull request it opened it narrates
+    // ("I'll fix CI failures and address comments…", "Tested commit abc in a browser…"), and those read as findings.
+    // Only a review-shaped comment votes; Devin Review's always are ("found N potential issues", "No Issues Found").
     id: "devin",
     title: "Devin",
     appId: 811515,
     logins: ["devin-ai-integration[bot]", "devin[bot]"],
     checkNames: ["Devin"],
     triggers: ["/devin review", "@devin review", "@devin"],
-    configFiles: []
+    configFiles: [],
+    conversational: true
   },
   {
     id: "codex",
@@ -19304,10 +19308,10 @@ function botTitle(id, login) {
   return login;
 }
 function parseBotBody(body, botId) {
-  const text = body.replace(/\r\n/g, "\n");
+  const text = body.replace(/\r\n/g, "\n").replace(/<!--[\s\S]*?-->/g, "").trim();
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== void 0 ? Number.parseFloat(scoreMatch[1]) : null;
-  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text);
+  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text);
   let count = countMatch?.[1] !== void 0 ? Number.parseInt(countMatch[1], 10) : null;
   if (botId === "greptile" && count === null && /\bconfidence score\b/i.test(text)) {
     const plain = text.replace(/<[^>]+>/g, "");
@@ -19318,21 +19322,40 @@ function parseBotBody(body, botId) {
       if (items > 0) count = items;
     }
   }
-  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || count === 0 && (score === null || botId === "greptile");
+  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
+  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || approved || count === 0 && (score === null || botId === "greptile");
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
   return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
 }
 function refusalReason(body) {
-  const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
+  const blocks = [];
+  for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").split("\n")) {
+    const heading2 = /^\s*(?:>\s*)*#{1,6}\s/.test(raw);
+    const line = raw.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+    const last = blocks.length - 1;
+    if (line === "" || heading2 || last < 0 || blocks[last] === "") blocks.push(line);
+    else blocks[last] = `${blocks[last]} ${line}`;
+    if (heading2) blocks.push("");
+  }
+  const text = blocks.filter((block) => block !== "").map((block) => /[.!?;,]$/.test(block) ? block : `${block.replace(/:$/, "")}.`).join(" ").trim();
   if (text === "") return null;
-  const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
+  if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
+    const lower = heading.toLowerCase();
+    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
+    const aboutBot = named || !runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading);
+    if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
+  }
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== void 0 && skipNotice[1].trim() !== "") return skipNotice[1].trim();
   if (text.length > 400) return null;
   const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
   const bare = sentences[0] !== void 0 && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : void 0;
-  const first = skipped ? sentences[0] : bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && REFUSAL_SUBJECT.test(sentence));
+  const first = skipped ? sentences[0] : bare ?? sentences.find(isRefusalSentence);
   if (first === void 0) return null;
   const stripped = first.replace(/^skipp(?:ing|ed)\s+[\w.-]+(?:\[bot\])?\s*[:,-]\s*/i, "");
   return stripped.replace(/[.!?]\s*$/, "").trim() || first;
@@ -19342,7 +19365,10 @@ function isBareRefusal(sentence) {
   if (lead.split(/\s+/).length > 8) return false;
   const match = REFUSAL_PHRASE.exec(lead);
   if (match === null || match.index !== 0) return false;
-  const rest = lead.slice(match[0].length).replace(/[.!?,;:]+$/, "").trim();
+  return onlyRefusalWords(lead.slice(match[0].length));
+}
+function onlyRefusalWords(text) {
+  const rest = text.replace(/[.!?,;:]+$/, "").trim();
   return rest === "" || rest.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, "")));
 }
 function isBareAdvice(body, text) {
@@ -19350,7 +19376,27 @@ function isBareAdvice(body, text) {
   const unlinked = text.replace(/https?:\/\/\S+/g, "");
   if (unlinked.length > 200 || /`/.test(body)) return false;
   const raw = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "");
-  return !/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw);
+  if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
+  if (/https?:\/\//.test(text)) return true;
+  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => {
+    if (sentence.trim() === "" || !STATEMENT_OPENER.test(sentence)) return true;
+    const subject = SETUP_SUBJECT.exec(sentence);
+    return subject !== null && onlyRefusalWords(sentence.slice(subject[0].length));
+  });
+}
+var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
+var SETUP_NOUN = /\b(?:bot|reviewer|reviews?|tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+var SETUP_SUBJECT = new RegExp(
+  `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, "")}\\s+(?:(?:\\w+ly|still|now|also|already|no longer|not yet)\\s+)?(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
+  "i"
+);
+function isRefusalSentence(sentence) {
+  const match = REFUSAL_PHRASE.exec(sentence);
+  if (match === null) return false;
+  if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
+  const before = sentence.slice(0, match.index).trim().split(/\s+/);
+  if (!REFUSAL_MONEY.test(before[before.length - 1] ?? "")) return false;
+  return onlyRefusalWords(sentence.slice(match.index + match[0].length));
 }
 var SOURCE_LINK = /https?:\/\/\S*(?:\/(?:blob|tree)\/\S+|\/pull\/\d+\/(?:files|changes)(?:[/?#]|$)|#L\d+(?:[-C]L?\d+)*[.,;:)\]]*(?:\s|$))/;
 var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
@@ -19456,12 +19502,54 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
   "enable",
   "install",
   "upgrade",
+  "run",
+  "review",
+  "integration",
+  "billing",
+  "payment",
+  "method",
+  "cycle",
+  "period",
+  "month",
+  "until",
+  "next",
+  "before",
+  "after",
+  "once",
+  "when",
+  "be",
+  "been",
+  "has",
+  "have",
+  "not",
+  "no",
+  "longer",
+  "yet",
+  "grant",
+  "granted",
+  "granting",
+  "retry",
+  "retrying",
+  "installed",
+  "configured",
+  "enabled",
+  "authorized",
+  "authorised",
+  "reconnect",
+  "renew",
+  "renewed",
+  "valid",
+  "correct",
+  "read",
+  "write",
   ""
 ]);
 var REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
     /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
     /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|review|analy[sz]e)\b/,
     /\b(?:permission denied|access denied|not authorized|unauthorized|forbidden)\b/
@@ -19470,15 +19558,17 @@ var REFUSAL_PHRASE = new RegExp(
 );
 var REFUSAL_SUBJECT = new RegExp(
   [
-    /\b(?:bot|reviews?|reviewer|reviewing|code review|analysis|scan)\b/,
+    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
-    /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
     new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
   ].map((part) => part.source).join("|"),
   "i"
 );
+var REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 function withOptionalCount(base, parsed) {
   return {
     ...base,

@@ -70,6 +70,9 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     acknowledges: 'reaction',
   },
   {
+    // Devin is a coding agent as well as a reviewer, under the same login: on a pull request it opened it narrates
+    // ("I'll fix CI failures and address comments…", "Tested commit abc in a browser…"), and those read as findings.
+    // Only a review-shaped comment votes; Devin Review's always are ("found N potential issues", "No Issues Found").
     id: 'devin',
     title: 'Devin',
     appId: 811515,
@@ -77,6 +80,7 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     checkNames: ['Devin'],
     triggers: ['/devin review', '@devin review', '@devin'],
     configFiles: [],
+    conversational: true,
   },
   {
     id: 'codex',
@@ -198,7 +202,8 @@ export interface ParsedBotBody {
  * unknown shapes return nulls rather than inventing numbers.
  */
 export function parseBotBody(body: string, botId: string): ParsedBotBody {
-  const text = body.replace(/\r\n/g, '\n');
+  // HTML comments are the bots' own markers (Cursor's automation ids, Greptile's score), never words to weigh.
+  const text = body.replace(/\r\n/g, '\n').replace(/<!--[\s\S]*?-->/g, '').trim();
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== undefined ? Number.parseFloat(scoreMatch[1]) : null;
   // "found 1 potential issue", "2 new bugs": one qualifier between the number and the noun is allowed through.
@@ -206,7 +211,7 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const countMatch =
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
-      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text));
+      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text));
   let count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
   // Greptile's summary (the one headed "Confidence Score: N/5") lists what it found under a "Findings" heading, one
   // bold title per finding ("1. **Review cards lack test coverage** ▶" raw, "**Review cards lack test coverage** ▶"
@@ -226,10 +231,18 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
   // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
+  // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
+  // Cursor's automations post under the Bugbot login. A verdict beside a count of findings ("Didn't find any major
+  // issues. Found 2 minor issues.") is not clean: the count is. The bare "Approved" must be the verdict word — followed
+  // by its punctuation or nothing — not the first word of a finding ("Approved users can edit another tenant's settings").
+  const approved =
+    (count === null || count === 0) &&
+    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
   const clean =
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
     /\bno actionable comments\b/i.test(text) ||
     /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
+    approved ||
     (count === 0 && (score === null || botId === 'greptile'));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
   // "without security risk". The denied phrase goes before the words are weighed.
@@ -299,19 +312,52 @@ export interface DerivedBotVerdict {
  * it — and shaped like one.
  */
 export function refusalReason(body: string): string | null {
-  const text = body
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_>~#]/g, '')
-    .replace(/\s+/g, ' ')
+  const untagged = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
+  // A block ends a sentence: a heading carries no full stop, and merged into the explanation under it the
+  // explanation's words would weigh on the heading's reading. Blocks are what a blank line or a heading line
+  // separates (HTML block tags became line breaks above); a soft-wrapped Markdown line is the same sentence.
+  const blocks: string[] = [];
+  for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').split('\n')) {
+    // A heading inside a blockquote ("> ### Permission denied") is a heading still.
+    const heading = /^\s*(?:>\s*)*#{1,6}\s/.test(raw);
+    const line = raw.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim();
+    const last = blocks.length - 1;
+    if (line === '' || heading || last < 0 || blocks[last] === '') blocks.push(line);
+    else blocks[last] = `${blocks[last]} ${line}`;
+    if (heading) blocks.push('');
+  }
+  const text = blocks
+    .filter((block) => block !== '')
+    // A block ending in a colon ends there too ("Permission denied:" over its advice), or the advice would weigh on it.
+    .map((block) => (/[.!?;,]$/.test(block) ? block : `${block.replace(/:$/, '')}.`))
+    .join(' ')
     .trim();
   if (text === '') return null;
+  // A notice headed by its reason, over an explanation too long for the cap below: Bugbot's "Bugbot couldn't run -
+  // usage limit reached" and "Bugbot needs on-demand usage enabled" (an <h3>, raw; the first line as the page reads
+  // it). The heading is the reason — when it is about the bot or its usage, not about the code ("Cannot run
+  // migrations on a fresh database" heads a finding).
+  const heading = untagged
+    .split('\n')
+    .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
+    .find((line) => line !== '');
+  if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
+    // A run-failure heading ("couldn't run …") must name the bot (a known title or login): "review" or "quota" in it
+    // is not enough — "Cannot run review tests on a fresh checkout", "Cannot run quota migrations on a fresh
+    // database" head findings. A heading that is itself about usage, credits or quota ("Usage limit reached") may
+    // leave the bot unnamed.
+    const lower = heading.toLowerCase();
+    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
+    const aboutBot = named || (!runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading));
+    if (aboutBot) return heading.replace(/[.!?]\s*$/, '');
+  }
   // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
   // reads it), then the reason as the first sentence, then its run configuration — long, so read before the length
   // cap below. "Auto reviews are disabled on base/target branches other than the default branch"; "Review was skipped
   // as selected files did not have any reviewable changes" (an incremental pass with nothing to read — a refusal only
   // for a bot that never reviewed here, as any refusal is).
-  const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== undefined && skipNotice[1].trim() !== '') return skipNotice[1].trim();
   if (text.length > 400) return null;
   // "Skipping Bugbot: …", "Skipped review: …" — a skip of the run, not of something in the code under review.
@@ -322,7 +368,7 @@ export function refusalReason(body: string): string | null {
   // a comment that is nothing but the refusal — "Permission denied.", "Unable to access repository." — a few
   // words with no subject before the phrase; a review of code names what it is about.
   const bare = sentences[0] !== undefined && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : undefined;
-  const first = skipped ? sentences[0] : (bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && REFUSAL_SUBJECT.test(sentence)));
+  const first = skipped ? sentences[0] : (bare ?? sentences.find(isRefusalSentence));
   if (first === undefined) return null;
   // The first sentence, without the bot's own name as a prefix ("Skipping Bugbot: " → the explanation).
   const stripped = first.replace(/^skipp(?:ing|ed)\s+[\w.-]+(?:\[bot\])?\s*[:,-]\s*/i, '');
@@ -344,7 +390,12 @@ function isBareRefusal(sentence: string): boolean {
   if (lead.split(/\s+/).length > 8) return false;
   const match = REFUSAL_PHRASE.exec(lead);
   if (match === null || match.index !== 0) return false;
-  const rest = lead.slice(match[0].length).replace(/[.!?,;:]+$/, '').trim();
+  return onlyRefusalWords(lead.slice(match[0].length));
+}
+
+/** Nothing but the words a refusal is made of (`BARE_REFUSAL_WORDS`), or nothing at all. */
+function onlyRefusalWords(text: string): boolean {
+  const rest = text.replace(/[.!?,;:]+$/, '').trim();
   return rest === '' || rest.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, '')));
 }
 
@@ -363,7 +414,75 @@ function isBareAdvice(body: string, text: string): boolean {
   if (unlinked.length > 200 || /`/.test(body)) return false;
   // The raw body, not the cleaned text: the cleanup strips underscores as emphasis marks.
   const raw = body.replace(/<!--[\s\S]*?-->/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '');
-  return !/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw);
+  if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
+  // And each sentence after the refusal must read as advice — an instruction ("Check the token and retry"), a
+  // link, or a statement about the setup the review needs that says nothing else: its subject a setup noun and
+  // the rest refusal vocabulary ("The token currently lacks the required scopes"). A statement about the code
+  // fails one or the other: "The new guard rejects every request because the role check is reversed" (a finding's
+  // explanation under a "Permission denied:" heading) on its subject, "The new permissions now require an
+  // administrator for every read, breaking existing member access" on its words.
+  if (/https?:\/\//.test(text)) return true;
+  return unlinked
+    .split(/(?<=[.!?])\s+/)
+    .slice(1)
+    .every((sentence) => {
+      if (sentence.trim() === '' || !STATEMENT_OPENER.test(sentence)) return true;
+      const subject = SETUP_SUBJECT.exec(sentence);
+      return subject !== null && onlyRefusalWords(sentence.slice(subject[0].length));
+    });
+}
+
+/** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
+const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
+/**
+ * A statement that is advice all the same: it is about the bot or the setup
+ * the review needs — the bot or review itself ("The bot needs access to this
+ * repository"), a credential ("The token must have the required scopes"), the
+ * installation or account ("The app must be installed for this
+ * organization"), billing, or a person with a say over them ("An
+ * administrator must grant access") — as its subject, see `SETUP_SUBJECT`,
+ * with nothing after the verb but refusal vocabulary (`isBareAdvice`). A
+ * statement about the code has none of these for a subject ("The guard
+ * should allow members but rejects every request") or says more than a
+ * notice does ("The new permissions now require an administrator for every
+ * read").
+ */
+const SETUP_NOUN = /\b(?:bot|reviewer|reviews?|tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+/**
+ * A statement whose subject is such a noun: the determiner, up to two words
+ * of modifier, the noun, and then the predicate's verb ("The token must…",
+ * "An administrator must…", "These credentials must…", "The newly generated
+ * token must…", an adverb allowed between: "The token currently lacks…").
+ * The verb is what makes the noun the subject: in "The guard
+ * drops permissions on every request" the noun is the object, and the
+ * sentence is the code's business — as is a setup noun anywhere further in
+ * ("The guard rejects members because it checks the wrong permissions").
+ */
+const SETUP_SUBJECT = new RegExp(
+  `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\s+(?:(?:\\w+ly|still|now|also|already|no longer|not yet)\\s+)?(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
+  'i',
+);
+
+/**
+ * A sentence that refuses: it holds a refusal phrase, and it is about the bot
+ * or its review, the reader, or their repository — not about something in the
+ * diff. A money word ("credits", "quota", "billing") is a subject only when it
+ * is what the phrase itself is about ("no credits remaining", "insufficient
+ * quota", "Billing is not configured"): "cannot run quota migrations" and "the
+ * billing worker retries after the customer has reached their usage limit"
+ * are findings.
+ */
+function isRefusalSentence(sentence: string): boolean {
+  const match = REFUSAL_PHRASE.exec(sentence);
+  if (match === null) return false;
+  if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
+  // Or the money word is what the phrase is said of — the word right before it: "Billing is not configured",
+  // "Credits are unavailable for this run" — not a modifier further back ("the billing worker … has reached their
+  // usage limit"), and with nothing after the phrase but refusal vocabulary: "Credits are unavailable because the
+  // new query excludes paid users" is about the code.
+  const before = sentence.slice(0, match.index).trim().split(/\s+/);
+  if (!REFUSAL_MONEY.test(before[before.length - 1] ?? '')) return false;
+  return onlyRefusalWords(sentence.slice(match.index + match[0].length));
 }
 
 /**
@@ -382,7 +501,9 @@ const BARE_REFUSAL_WORDS = new Set([
   'installation', 'app', 'github', 'token', 'tokens', 'credentials', 'key', 'secret', 'permission', 'permissions', 'access', 'scope', 'scopes', 'rights',
   'account', 'organization', 'org', 'team', 'workspace', 'project', 'plan', 'subscription', 'trial', 'quota', 'limit', 'credits', 'usage', 'seats', 'settings', 'dashboard',
   'remaining', 'left', 'available', 'exceeded', 'expired', 'invalid', 'missing', 'required', 'needed', 'right', 'now', 'currently', 'moment', 'time',
-  'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade',
+  'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade', 'run', 'review',
+  'integration', 'billing', 'payment', 'method', 'cycle', 'period', 'month', 'until', 'next', 'before', 'after', 'once', 'when',
+  'be', 'been', 'has', 'have', 'not', 'no', 'longer', 'yet', 'grant', 'granted', 'granting', 'retry', 'retrying', 'installed', 'configured', 'enabled', 'authorized', 'authorised', 'reconnect', 'renew', 'renewed', 'valid', 'correct', 'read', 'write',
   '',
 ]);
 
@@ -391,6 +512,8 @@ const REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
     /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
     /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|review|analy[sz]e)\b/,
     /\b(?:permission denied|access denied|not authorized|unauthorized|forbidden)\b/,
@@ -401,16 +524,20 @@ const REFUSAL_PHRASE = new RegExp(
 );
 
 /**
- * The sentence is about the bot or its review — a bot's name, "review(s)",
- * "this repository", "your account", credits — rather than about something
- * in the diff. A review bot's own login or title is one of these; so is the
- * second person, since a refusal addresses the reader ("You have no credits").
+ * The sentence is about the bot or its review — a bot's name, "the review" /
+ * "to review" / "code reviews", "this repository", "your account", credits —
+ * rather than about something in the diff. "review" alone is not enough:
+ * "Cannot run review tests on a fresh checkout" is about the code. A review
+ * bot's own login or title is one of these; so is the second person, since
+ * a refusal addresses the reader ("You have no credits"). The money words
+ * are not (`REFUSAL_MONEY`): "billing" names a worker as readily as a bill.
  */
 const REFUSAL_SUBJECT = new RegExp(
   [
-    /\b(?:bot|reviews?|reviewer|reviewing|code review|analysis|scan)\b/,
+    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
-    /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
     new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
@@ -419,6 +546,8 @@ const REFUSAL_SUBJECT = new RegExp(
     .join('|'),
   'i',
 );
+/** The money words: a subject only inside the refusal phrase itself ("no credits remaining"), see `isRefusalSentence`. */
+const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 
 function withOptionalCount(base: DerivedBotVerdict, parsed: ParsedBotBody): DerivedBotVerdict {
   return {
