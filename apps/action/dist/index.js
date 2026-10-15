@@ -19377,13 +19377,21 @@ function isBareAdvice(body, text) {
   return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || ADVICE_MARK.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
-var ADVICE_MARK = /\b(?:must|should|needs? to|has to|have to|will need|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+var ADVICE_MARK = new RegExp(
+  [
+    /\b(?:admin(?:istrator)?|owner|maintainer)s?\s+(?:must|should|needs? to|has to|have to|will need to|can)\b/,
+    /\b(?:must|should|needs? to|has to|have to|will need to)\s+(?:be\s+|first\s+)?(?:grant|enabl|install|configur|add|upgrad|authori[sz]|approv|connect|reconnect|re-?run|retr|renew|allow access)\w*/
+  ].map((part) => part.source).join("|"),
+  "i"
+);
 function isRefusalSentence(sentence) {
   const match = REFUSAL_PHRASE.exec(sentence);
   if (match === null) return false;
   if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
   const before = sentence.slice(0, match.index).trim().split(/\s+/);
-  return REFUSAL_MONEY.test(before[before.length - 1] ?? "");
+  if (!REFUSAL_MONEY.test(before[before.length - 1] ?? "")) return false;
+  const after = sentence.slice(match.index + match[0].length).replace(/[.!?,;:]+$/, "").trim();
+  return after === "" || after.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, "")));
 }
 var SOURCE_LINK = /https?:\/\/\S*(?:\/(?:blob|tree)\/\S+|\/pull\/\d+\/(?:files|changes)(?:[/?#]|$)|#L\d+(?:[-C]L?\d+)*[.,;:)\]]*(?:\s|$))/;
 var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
@@ -19489,6 +19497,8 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
   "enable",
   "install",
   "upgrade",
+  "run",
+  "review",
   ""
 ]);
 var REFUSAL_PHRASE = new RegExp(
