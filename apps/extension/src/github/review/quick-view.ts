@@ -31,7 +31,50 @@ export function renderQuickView(slot: HTMLElement, nodes: readonly HTMLElement[]
   openMinimized(list);
   compactForcePushes(list);
   compactEvents(list, context.headSha ?? null);
+  joinCommitSubjects(list);
   timeCommitRows(list, onChange);
+}
+
+const ATTR_JOINED = 'data-geld-joined';
+const ATTR_EMPTY = 'data-geld-empty';
+
+/**
+ * GitHub cuts a commit subject past 72 characters: the row's link ends in
+ * "…" and the body under GitHub's "…" expander begins with the rest
+ * ("…gories"), so the subject is never on one line even opened. In the
+ * panel the row is one ellipsized line that opens to the whole message, so
+ * the two halves are joined: the link reads the whole subject (the link's
+ * `title` is the full message, subject first) and the body loses the tail,
+ * and the blank line after it; a body left empty is hidden. Text only, and
+ * put back when the node goes home. Exported for its test.
+ */
+export function joinCommitSubjects(list: HTMLElement): void {
+  for (const link of list.querySelectorAll<HTMLAnchorElement>('a.markdown-title')) {
+    if (link.hasAttribute(ATTR_JOINED)) continue;
+    const shown = link.textContent ?? '';
+    if (!shown.endsWith('\u2026')) continue;
+    const container = link.closest<HTMLElement>('.js-details-container');
+    const pre = container?.querySelector('pre') ?? null;
+    const text = pre?.firstChild;
+    if (pre === null || !(text instanceof Text) || !text.data.startsWith('\u2026')) continue;
+    const subject = (link.getAttribute('title') ?? '').split('\n')[0]?.trim() ?? '';
+    const head = shown.slice(0, -1);
+    const tailLine = text.data.slice(1).split('\n')[0] ?? '';
+    // The halves must be the subject: GitHub's title says it whole, the link shows its head and the body its tail.
+    if (subject === '' || !subject.startsWith(head) || head + tailLine !== subject) continue;
+    const before = text.data;
+    link.textContent = subject;
+    link.setAttribute(ATTR_JOINED, '');
+    text.data = text.data.slice(1 + tailLine.length).replace(/^\n+/, '');
+    const empty = (pre.textContent ?? '').trim() === '';
+    if (empty) pre.setAttribute(ATTR_EMPTY, '');
+    onRestore(() => {
+      link.textContent = shown;
+      link.removeAttribute(ATTR_JOINED);
+      text.data = before;
+      pre.removeAttribute(ATTR_EMPTY);
+    });
+  }
 }
 
 const ATTR_EVENT_HIDDEN = 'data-geld-event-hidden';
