@@ -5467,6 +5467,23 @@ a.geld-review__rerun:hover {
   flex: 0 0 auto;
 }
 
+/* Opened with GitHub's "…" (`Details--on` on the container, which shows the message body under the line), the
+ * message is what the reader asked for: the cell wraps and the subject shows whole — ellipsized on one line, the
+ * subject's middle stayed hidden while the body below began with its last word ("…gories"). */
+.geld-review__qv .TimelineItem .js-details-container.Details--on .pr-1.flex-auto.min-width-0 {
+  /* Back to flow, as GitHub lays it out: the subject wraps and the "…" button follows its last word inline. */
+  display: block;
+  overflow: visible;
+  white-space: normal;
+}
+
+.geld-review__qv .TimelineItem .js-details-container.Details--on .pr-1.flex-auto.min-width-0 > code {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* The cells' own flex row (`d-flex flex-auto`) is a flex item with `min-width: auto`, whose min-content is the whole
  * unwrapped message: a long message pushed the row past the time column, and the SHA under the time. Letting the
  * row shrink is what lets the message cell above ellipsize. */
