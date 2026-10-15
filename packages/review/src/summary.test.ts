@@ -719,6 +719,13 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Skipping Bugbot: Bugbot is disabled\nfor this repository.\n\nVisit the [Bugbot dashboard](https://cursor.com/dashboard/bugbot) to update your settings.')).toBe('Bugbot is disabled for this repository');
     // A heading inside a blockquote ends its block too.
     expect(refusalReason('> ### Permission denied\n> Check the token and retry.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied:\n\nCheck the token and retry.')).toBe('Permission denied');
+    // A run-failure heading about the code, with a usage word in it, is still a finding's; a usage heading needs no bot name.
+    expect(refusalReason('<h3>Cannot run quota migrations on a fresh database</h3>\nThe quota table is created two migrations later, so `db migrate` fails from scratch.')).toBeNull();
+    expect(refusalReason('<h3>Usage limit reached</h3>\nThis run hit the team\u2019s spend limit; an admin can raise it in the dashboard, after which reviews resume on the next push to this branch without any further action here.')).toBe('Usage limit reached');
+    // The limit named the other way round.
+    expect(refusalReason('Bugbot has reached its usage limit for this billing period.')).toBe('Bugbot has reached its usage limit for this billing period');
+    expect(refusalReason('The usage limit was reached for code reviews; try again next month.')).toBe('The usage limit was reached for code reviews; try again next month');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';

@@ -328,7 +328,8 @@ export function refusalReason(body: string): string | null {
   }
   const text = blocks
     .filter((block) => block !== '')
-    .map((block) => (/[.!?:;,]$/.test(block) ? block : `${block}.`))
+    // A block ending in a colon ends there too ("Permission denied:" over its advice), or the advice would weigh on it.
+    .map((block) => (/[.!?;,]$/.test(block) ? block : `${block.replace(/:$/, '')}.`))
     .join(' ')
     .trim();
   if (text === '') return null;
@@ -341,10 +342,14 @@ export function refusalReason(body: string): string | null {
     .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
     .find((line) => line !== '');
   if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
-    // The heading must name the bot (a known title or login) or its usage, credits or quota: "review" alone would
-    // let "Cannot run review tests on a fresh checkout" through, and that heads a finding.
+    // A run-failure heading ("couldn't run …") must name the bot (a known title or login): "review" or "quota" in it
+    // is not enough — "Cannot run review tests on a fresh checkout", "Cannot run quota migrations on a fresh
+    // database" head findings. A heading that is itself about usage, credits or quota ("Usage limit reached") may
+    // leave the bot unnamed.
     const lower = heading.toLowerCase();
-    const aboutBot = /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
+    const aboutBot = named || (!runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading));
     if (aboutBot) return heading.replace(/[.!?]\s*$/, '');
   }
   // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
@@ -363,7 +368,9 @@ export function refusalReason(body: string): string | null {
   // a comment that is nothing but the refusal — "Permission denied.", "Unable to access repository." — a few
   // words with no subject before the phrase; a review of code names what it is about.
   const bare = sentences[0] !== undefined && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : undefined;
-  const first = skipped ? sentences[0] : (bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && REFUSAL_SUBJECT.test(sentence)));
+  // A run-failure sentence must name the bot, its review, the reader or their repository — a money word alone
+  // ("quota") is a subject for "no credits remaining", not for "cannot run quota migrations on a fresh database".
+  const first = skipped ? sentences[0] : (bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && (RUN_FAILURE.test(sentence) ? REFUSAL_SUBJECT_STRICT : REFUSAL_SUBJECT).test(sentence)));
   if (first === undefined) return null;
   // The first sentence, without the bot's own name as a prefix ("Skipping Bugbot: " → the explanation).
   const stripped = first.replace(/^skipp(?:ing|ed)\s+[\w.-]+(?:\[bot\])?\s*[:,-]\s*/i, '');
@@ -432,7 +439,8 @@ const REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
     /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
-    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:has|have|was|were)\s+been\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
     /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|review|analy[sz]e)\b/,
     /\b(?:permission denied|access denied|not authorized|unauthorized|forbidden)\b/,
@@ -450,21 +458,22 @@ const REFUSAL_PHRASE = new RegExp(
  * bot's own login or title is one of these; so is the second person, since
  * a refusal addresses the reader ("You have no credits").
  */
-const REFUSAL_SUBJECT = new RegExp(
-  [
-    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
-    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
-    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
-    /\b(?:credits?|quota|billing|seats?)\b/,
-    /\byou(?:r)?\b/,
-    /\[bot\]/,
-    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
-  ]
-    .map((part) => part.source)
-    .join('|'),
-  'i',
-);
+const REFUSAL_SUBJECT_PARTS = [
+  /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+  /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+  /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+  /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
+  /\byou(?:r)?\b/,
+  /\[bot\]/,
+  new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
+];
+/** The money words alone: a subject for "no credits remaining", not for "cannot run quota migrations". */
+const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/;
+const REFUSAL_SUBJECT = new RegExp([...REFUSAL_SUBJECT_PARTS, REFUSAL_MONEY].map((part) => part.source).join('|'), 'i');
+/** Without the money words: what a sentence that says the bot could not run or start must name. */
+const REFUSAL_SUBJECT_STRICT = new RegExp(REFUSAL_SUBJECT_PARTS.map((part) => part.source).join('|'), 'i');
+/** A run that did not happen — the phrase a finding about the code uses most readily ("Cannot run migrations…"). */
+const RUN_FAILURE = /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|analy[sz]e)\b/i;
 
 function withOptionalCount(base: DerivedBotVerdict, parsed: ParsedBotBody): DerivedBotVerdict {
   return {
