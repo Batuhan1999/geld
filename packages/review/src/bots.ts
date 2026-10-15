@@ -436,13 +436,14 @@ const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|instal
  * A statement whose subject is such a noun: the determiner, up to two words
  * of modifier, the noun, and then the predicate's verb ("The token must…",
  * "An administrator must…", "These credentials must…", "The newly generated
- * token must…"). The verb is what makes the noun the subject: in "The guard
+ * token must…", an adverb allowed between: "The token currently lacks…").
+ * The verb is what makes the noun the subject: in "The guard
  * drops permissions on every request" the noun is the object, and the
  * sentence is the code's business — as is a setup noun anywhere further in
  * ("The guard rejects members because it checks the wrong permissions").
  */
 const SETUP_SUBJECT = new RegExp(
-  `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\s+(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
+  `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\s+(?:(?:\\w+ly|still|now|also|already|no longer|not yet)\\s+)?(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
   'i',
 );
 
