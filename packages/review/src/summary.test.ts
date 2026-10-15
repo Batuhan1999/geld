@@ -723,6 +723,13 @@ describe('a bot that refuses to run', () => {
     // The limit named the other way round.
     expect(refusalReason('Bugbot has reached its usage limit for this billing period.')).toBe('Bugbot has reached its usage limit for this billing period');
     expect(refusalReason('The usage limit was reached for code reviews; try again next month.')).toBe('The usage limit was reached for code reviews; try again next month');
+    // A limit the code handles, not one the bot hit; a money word in the sentence is no subject for it.
+    expect(refusalReason('The billing worker retries forever after the customer has reached their usage limit.')).toBeNull();
+    expect(refusalReason('The billing job exceeded the retry limit and gave up.')).toBeNull();
+    expect(refusalReason('Insufficient quota for this run; add credits to continue.')).toBe('Insufficient quota for this run; add credits to continue');
+    // A finding headed "Permission denied:" keeps its explanation — a statement about the code is not advice.
+    expect(refusalReason('Permission denied:\n\nThe new guard rejects every request because the role check is reversed.')).toBeNull();
+    expect(refusalReason('Permission denied. The app must be installed for this organization.')).toBe('Permission denied');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';
