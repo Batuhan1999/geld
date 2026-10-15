@@ -5690,10 +5690,12 @@ a.geld-review__rerun:hover {
 }
 
 /* The row with an open menu is above every other row, the open one included — otherwise a menu dropped from a
- * row above the open row painted under it (equal z-index, later in the DOM wins). */
+ * row above the open row painted under it (equal z-index, later in the DOM wins) — and above the rail and
+ * target-ring overlays (`::after`, z-index 5) on the rows and slots below it, which at 4 still drew their line
+ * across the menu (a round's ⋯ over the ring round a permalinked line inside it). */
 .geld-review__row:has(details[open]) {
   position: relative;
-  z-index: 4;
+  z-index: 6;
 }
 
 .geld-review__head-slot:empty {
