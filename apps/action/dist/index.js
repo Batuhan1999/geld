@@ -19334,7 +19334,8 @@ function refusalReason(body) {
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
-    const aboutBot = REFUSAL_SUBJECT.test(heading) || /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => new RegExp(`\\b${bot.title}\\b`, "i").test(heading) || bot.logins.some((login) => heading.toLowerCase().includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const lower = heading.toLowerCase();
+    const aboutBot = /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
     if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
   }
   const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
