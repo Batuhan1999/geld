@@ -19322,7 +19322,7 @@ function parseBotBody(body, botId) {
       if (items > 0) count = items;
     }
   }
-  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\b/i.test(text));
+  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
   const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || approved || count === 0 && (score === null || botId === "greptile");
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
