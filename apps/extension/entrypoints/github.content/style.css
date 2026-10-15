@@ -5484,6 +5484,11 @@ a.geld-review__rerun:hover {
   overflow-wrap: anywhere;
 }
 
+/* A message body that was only the subject's tail (quick-view.ts: joinCommitSubjects) has nothing left to show. */
+.geld-review__qv pre[data-geld-empty] {
+  display: none;
+}
+
 /* The cells' own flex row (`d-flex flex-auto`) is a flex item with `min-width: auto`, whose min-content is the whole
  * unwrapped message: a long message pushed the row past the time column, and the SHA under the time. Letting the
  * row shrink is what lets the message cell above ellipsize. */
