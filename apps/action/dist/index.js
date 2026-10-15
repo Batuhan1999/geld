@@ -19365,7 +19365,10 @@ function isBareRefusal(sentence) {
   if (lead.split(/\s+/).length > 8) return false;
   const match = REFUSAL_PHRASE.exec(lead);
   if (match === null || match.index !== 0) return false;
-  const rest = lead.slice(match[0].length).replace(/[.!?,;:]+$/, "").trim();
+  return onlyRefusalWords(lead.slice(match[0].length));
+}
+function onlyRefusalWords(text) {
+  const rest = text.replace(/[.!?,;:]+$/, "").trim();
   return rest === "" || rest.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, "")));
 }
 function isBareAdvice(body, text) {
@@ -19374,10 +19377,15 @@ function isBareAdvice(body, text) {
   if (unlinked.length > 200 || /`/.test(body)) return false;
   const raw = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "");
   if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
-  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || SETUP_SUBJECT.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+  if (/https?:\/\//.test(text)) return true;
+  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => {
+    if (sentence.trim() === "" || !STATEMENT_OPENER.test(sentence)) return true;
+    const subject = SETUP_SUBJECT.exec(sentence);
+    return subject !== null && onlyRefusalWords(sentence.slice(subject[0].length));
+  });
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
-var SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+var SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 var SETUP_SUBJECT = new RegExp(
   `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, "")}\\s+(?:(?:\\w+ly|still|now|also|already|no longer|not yet)\\s+)?(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
   "i"
@@ -19388,8 +19396,7 @@ function isRefusalSentence(sentence) {
   if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
   const before = sentence.slice(0, match.index).trim().split(/\s+/);
   if (!REFUSAL_MONEY.test(before[before.length - 1] ?? "")) return false;
-  const after = sentence.slice(match.index + match[0].length).replace(/[.!?,;:]+$/, "").trim();
-  return after === "" || after.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, "")));
+  return onlyRefusalWords(sentence.slice(match.index + match[0].length));
 }
 var SOURCE_LINK = /https?:\/\/\S*(?:\/(?:blob|tree)\/\S+|\/pull\/\d+\/(?:files|changes)(?:[/?#]|$)|#L\d+(?:[-C]L?\d+)*[.,;:)\]]*(?:\s|$))/;
 var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
@@ -19510,6 +19517,29 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
   "after",
   "once",
   "when",
+  "be",
+  "been",
+  "has",
+  "have",
+  "not",
+  "no",
+  "longer",
+  "yet",
+  "grant",
+  "granted",
+  "granting",
+  "retry",
+  "retrying",
+  "installed",
+  "configured",
+  "enabled",
+  "authorized",
+  "authorised",
+  "reconnect",
+  "renew",
+  "renewed",
+  "valid",
+  "correct",
   ""
 ]);
 var REFUSAL_PHRASE = new RegExp(

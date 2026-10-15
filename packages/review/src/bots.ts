@@ -390,7 +390,12 @@ function isBareRefusal(sentence: string): boolean {
   if (lead.split(/\s+/).length > 8) return false;
   const match = REFUSAL_PHRASE.exec(lead);
   if (match === null || match.index !== 0) return false;
-  const rest = lead.slice(match[0].length).replace(/[.!?,;:]+$/, '').trim();
+  return onlyRefusalWords(lead.slice(match[0].length));
+}
+
+/** Nothing but the words a refusal is made of (`BARE_REFUSAL_WORDS`), or nothing at all. */
+function onlyRefusalWords(text: string): boolean {
+  const rest = text.replace(/[.!?,;:]+$/, '').trim();
   return rest === '' || rest.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, '')));
 }
 
@@ -411,13 +416,20 @@ function isBareAdvice(body: string, text: string): boolean {
   const raw = body.replace(/<!--[\s\S]*?-->/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '');
   if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
   // And each sentence after the refusal must read as advice — an instruction ("Check the token and retry"), a
-  // link, or a sentence about the reader, the bot or the setup the review needs — not as a statement about the
-  // code ("The new guard rejects every request because the role check is reversed" explains a finding headed
-  // "Permission denied:").
+  // link, or a statement about the setup the review needs that says nothing else: its subject a setup noun and
+  // the rest refusal vocabulary ("The token currently lacks the required scopes"). A statement about the code
+  // fails one or the other: "The new guard rejects every request because the role check is reversed" (a finding's
+  // explanation under a "Permission denied:" heading) on its subject, "The new permissions now require an
+  // administrator for every read, breaking existing member access" on its words.
+  if (/https?:\/\//.test(text)) return true;
   return unlinked
     .split(/(?<=[.!?])\s+/)
     .slice(1)
-    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || SETUP_SUBJECT.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+    .every((sentence) => {
+      if (sentence.trim() === '' || !STATEMENT_OPENER.test(sentence)) return true;
+      const subject = SETUP_SUBJECT.exec(sentence);
+      return subject !== null && onlyRefusalWords(sentence.slice(subject[0].length));
+    });
 }
 
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
@@ -427,11 +439,14 @@ const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|the
  * needs — a credential ("The token must have the required scopes"), the
  * installation or account ("The app must be installed for this
  * organization"), billing, or a person with a say over them ("An
- * administrator must grant access") — as its subject, see `SETUP_SUBJECT`.
- * A statement about the code has none of these for a subject: "The guard
- * should allow members but rejects every request".
+ * administrator must grant access") — as its subject, see `SETUP_SUBJECT`,
+ * with nothing after the verb but refusal vocabulary (`isBareAdvice`). A
+ * statement about the code has none of these for a subject ("The guard
+ * should allow members but rejects every request") or says more than a
+ * notice does ("The new permissions now require an administrator for every
+ * read").
  */
-const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 /**
  * A statement whose subject is such a noun: the determiner, up to two words
  * of modifier, the noun, and then the predicate's verb ("The token must…",
@@ -466,8 +481,7 @@ function isRefusalSentence(sentence: string): boolean {
   // new query excludes paid users" is about the code.
   const before = sentence.slice(0, match.index).trim().split(/\s+/);
   if (!REFUSAL_MONEY.test(before[before.length - 1] ?? '')) return false;
-  const after = sentence.slice(match.index + match[0].length).replace(/[.!?,;:]+$/, '').trim();
-  return after === '' || after.split(/\s+/).every((word) => BARE_REFUSAL_WORDS.has(word.toLowerCase().replace(/^[^a-z]+|[^a-z]+$/gi, '')));
+  return onlyRefusalWords(sentence.slice(match.index + match[0].length));
 }
 
 /**
@@ -488,6 +502,7 @@ const BARE_REFUSAL_WORDS = new Set([
   'remaining', 'left', 'available', 'exceeded', 'expired', 'invalid', 'missing', 'required', 'needed', 'right', 'now', 'currently', 'moment', 'time',
   'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade', 'run', 'review',
   'integration', 'billing', 'payment', 'method', 'cycle', 'period', 'month', 'until', 'next', 'before', 'after', 'once', 'when',
+  'be', 'been', 'has', 'have', 'not', 'no', 'longer', 'yet', 'grant', 'granted', 'granting', 'retry', 'retrying', 'installed', 'configured', 'enabled', 'authorized', 'authorised', 'reconnect', 'renew', 'renewed', 'valid', 'correct',
   '',
 ]);
 
