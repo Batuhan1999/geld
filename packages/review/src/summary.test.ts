@@ -334,9 +334,22 @@ describe('bots + prompts', () => {
   it('parses greptile scores and known logins', () => {
     expect(looksLikeBotLogin('cursor[bot]')).toBe(true);
     expect(parseBotBody('Greptile 4/5. Found 1 issue.', 'greptile')).toEqual({ count: 1, score: 4, clean: false, severity: null });
+    // Greptile's summary lists its findings under a "Findings" heading; one without the section found nothing, however
+    // its risk sentence is worded (mint#12992: 5/5, "This PR appears safe to merge", no findings — read as findings,
+    // the chip said 5/5 but the request menu pre-ticked Greptile over "Findings").
+    const cleanRaw = '<!-- greptile_summary -->\n\n<h2><a href="https://app.greptile.com/api/retrigger?id=1"><img alt="Retrigger"></a>Confidence Score: 5/5</h2>\n\n<!-- greptile-risk -->\n\n**[Low impact]** This PR appears safe to merge.\n\n<!-- greptile_confidence_score:5 -->\n\n<sub>Reviews (1) · Last reviewed commit: ["Make test-hygiene…"](https://github.com/o/r/commit/abc) · [Reviewed by Greptile](https://www.greptile.com/)</sub>';
+    expect(parseBotBody(cleanRaw, 'greptile')).toMatchObject({ count: 0, score: 5, clean: true });
+    expect(parseBotBody('Confidence Score: 5/5\n[Low impact] This PR appears safe to merge.\nReviews (1) · Last reviewed commit: "Make test-hygiene presentation assertion..." · Reviewed by Greptile', 'greptile')).toMatchObject({ count: 0, score: 5, clean: true });
+    // With the section, its bold titles are the findings — raw ("1. **…** ▶") and as the page reads the list.
+    const findingsRaw = '<h2>Confidence Score: 4/5</h2>\n\nThe PR appears safe to merge, with a non-blocking request for a focused regression test.\n\n<h2>Findings</h2>\n\n1. <img alt="P2">&nbsp;**Review cards lack test coverage** <a href="#">▶</a>\n2. <img alt="P2">&nbsp;**Another one** <a href="#">▶</a>\n\n<details><summary><h3>Summary</h3></summary>\n\nThe PR lets a review\u2019s own body card render as a dressed chat message.\n</details>';
+    expect(parseBotBody(findingsRaw, 'greptile')).toMatchObject({ count: 2, score: 4, clean: false });
+    expect(parseBotBody('Confidence Score: 4/5\n[Medium impact] Adjusts how review comments are identified.\nThe PR appears safe to merge, with a non-blocking request.\nFindings\n\n**Review cards lack test coverage** ▶\n\nSummary\nThe PR lets a review\u2019s own body card render as a dressed chat message.', 'greptile')).toMatchObject({ count: 1, score: 4, clean: false });
+    // A Findings section whose items cannot be read claims nothing either way.
+    expect(parseBotBody('Confidence Score: 3/5\nFindings\nsomething unreadable\nSummary\nwords', 'greptile')).toMatchObject({ count: null, clean: false });
     expect(parseBotBody('1 high severity bug found.', 'bugbot').severity).toBe('high');
     // A denied severity word is not a severity: Greptile's "[Medium risk] ... no established behavioral blocker" is medium, not high.
-    expect(parseBotBody('Confidence Score: 4/5 [Medium risk] The implementation has no established behavioral blocker, but tests are required.', 'greptile')).toEqual({ count: null, score: 4, clean: false, severity: 'medium' });
+    // (A scored summary with no Findings section counts as none found; this one-liner has none, so it is clean with its score.)
+    expect(parseBotBody('Confidence Score: 4/5 [Medium risk] The implementation has no established behavioral blocker, but tests are required.', 'greptile')).toEqual({ count: 0, score: 4, clean: true, severity: 'medium' });
     expect(parseBotBody('No critical issues. 2 issues found.', 'bugbot').severity).toBeNull();
     // A deploy bot's comment is not a review verdict.
     expect(verdictsFrom([], [{ author: 'vercel[bot]', body: 'Deployment ready', anchor: 'issuecomment-5' }], 'aaa')).toEqual([]);

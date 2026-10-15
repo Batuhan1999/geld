@@ -19308,8 +19308,17 @@ function parseBotBody(body, botId) {
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== void 0 ? Number.parseFloat(scoreMatch[1]) : null;
   const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text);
-  const count = countMatch?.[1] !== void 0 ? Number.parseInt(countMatch[1], 10) : null;
-  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || count === 0 && score === null;
+  let count = countMatch?.[1] !== void 0 ? Number.parseInt(countMatch[1], 10) : null;
+  if (botId === "greptile" && count === null && /\bconfidence score\b/i.test(text)) {
+    const plain = text.replace(/<[^>]+>/g, "");
+    const section = /^\s*(?:#{1,6}\s*)?Findings\s*$\n([\s\S]*?)(?=^\s*(?:#{1,6}\s*)?(?:Summary|Reviews \(\d+\))\b|(?![\s\S]))/im.exec(plain);
+    if (section === null) count = 0;
+    else {
+      const items = (section[1] ?? "").split("\n").filter((line) => /\*\*[^*]+\*\*/.test(line)).length;
+      if (items > 0) count = items;
+    }
+  }
+  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || count === 0 && (score === null || botId === "greptile");
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
   return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
