@@ -288,7 +288,15 @@ export function refusalReason(body: string): string | null {
     .replace(/[`*_>~#]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (text === '' || text.length > 400) return null;
+  if (text === '') return null;
+  // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
+  // reads it), then the reason as the first sentence, then its run configuration — long, so read before the length
+  // cap below. "Auto reviews are disabled on base/target branches other than the default branch"; "Review was skipped
+  // as selected files did not have any reviewable changes" (an incremental pass with nothing to read — a refusal only
+  // for a bot that never reviewed here, as any refusal is).
+  const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  if (skipNotice?.[1] !== undefined && skipNotice[1].trim() !== '') return skipNotice[1].trim();
+  if (text.length > 400) return null;
   // "Skipping Bugbot: …", "Skipped review: …" — a skip of the run, not of something in the code under review.
   const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
