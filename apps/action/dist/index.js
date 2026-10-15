@@ -19378,7 +19378,7 @@ function isBareAdvice(body, text) {
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
 var SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
-var SETUP_SUBJECT = new RegExp(`^\\s*(?:the|this|that|an?|its|your|our)\\s+(?:[\\w-]+\\s+)?${SETUP_NOUN.source.replace(/^\\b|\\b$/g, "")}\\b`, "i");
+var SETUP_SUBJECT = new RegExp(`^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, "")}\\b`, "i");
 function isRefusalSentence(sentence) {
   const match = REFUSAL_PHRASE.exec(sentence);
   if (match === null) return false;
