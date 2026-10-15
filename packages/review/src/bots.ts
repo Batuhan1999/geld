@@ -317,7 +317,8 @@ export function refusalReason(body: string): string | null {
   // separates (HTML block tags became line breaks above); a soft-wrapped Markdown line is the same sentence.
   const blocks: string[] = [];
   for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').split('\n')) {
-    const heading = /^\s*#{1,6}\s/.test(raw);
+    // A heading inside a blockquote ("> ### Permission denied") is a heading still.
+    const heading = /^\s*(?:>\s*)*#{1,6}\s/.test(raw);
     const line = raw.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim();
     const last = blocks.length - 1;
     if (line === '' || heading || last < 0 || blocks[last] === '') blocks.push(line);
