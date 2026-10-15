@@ -19385,7 +19385,7 @@ function isBareAdvice(body, text) {
   });
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
-var SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+var SETUP_NOUN = /\b(?:bot|reviewer|reviews?|tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 var SETUP_SUBJECT = new RegExp(
   `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, "")}\\s+(?:(?:\\w+ly|still|now|also|already|no longer|not yet)\\s+)?(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
   "i"
@@ -19540,6 +19540,8 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
   "renewed",
   "valid",
   "correct",
+  "read",
+  "write",
   ""
 ]);
 var REFUSAL_PHRASE = new RegExp(

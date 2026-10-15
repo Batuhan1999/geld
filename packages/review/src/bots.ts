@@ -435,8 +435,9 @@ function isBareAdvice(body: string, text: string): boolean {
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
 const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
 /**
- * A statement that is advice all the same: it is about the setup the review
- * needs — a credential ("The token must have the required scopes"), the
+ * A statement that is advice all the same: it is about the bot or the setup
+ * the review needs — the bot or review itself ("The bot needs access to this
+ * repository"), a credential ("The token must have the required scopes"), the
  * installation or account ("The app must be installed for this
  * organization"), billing, or a person with a say over them ("An
  * administrator must grant access") — as its subject, see `SETUP_SUBJECT`,
@@ -446,7 +447,7 @@ const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|the
  * notice does ("The new permissions now require an administrator for every
  * read").
  */
-const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+const SETUP_NOUN = /\b(?:bot|reviewer|reviews?|tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|repo(?:sitory)?|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 /**
  * A statement whose subject is such a noun: the determiner, up to two words
  * of modifier, the noun, and then the predicate's verb ("The token must…",
@@ -502,7 +503,7 @@ const BARE_REFUSAL_WORDS = new Set([
   'remaining', 'left', 'available', 'exceeded', 'expired', 'invalid', 'missing', 'required', 'needed', 'right', 'now', 'currently', 'moment', 'time',
   'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade', 'run', 'review',
   'integration', 'billing', 'payment', 'method', 'cycle', 'period', 'month', 'until', 'next', 'before', 'after', 'once', 'when',
-  'be', 'been', 'has', 'have', 'not', 'no', 'longer', 'yet', 'grant', 'granted', 'granting', 'retry', 'retrying', 'installed', 'configured', 'enabled', 'authorized', 'authorised', 'reconnect', 'renew', 'renewed', 'valid', 'correct',
+  'be', 'been', 'has', 'have', 'not', 'no', 'longer', 'yet', 'grant', 'granted', 'granting', 'retry', 'retrying', 'installed', 'configured', 'enabled', 'authorized', 'authorised', 'reconnect', 'renew', 'renewed', 'valid', 'correct', 'read', 'write',
   '',
 ]);
 
