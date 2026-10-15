@@ -19339,12 +19339,14 @@ function refusalReason(body) {
     else blocks[last] = `${blocks[last]} ${line}`;
     if (heading2) blocks.push("");
   }
-  const text = blocks.filter((block) => block !== "").map((block) => /[.!?:;,]$/.test(block) ? block : `${block}.`).join(" ").trim();
+  const text = blocks.filter((block) => block !== "").map((block) => /[.!?;,]$/.test(block) ? block : `${block.replace(/:$/, "")}.`).join(" ").trim();
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
     const lower = heading.toLowerCase();
-    const aboutBot = /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
+    const aboutBot = named || !runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading);
     if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
   }
   const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
@@ -19353,7 +19355,7 @@ function refusalReason(body) {
   const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
   const bare = sentences[0] !== void 0 && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : void 0;
-  const first = skipped ? sentences[0] : bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && REFUSAL_SUBJECT.test(sentence));
+  const first = skipped ? sentences[0] : bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && (RUN_FAILURE.test(sentence) ? REFUSAL_SUBJECT_STRICT : REFUSAL_SUBJECT).test(sentence));
   if (first === void 0) return null;
   const stripped = first.replace(/^skipp(?:ing|ed)\s+[\w.-]+(?:\[bot\])?\s*[:,-]\s*/i, "");
   return stripped.replace(/[.!?]\s*$/, "").trim() || first;
@@ -19483,26 +19485,27 @@ var REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
     /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
-    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:has|have|was|were)\s+been\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
+    /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
     /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|review|analy[sz]e)\b/,
     /\b(?:permission denied|access denied|not authorized|unauthorized|forbidden)\b/
   ].map((part) => part.source).join("|"),
   "i"
 );
-var REFUSAL_SUBJECT = new RegExp(
-  [
-    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
-    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
-    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
-    /\b(?:credits?|quota|billing|seats?)\b/,
-    /\byou(?:r)?\b/,
-    /\[bot\]/,
-    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
-  ].map((part) => part.source).join("|"),
-  "i"
-);
+var REFUSAL_SUBJECT_PARTS = [
+  /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+  /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+  /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+  /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
+  /\byou(?:r)?\b/,
+  /\[bot\]/,
+  new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
+];
+var REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/;
+var REFUSAL_SUBJECT = new RegExp([...REFUSAL_SUBJECT_PARTS, REFUSAL_MONEY].map((part) => part.source).join("|"), "i");
+var REFUSAL_SUBJECT_STRICT = new RegExp(REFUSAL_SUBJECT_PARTS.map((part) => part.source).join("|"), "i");
+var RUN_FAILURE = /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|analy[sz]e)\b/i;
 function withOptionalCount(base, parsed) {
   return {
     ...base,
