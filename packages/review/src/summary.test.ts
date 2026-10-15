@@ -733,6 +733,9 @@ describe('a bot that refuses to run', () => {
     // A finding headed "Permission denied:" keeps its explanation — a statement about the code is not advice.
     expect(refusalReason('Permission denied:\n\nThe new guard rejects every request because the role check is reversed.')).toBeNull();
     expect(refusalReason('Permission denied. The app must be installed for this organization.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. An administrator must grant access before retrying.')).toBe('Permission denied');
+    expect(refusalReason('Billing is not configured. Please add a payment method.')).toBe('Billing is not configured');
+    expect(refusalReason('Credits are unavailable for this run.')).toBe('Credits are unavailable for this run');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';

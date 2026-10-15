@@ -417,24 +417,31 @@ function isBareAdvice(body: string, text: string): boolean {
   return unlinked
     .split(/(?<=[.!?])\s+/)
     .slice(1)
-    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || ADVICE_MARK.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
 const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
+/** A statement that is advice all the same: it says who must act ("An administrator must grant access") or what is needed. */
+const ADVICE_MARK = /\b(?:must|should|needs? to|has to|have to|will need|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 
 /**
  * A sentence that refuses: it holds a refusal phrase, and it is about the bot
  * or its review, the reader, or their repository — not about something in the
  * diff. A money word ("credits", "quota", "billing") is a subject only when it
  * is what the phrase itself is about ("no credits remaining", "insufficient
- * quota"): "cannot run quota migrations" and "the billing worker retries after
- * the customer has reached their usage limit" are findings.
+ * quota", "Billing is not configured"): "cannot run quota migrations" and "the
+ * billing worker retries after the customer has reached their usage limit"
+ * are findings.
  */
 function isRefusalSentence(sentence: string): boolean {
   const match = REFUSAL_PHRASE.exec(sentence);
   if (match === null) return false;
-  return REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0]);
+  if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
+  // Or the money word is what the phrase is said of — the word right before it: "Billing is not configured",
+  // "Credits are unavailable" — not a modifier further back ("the billing worker … has reached their usage limit").
+  const before = sentence.slice(0, match.index).trim().split(/\s+/);
+  return REFUSAL_MONEY.test(before[before.length - 1] ?? '');
 }
 
 /**
