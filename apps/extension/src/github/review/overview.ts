@@ -1582,7 +1582,7 @@ function botTitleFor(login: string): string {
 function botCardLine(record: BotVerdictRecord): string {
   if (record.verdict === 'running') return 'Reviewing this pull request now';
   if (record.verdict === 'loading') return 'Still reading this pull request\u2019s timeline for its review';
-  if (record.verdict === 'unknown') return 'Asked to review, and never answered here; the pull request is closed and its checks are gone, so there is no word either way';
+  if (record.verdict === 'unknown') return 'No word from it on this pull request: the run it announced or was asked for never reported here, and nothing on the page says how it went';
   if (record.verdict === 'failed') return record.reason === undefined ? 'Its review of this pull request failed' : `Did not review this pull request: ${record.reason}`;
   const scored = record.score === undefined ? '' : `Scored this pull request ${record.score}/5`;
   if (record.verdict === 'clean') return scored === '' ? 'Found nothing on this pull request' : `${scored} and found nothing`;
