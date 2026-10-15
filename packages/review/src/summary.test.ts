@@ -655,6 +655,15 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Greptile is not enabled for this repo. Enable it in the dashboard.')).toBe('Greptile is not enabled for this repo');
     expect(refusalReason('You have no credits remaining. Upgrade your plan to continue.')).toBe('You have no credits remaining');
     expect(refusalReason('Could not access the repository: permission denied.')).toBe('Could not access the repository: permission denied');
+    // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
+    // reason is read before the length cap; the chip then says skipped, not findings.
+    const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';
+    expect(refusalReason(crSkipRaw)).toBe('Auto reviews are disabled on base/target branches other than the default branch');
+    const crSkipPage = 'Important\nReview skipped\nAuto reviews are disabled on base/target branches other than the default branch.\nPlease check the settings in the CodeRabbit UI or the .coderabbit.yaml file in this repository. To trigger a single review, invoke the @coderabbitai review command.\n⚙️ Run configuration\nConfiguration used: defaults\nReview profile: CHILL\nPlan: Advanced\nRun ID: 06f58674-6686-4766-b8d6-0ef253422b';
+    expect(refusalReason(crSkipPage)).toBe('Auto reviews are disabled on base/target branches other than the default branch');
+    expect(refusalReason('Important\nReview skipped\nReview was skipped as selected files did not have any reviewable changes.\n⛔ Files ignored due to path filters: 1\npnpm-lock.yaml is excluded by !**/pnpm-lock.yaml')).toBe('Review was skipped as selected files did not have any reviewable changes');
+    const now = Date.UTC(2026, 9, 15, 0, 30);
+    expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: crSkipPage, anchor: 'issuecomment-1', createdAt: new Date(now - 3_600_000).toISOString() }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'failed', reason: 'Auto reviews are disabled on base/target branches other than the default branch', sourceId: 'issuecomment-1' });
   });
 
   it('does not mistake a review, a status line or a question for a refusal', () => {
