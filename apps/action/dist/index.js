@@ -19332,7 +19332,7 @@ function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
   const blocks = [];
   for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").split("\n")) {
-    const heading2 = /^\s*#{1,6}\s/.test(raw);
+    const heading2 = /^\s*(?:>\s*)*#{1,6}\s/.test(raw);
     const line = raw.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
     const last = blocks.length - 1;
     if (line === "" || heading2 || last < 0 || blocks[last] === "") blocks.push(line);
