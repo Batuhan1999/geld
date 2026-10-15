@@ -70,6 +70,9 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     acknowledges: 'reaction',
   },
   {
+    // Devin is a coding agent as well as a reviewer, under the same login: on a pull request it opened it narrates
+    // ("I'll fix CI failures and address comments…", "Tested commit abc in a browser…"), and those read as findings.
+    // Only a review-shaped comment votes; Devin Review's always are ("found N potential issues", "No Issues Found").
     id: 'devin',
     title: 'Devin',
     appId: 811515,
@@ -77,6 +80,7 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     checkNames: ['Devin'],
     triggers: ['/devin review', '@devin review', '@devin'],
     configFiles: [],
+    conversational: true,
   },
   {
     id: 'codex',
@@ -198,7 +202,8 @@ export interface ParsedBotBody {
  * unknown shapes return nulls rather than inventing numbers.
  */
 export function parseBotBody(body: string, botId: string): ParsedBotBody {
-  const text = body.replace(/\r\n/g, '\n');
+  // HTML comments are the bots' own markers (Cursor's automation ids, Greptile's score), never words to weigh.
+  const text = body.replace(/\r\n/g, '\n').replace(/<!--[\s\S]*?-->/g, '').trim();
   const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== undefined ? Number.parseFloat(scoreMatch[1]) : null;
   // "found 1 potential issue", "2 new bugs": one qualifier between the number and the noun is allowed through.
@@ -206,7 +211,7 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const countMatch =
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
-      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text));
+      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text));
   let count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
   // Greptile's summary (the one headed "Confidence Score: N/5") lists what it found under a "Findings" heading, one
   // bold title per finding ("1. **Review cards lack test coverage** ▶" raw, "**Review cards lack test coverage** ▶"
@@ -230,6 +235,11 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
     /\bno actionable comments\b/i.test(text) ||
     /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
+    // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
+    // Cursor's automations post under the Bugbot login.
+    /\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) ||
+    /\bverdict:\s*approved?\b/i.test(text) ||
+    /^\s*(?:[#>*\s]*)approved\b/i.test(text) ||
     (count === 0 && (score === null || botId === 'greptile'));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
   // "without security risk". The denied phrase goes before the words are weighed.
@@ -299,13 +309,23 @@ export interface DerivedBotVerdict {
  * it — and shaped like one.
  */
 export function refusalReason(body: string): string | null {
-  const text = body
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const untagged = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
+  const text = untagged
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_>~#]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (text === '') return null;
+  // A notice headed by its reason, over an explanation too long for the cap below: Bugbot's "Bugbot couldn't run -
+  // usage limit reached" and "Bugbot needs on-demand usage enabled" (an <h3>, raw; the first line as the page reads
+  // it). The heading is the reason.
+  const heading = untagged
+    .split('\n')
+    .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
+    .find((line) => line !== '');
+  if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
+    return heading.replace(/[.!?]\s*$/, '');
+  }
   // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
   // reads it), then the reason as the first sentence, then its run configuration — long, so read before the length
   // cap below. "Auto reviews are disabled on base/target branches other than the default branch"; "Review was skipped
@@ -391,6 +411,7 @@ const REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
     /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:has|have|was|were)\s+been\s+)?(?:reached|exceeded|hit)\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
     /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|review|analy[sz]e)\b/,
     /\b(?:permission denied|access denied|not authorized|unauthorized|forbidden)\b/,

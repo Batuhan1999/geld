@@ -351,6 +351,15 @@ describe('bots + prompts', () => {
     // (A scored summary with no Findings section counts as none found; this one-liner has none, so it is clean with its score.)
     expect(parseBotBody('Confidence Score: 4/5 [Medium risk] The implementation has no established behavioral blocker, but tests are required.', 'greptile')).toEqual({ count: 0, score: 4, clean: true, severity: 'medium' });
     expect(parseBotBody('No critical issues. 2 issues found.', 'bugbot').severity).toBeNull();
+    // Survey of public pull requests, Oct 2026 — wordings that read as findings and are not:
+    // Devin: two qualifiers before the noun ("1 new potential issue").
+    expect(parseBotBody('**Devin Review** found 1 new potential issue. <a href="https://app.devin.ai/review/o/r/pull/1"><img alt="Devin Review"></a>', 'devin')).toMatchObject({ count: 1, clean: false });
+    // Codex: "Didn't find any major issues".
+    expect(parseBotBody("Codex Review: Didn't find any major issues. Great work!", 'codex')).toMatchObject({ clean: true });
+    // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null });
     // A deploy bot's comment is not a review verdict.
     expect(verdictsFrom([], [{ author: 'vercel[bot]', body: 'Deployment ready', anchor: 'issuecomment-5' }], 'aaa')).toEqual([]);
     expect(verdictsFrom([], [{ author: 'acme[bot]', body: 'Found 2 issues', anchor: 'issuecomment-6' }], 'aaa', ['acme[bot]'])[0]?.count).toBe(2);
@@ -682,6 +691,12 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Greptile is not enabled for this repo. Enable it in the dashboard.')).toBe('Greptile is not enabled for this repo');
     expect(refusalReason('You have no credits remaining. Upgrade your plan to continue.')).toBe('You have no credits remaining');
     expect(refusalReason('Could not access the repository: permission denied.')).toBe('Could not access the repository: permission denied');
+    // Notices headed by their reason over a long explanation (Bugbot, raw and as the page reads the heading), and
+    // Codex's usage-limit line: all skips of the run, none of them findings.
+    expect(refusalReason('<h3>Bugbot couldn\'t run - usage limit reached</h3>\nBugbot is counted against Cursor usage for this user or team, and this run hit a usage or spend limit. An admin can raise the limit or enable on-demand usage in the dashboard; then re-run Bugbot with `bugbot run`. Learn more about [usage](https://cursor.com/docs) and [Bugbot billing](https://cursor.com/docs/bugbot).')).toBe("Bugbot couldn't run - usage limit reached");
+    expect(refusalReason("Bugbot couldn't run - usage limit reached\nBugbot is counted against Cursor usage for this user or team, and this run hit a usage or spend limit.")).toBe("Bugbot couldn't run - usage limit reached");
+    expect(refusalReason('<h3>Bugbot needs on-demand usage enabled</h3>\nBugbot uses usage-based billing for this team and requires on-demand usage to be enabled. A team admin can enable it in the dashboard, after which Bugbot runs on this pull request as usual; until then every run is skipped and this notice is posted again on each push to the branch so nobody is left waiting on a review that is not coming.')).toBe('Bugbot needs on-demand usage enabled');
+    expect(refusalReason('Codex usage limits have been reached for code reviews. Please check with the admins of this repo to increase the limits by adding credits. Repo admins can do so in the Codex settings.')).toBe('Codex usage limits have been reached for code reviews');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';
