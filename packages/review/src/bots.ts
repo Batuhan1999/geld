@@ -368,9 +368,7 @@ export function refusalReason(body: string): string | null {
   // a comment that is nothing but the refusal — "Permission denied.", "Unable to access repository." — a few
   // words with no subject before the phrase; a review of code names what it is about.
   const bare = sentences[0] !== undefined && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : undefined;
-  // A run-failure sentence must name the bot, its review, the reader or their repository — a money word alone
-  // ("quota") is a subject for "no credits remaining", not for "cannot run quota migrations on a fresh database".
-  const first = skipped ? sentences[0] : (bare ?? sentences.find((sentence) => REFUSAL_PHRASE.test(sentence) && (RUN_FAILURE.test(sentence) ? REFUSAL_SUBJECT_STRICT : REFUSAL_SUBJECT).test(sentence)));
+  const first = skipped ? sentences[0] : (bare ?? sentences.find(isRefusalSentence));
   if (first === undefined) return null;
   // The first sentence, without the bot's own name as a prefix ("Skipping Bugbot: " → the explanation).
   const stripped = first.replace(/^skipp(?:ing|ed)\s+[\w.-]+(?:\[bot\])?\s*[:,-]\s*/i, '');
@@ -411,7 +409,32 @@ function isBareAdvice(body: string, text: string): boolean {
   if (unlinked.length > 200 || /`/.test(body)) return false;
   // The raw body, not the cleaned text: the cleanup strips underscores as emphasis marks.
   const raw = body.replace(/<!--[\s\S]*?-->/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '');
-  return !/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw);
+  if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
+  // And each sentence after the refusal must read as advice — an instruction ("Check the token and retry"), a
+  // link, or a sentence about the reader, the bot or their installation — not as a statement about the code
+  // ("The new guard rejects every request because the role check is reversed" explains a finding headed
+  // "Permission denied:").
+  return unlinked
+    .split(/(?<=[.!?])\s+/)
+    .slice(1)
+    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+}
+
+/** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
+const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
+
+/**
+ * A sentence that refuses: it holds a refusal phrase, and it is about the bot
+ * or its review, the reader, or their repository — not about something in the
+ * diff. A money word ("credits", "quota", "billing") is a subject only when it
+ * is what the phrase itself is about ("no credits remaining", "insufficient
+ * quota"): "cannot run quota migrations" and "the billing worker retries after
+ * the customer has reached their usage limit" are findings.
+ */
+function isRefusalSentence(sentence: string): boolean {
+  const match = REFUSAL_PHRASE.exec(sentence);
+  if (match === null) return false;
+  return REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0]);
 }
 
 /**
@@ -456,24 +479,25 @@ const REFUSAL_PHRASE = new RegExp(
  * rather than about something in the diff. "review" alone is not enough:
  * "Cannot run review tests on a fresh checkout" is about the code. A review
  * bot's own login or title is one of these; so is the second person, since
- * a refusal addresses the reader ("You have no credits").
+ * a refusal addresses the reader ("You have no credits"). The money words
+ * are not (`REFUSAL_MONEY`): "billing" names a worker as readily as a bill.
  */
-const REFUSAL_SUBJECT_PARTS = [
-  /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
-  /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
-  /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
-  /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
-  /\byou(?:r)?\b/,
-  /\[bot\]/,
-  new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
-];
-/** The money words alone: a subject for "no credits remaining", not for "cannot run quota migrations". */
-const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/;
-const REFUSAL_SUBJECT = new RegExp([...REFUSAL_SUBJECT_PARTS, REFUSAL_MONEY].map((part) => part.source).join('|'), 'i');
-/** Without the money words: what a sentence that says the bot could not run or start must name. */
-const REFUSAL_SUBJECT_STRICT = new RegExp(REFUSAL_SUBJECT_PARTS.map((part) => part.source).join('|'), 'i');
-/** A run that did not happen — the phrase a finding about the code uses most readily ("Cannot run migrations…"). */
-const RUN_FAILURE = /\b(?:could not|couldn.t|cannot|can.t|unable to|failed to)\s+(?:access|read|clone|fetch|start|run|analy[sz]e)\b/i;
+const REFUSAL_SUBJECT = new RegExp(
+  [
+    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
+    /\byou(?:r)?\b/,
+    /\[bot\]/,
+    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
+  ]
+    .map((part) => part.source)
+    .join('|'),
+  'i',
+);
+/** The money words: a subject only inside the refusal phrase itself ("no credits remaining"), see `isRefusalSentence`. */
+const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 
 function withOptionalCount(base: DerivedBotVerdict, parsed: ParsedBotBody): DerivedBotVerdict {
   return {
