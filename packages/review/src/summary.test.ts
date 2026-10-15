@@ -356,6 +356,9 @@ describe('bots + prompts', () => {
     expect(parseBotBody('**Devin Review** found 1 new potential issue. <a href="https://app.devin.ai/review/o/r/pull/1"><img alt="Devin Review"></a>', 'devin')).toMatchObject({ count: 1, clean: false });
     // Codex: "Didn't find any major issues".
     expect(parseBotBody("Codex Review: Didn't find any major issues. Great work!", 'codex')).toMatchObject({ clean: true });
+    // ...but not beside a count of findings: the count is the word.
+    expect(parseBotBody("Didn't find any major issues. Found 2 minor issues.", 'codex')).toMatchObject({ clean: false, count: 2 });
+    expect(parseBotBody('Verdict: approve. Found 1 minor issue worth a look.', 'bugbot')).toMatchObject({ clean: false, count: 1 });
     // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
@@ -697,6 +700,9 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason("Bugbot couldn't run - usage limit reached\nBugbot is counted against Cursor usage for this user or team, and this run hit a usage or spend limit.")).toBe("Bugbot couldn't run - usage limit reached");
     expect(refusalReason('<h3>Bugbot needs on-demand usage enabled</h3>\nBugbot uses usage-based billing for this team and requires on-demand usage to be enabled. A team admin can enable it in the dashboard, after which Bugbot runs on this pull request as usual; until then every run is skipped and this notice is posted again on each push to the branch so nobody is left waiting on a review that is not coming.')).toBe('Bugbot needs on-demand usage enabled');
     expect(refusalReason('Codex usage limits have been reached for code reviews. Please check with the admins of this repo to increase the limits by adding credits. Repo admins can do so in the Codex settings.')).toBe('Codex usage limits have been reached for code reviews');
+    // A heading about the code, not the bot, is a finding's: no refusal.
+    expect(refusalReason('<h3>Cannot run migrations on a fresh database</h3>\nThe new migration references a table created two migrations later, so `db migrate` fails from scratch while an existing database upgrades fine. Reorder the files or add the dependency.')).toBeNull();
+    expect(refusalReason('### Config needs the flag enabled\nThe worker reads `FEATURE_X` but nothing in the deploy manifest sets it, so the branch below is dead in production.')).toBeNull();
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
     // reason is read before the length cap; the chip then says skipped, not findings.
     const crSkipRaw = '<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Auto reviews are disabled on base/target branches other than the default branch.\n> \n> Please check the settings in the CodeRabbit UI or the `.coderabbit.yaml` file in this repository. To trigger a single review, invoke the `@coderabbitai review` command.\n> \n> <details>\n> <summary><strong>⚙️ Run configuration</strong></summary>\n> - **Configuration used**: defaults\n> - **Review profile**: CHILL\n> - **Plan**: Advanced\n> - **Run ID**: `06f58674-6686-4766-b8d6-0ef253422b`\n> </details>\n> \n> You can disable this status message by setting the `reviews.review_status` to `false` in the CodeRabbit configuration file.';

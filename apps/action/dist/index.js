@@ -19322,9 +19322,8 @@ function parseBotBody(body, botId) {
       if (items > 0) count = items;
     }
   }
-  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
-  // Cursor's automations post under the Bugbot login.
-  /\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\b/i.test(text) || count === 0 && (score === null || botId === "greptile");
+  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\b/i.test(text));
+  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || approved || count === 0 && (score === null || botId === "greptile");
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
   return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
@@ -19335,7 +19334,8 @@ function refusalReason(body) {
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
-    return heading.replace(/[.!?]\s*$/, "");
+    const aboutBot = REFUSAL_SUBJECT.test(heading) || /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => new RegExp(`\\b${bot.title}\\b`, "i").test(heading) || bot.logins.some((login) => heading.toLowerCase().includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
   }
   const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== void 0 && skipNotice[1].trim() !== "") return skipNotice[1].trim();

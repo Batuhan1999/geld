@@ -231,15 +231,17 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
   // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
+  // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
+  // Cursor's automations post under the Bugbot login. A verdict beside a count of findings ("Didn't find any major
+  // issues. Found 2 minor issues.") is not clean: the count is.
+  const approved =
+    (count === null || count === 0) &&
+    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\b/i.test(text));
   const clean =
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
     /\bno actionable comments\b/i.test(text) ||
     /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
-    // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
-    // Cursor's automations post under the Bugbot login.
-    /\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) ||
-    /\bverdict:\s*approved?\b/i.test(text) ||
-    /^\s*(?:[#>*\s]*)approved\b/i.test(text) ||
+    approved ||
     (count === 0 && (score === null || botId === 'greptile'));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
   // "without security risk". The denied phrase goes before the words are weighed.
@@ -318,13 +320,15 @@ export function refusalReason(body: string): string | null {
   if (text === '') return null;
   // A notice headed by its reason, over an explanation too long for the cap below: Bugbot's "Bugbot couldn't run -
   // usage limit reached" and "Bugbot needs on-demand usage enabled" (an <h3>, raw; the first line as the page reads
-  // it). The heading is the reason.
+  // it). The heading is the reason — when it is about the bot or its usage, not about the code ("Cannot run
+  // migrations on a fresh database" heads a finding).
   const heading = untagged
     .split('\n')
     .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
     .find((line) => line !== '');
   if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
-    return heading.replace(/[.!?]\s*$/, '');
+    const aboutBot = REFUSAL_SUBJECT.test(heading) || /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => new RegExp(`\\b${bot.title}\\b`, 'i').test(heading) || bot.logins.some((login) => heading.toLowerCase().includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    if (aboutBot) return heading.replace(/[.!?]\s*$/, '');
   }
   // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
   // reads it), then the reason as the first sentence, then its run configuration — long, so read before the length
