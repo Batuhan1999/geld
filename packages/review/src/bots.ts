@@ -434,12 +434,17 @@ const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|the
 const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 /**
  * A statement whose subject is such a noun: the determiner, up to two words
- * of modifier, then the noun ("The token must…", "An administrator must…",
- * "These credentials must…", "The newly generated token must…"). A setup
- * noun further in — "The guard rejects members because it checks the wrong
- * permissions" — is the code's business.
+ * of modifier, the noun, and then the predicate's verb ("The token must…",
+ * "An administrator must…", "These credentials must…", "The newly generated
+ * token must…"). The verb is what makes the noun the subject: in "The guard
+ * drops permissions on every request" the noun is the object, and the
+ * sentence is the code's business — as is a setup noun anywhere further in
+ * ("The guard rejects members because it checks the wrong permissions").
  */
-const SETUP_SUBJECT = new RegExp(`^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\b`, 'i');
+const SETUP_SUBJECT = new RegExp(
+  `^\\s*(?:the|this|that|these|those|an?|its|your|our)\\s+(?:[\\w-]+\\s+){0,2}${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\s+(?:must|should|needs?|has|have|had|is|are|was|were|will|would|can|could|may|might|does|do|did|lacks?|requires?|expired|belongs?)\\b`,
+  'i',
+);
 
 /**
  * A sentence that refuses: it holds a refusal phrase, and it is about the bot
