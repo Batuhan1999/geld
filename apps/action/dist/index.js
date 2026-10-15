@@ -19374,16 +19374,10 @@ function isBareAdvice(body, text) {
   if (unlinked.length > 200 || /`/.test(body)) return false;
   const raw = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "");
   if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
-  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || ADVICE_MARK.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || SETUP_NOUN.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
-var ADVICE_MARK = new RegExp(
-  [
-    /\b(?:admin(?:istrator)?|owner|maintainer)s?\s+(?:must|should|needs? to|has to|have to|will need to|can)\b/,
-    /\b(?:must|should|needs? to|has to|have to|will need to)\s+(?:be\s+|first\s+)?(?:grant|enabl|install|configur|add|upgrad|authori[sz]|approv|connect|reconnect|re-?run|retr|renew|allow access)\w*/
-  ].map((part) => part.source).join("|"),
-  "i"
-);
+var SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|installed|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 function isRefusalSentence(sentence) {
   const match = REFUSAL_PHRASE.exec(sentence);
   if (match === null) return false;
@@ -19499,6 +19493,19 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
   "upgrade",
   "run",
   "review",
+  "integration",
+  "billing",
+  "payment",
+  "method",
+  "cycle",
+  "period",
+  "month",
+  "until",
+  "next",
+  "before",
+  "after",
+  "once",
+  "when",
   ""
 ]);
 var REFUSAL_PHRASE = new RegExp(

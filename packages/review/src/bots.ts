@@ -411,34 +411,26 @@ function isBareAdvice(body: string, text: string): boolean {
   const raw = body.replace(/<!--[\s\S]*?-->/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '');
   if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
   // And each sentence after the refusal must read as advice — an instruction ("Check the token and retry"), a
-  // link, or a sentence about the reader, the bot or their installation — not as a statement about the code
-  // ("The new guard rejects every request because the role check is reversed" explains a finding headed
+  // link, or a sentence about the reader, the bot or the setup the review needs — not as a statement about the
+  // code ("The new guard rejects every request because the role check is reversed" explains a finding headed
   // "Permission denied:").
   return unlinked
     .split(/(?<=[.!?])\s+/)
     .slice(1)
-    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || ADVICE_MARK.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || SETUP_NOUN.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
 const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
 /**
- * A statement that is advice all the same: it says who must act to get the
- * review running ("An administrator must grant access") or what must be done
- * for it ("The app must be installed") — an obligation on a person with a say
- * over the installation, or an obligation to grant, enable, install,
- * configure, upgrade, authorise or retry. "The guard should allow members"
- * is an obligation on the code, and a finding.
+ * A statement that is advice all the same: it is about the setup the review
+ * needs — a credential ("The token must have the required scopes"), the
+ * installation or account ("The app must be installed for this
+ * organization"), billing, or a person with a say over them ("An
+ * administrator must grant access"). A statement about the code names none
+ * of these: "The guard should allow members but rejects every request".
  */
-const ADVICE_MARK = new RegExp(
-  [
-    /\b(?:admin(?:istrator)?|owner|maintainer)s?\s+(?:must|should|needs? to|has to|have to|will need to|can)\b/,
-    /\b(?:must|should|needs? to|has to|have to|will need to)\s+(?:be\s+|first\s+)?(?:grant|enabl|install|configur|add|upgrad|authori[sz]|approv|connect|reconnect|re-?run|retr|renew|allow access)\w*/,
-  ]
-    .map((part) => part.source)
-    .join('|'),
-  'i',
-);
+const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|installed|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 
 /**
  * A sentence that refuses: it holds a refusal phrase, and it is about the bot
@@ -480,6 +472,7 @@ const BARE_REFUSAL_WORDS = new Set([
   'account', 'organization', 'org', 'team', 'workspace', 'project', 'plan', 'subscription', 'trial', 'quota', 'limit', 'credits', 'usage', 'seats', 'settings', 'dashboard',
   'remaining', 'left', 'available', 'exceeded', 'expired', 'invalid', 'missing', 'required', 'needed', 'right', 'now', 'currently', 'moment', 'time',
   'please', 'try', 'again', 'later', 'contact', 'support', 'enable', 'install', 'upgrade', 'run', 'review',
+  'integration', 'billing', 'payment', 'method', 'cycle', 'period', 'month', 'until', 'next', 'before', 'after', 'once', 'when',
   '',
 ]);
 
