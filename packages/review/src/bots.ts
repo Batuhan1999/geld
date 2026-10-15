@@ -722,7 +722,7 @@ export function verdictsFrom(
   }
 
   /** Bots whose latest comment so far is a status line (the run it announced has not reported), with that line. */
-  const statusOnly = new Map<string, { readonly login: string; readonly anchor: string; readonly at: number | null }>();
+  const statusOnly = new Map<string, { readonly login: string; readonly anchor: string; readonly at: number | null; readonly own: boolean }>();
   const threadRuns = new Map<string, ThreadRun>();
   /** The thread run a request set aside, in case the request is refused and that run is still the bot's last real one. */
   const runsBeforeAsk = new Map<string, ThreadRun>();
@@ -766,7 +766,7 @@ export function verdictsFrom(
         const prior = threadRuns.get(asked.id);
         if (prior !== undefined) runsBeforeAsk.set(asked.id, prior);
         threadRuns.delete(asked.id);
-        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at });
+        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: false });
       }
       continue;
     }
@@ -806,7 +806,7 @@ export function verdictsFrom(
       if (prior !== undefined) runsBeforeAsk.set(id, prior);
       threadRuns.delete(id);
       const at = comment.createdAt === undefined ? NaN : Date.parse(comment.createdAt);
-      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at });
+      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: true });
       continue;
     }
     const parsed = parseBotBody(comment.body, id.startsWith('custom:') ? '' : id);
@@ -833,7 +833,7 @@ export function verdictsFrom(
   // A bot whose latest word is "starting" has a run under way or just finished: what it found before belongs to
   // an earlier run (those threads are items in their own right). The check says how this run ended; with no
   // check to go by the bot is running until it says more.
-  for (const [id, { login, anchor, at }] of statusOnly) {
+  for (const [id, { login, anchor, at, own }] of statusOnly) {
     const existing = byId.get(id);
     // The bot rewrote its summary after the run was asked for: that is the report, and the summary's verdict (read
     // above, from its words as they are now) stands. Greptile re-reviews into the same comment.
@@ -861,9 +861,13 @@ export function verdictsFrom(
       }
     }
     if (existing === undefined) {
-      // With the timeline still loading, an old request and silence is not yet a verdict on the bot.
-      // ...and on a merged or closed pull request the silence is no verdict at all: the checks of the time are gone.
-      byId.set(id, { id, login, verdict: stale ? (options.partial === true ? 'loading' : options.closed === true ? 'unknown' : 'failed') : 'running', reviewedSha: headSha, sourceId: anchor });
+      // With the timeline still loading, an old request and silence is not yet a verdict on the bot. On a merged or
+      // closed pull request the silence is no verdict at all: the checks of the time are gone. And the bot's own
+      // "Currently processing…" that aged with no report is no word either way — nothing on the page says the run
+      // failed (CodeRabbit leaves the note standing when it decides not to review) — where a person's request the
+      // bot never answered is a failure to answer.
+      const silence = options.partial === true ? 'loading' : options.closed === true || own ? 'unknown' : 'failed';
+      byId.set(id, { id, login, verdict: stale ? silence : 'running', reviewedSha: headSha, sourceId: anchor });
       continue;
     }
     if (!checkIsThisRun) {

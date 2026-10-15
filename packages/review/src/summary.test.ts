@@ -602,8 +602,11 @@ describe('bots + prompts', () => {
     expect(verdictsFrom([], devin, 'aaa', [], now)[0]).toMatchObject({ verdict: 'clean', sourceId: 'pullrequestreview-1' });
     // The same lines ten minutes later: still running.
     expect(verdictsFrom([], devin, 'aaa', [], Date.UTC(2026, 8, 25, 5, 50))[0]).toMatchObject({ verdict: 'running', sourceId: 'issuecomment-2' });
-    // A bot that only ever said "starting", long ago: it did not review this.
-    expect(verdictsFrom([], devin.slice(2), 'aaa', [], now)[0]).toMatchObject({ verdict: 'failed', sourceId: 'issuecomment-2' });
+    // A bot that only ever said "starting", long ago, and nothing on the page says how it went: no word, not a
+    // failure (geld#57: CodeRabbit's "Currently processing…" left standing read as failed, red).
+    expect(verdictsFrom([], devin.slice(2), 'aaa', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-2' });
+    // A person's request the bot never answered is a failure to answer, as before.
+    expect(verdictsFrom([], [{ author: 'brandonmcconnell', body: '/devin review', anchor: 'issuecomment-9', createdAt: t(0) }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'failed', sourceId: 'issuecomment-9' });
     // A check run says how the run ended, however old the line.
     expect(verdictsFrom([{ name: 'Devin Review', status: 'completed', conclusion: 'success', sha: 'aaa' }], devin.slice(2), 'aaa', [], now)[0]?.verdict).toBe('clean');
     // Without a timestamp nothing ages.
