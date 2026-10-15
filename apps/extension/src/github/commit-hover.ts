@@ -5,7 +5,8 @@ import type { DiffFetchState, DiffSource } from './diff-source';
 import { isOwnElement } from './dom';
 import type { Subject } from './subject';
 import { commitSubjectFrom } from './subject';
-import { hideTooltip, showBreakdownTooltip, showTooltipLoading, showTooltipMessage, tooltipHost } from './ui/tooltip';
+import { hideTooltip, moveTooltipPointer, showBreakdownTooltip, showTooltipLoading, showTooltipMessage, tooltipHost } from './ui/tooltip';
+import type { TooltipPoint } from './ui/tooltip';
 
 /**
  * Line counts for the commits a page links to — the conversation timeline
@@ -44,6 +45,10 @@ let intentTimer: ReturnType<typeof setTimeout> | null = null;
 let armed: Target | null = null;
 /** What the tooltip currently shows for `armed`, so a re-apply with nothing new does not redraw it. */
 let presented: DiffFetchState | null = null;
+/** Where the pointer rests on the hovered link (viewport y); null when it was reached by focus. A wrapped link's tooltip hangs under that line. */
+let pointer: TooltipPoint | null = null;
+/** The one listener a link gets while armed: the pointer crossing to another of its lines moves the tooltip. */
+let pointerWatch: { readonly link: HTMLAnchorElement; readonly onMove: (event: MouseEvent) => void } | null = null;
 
 /** The commit a link names, unless GitHub already explains it with a hovercard (which Geld rewrites instead). */
 function targetOf(node: EventTarget | null): Target | null {
@@ -92,6 +97,8 @@ function disarm(): void {
     if (tooltipHost() === armed.link) hideTooltip();
     releaseTitle(armed.link);
   }
+  if (pointerWatch !== null) pointerWatch.link.removeEventListener('mousemove', pointerWatch.onMove);
+  pointerWatch = null;
   armed = null;
   presented = null;
 }
@@ -108,13 +115,13 @@ function present(): void {
     case 'ready': {
       const matcher = options.matcherFor(subject.repo);
       const { all, hidden } = breakdownFromFiles(state.files, matcher, options.hideCommentLines);
-      showBreakdownTooltip(link, statsBreakdown(all, hidden, hiddenNounPlural(matcher.activeCategories, hidden), matcher.activeCategories));
+      showBreakdownTooltip(link, statsBreakdown(all, hidden, hiddenNounPlural(matcher.activeCategories, hidden), matcher.activeCategories), pointer ?? undefined);
       return;
     }
     case 'idle':
     case 'loading': {
       const active = options.matcherFor(subject.repo).activeCategories;
-      showTooltipLoading(link, { hasHidden: active.length > 0, hiddenTitle: active.length === 1 ? (active[0]?.title ?? null) : null });
+      showTooltipLoading(link, { hasHidden: active.length > 0, hiddenTitle: active.length === 1 ? (active[0]?.title ?? null) : null }, pointer ?? undefined);
       return;
     }
     case 'failed':
@@ -125,6 +132,7 @@ function present(): void {
           : state.reason === 'rate-limited'
             ? 'GitHub is rate limiting diffs \u2014 try again shortly'
             : 'Line counts unavailable for this commit',
+        pointer ?? undefined,
       );
       return;
   }
@@ -136,20 +144,36 @@ function arm(): void {
   armed = hovered;
   presented = null;
   holdTitle(armed.link);
+  // Only a pointer that is there moves the tooltip between lines; a focused link has no pointer to follow.
+  if (pointer !== null) {
+    const { link } = armed;
+    const onMove = (event: MouseEvent): void => {
+      pointer = { y: event.clientY };
+      moveTooltipPointer(link, event.clientY);
+    };
+    link.addEventListener('mousemove', onMove, { passive: true });
+    pointerWatch = { link, onMove };
+  }
   present();
 }
 
-function enter(target: Target, immediate: boolean): void {
-  if (hovered?.link === target.link) return;
+function enter(target: Target, immediate: boolean, at: TooltipPoint | null): void {
+  if (hovered?.link === target.link) {
+    // Still the same link, another of its children under the pointer: only where the pointer is has changed.
+    if (at !== null) pointer = at;
+    return;
+  }
   if (armed !== null && armed.link !== target.link) disarm();
   else clearIntent();
   hovered = target;
+  pointer = at;
   if (immediate) arm();
   else intentTimer = setTimeout(arm, HOVER_INTENT_MS);
 }
 
 function leave(): void {
   hovered = null;
+  pointer = null;
   disarm();
 }
 
@@ -157,7 +181,7 @@ function onMouseOver(event: MouseEvent): void {
   const target = targetOf(event.target);
   // A move within the hovered link resolves to the same link; anything else is a leave.
   if (target === null) leave();
-  else enter(target, false);
+  else enter(target, false, { y: event.clientY });
 }
 
 function onMouseOut(event: MouseEvent): void {
@@ -170,7 +194,7 @@ function onMouseOut(event: MouseEvent): void {
 
 function onFocusIn(event: FocusEvent): void {
   const target = targetOf(event.target);
-  if (target !== null) enter(target, true);
+  if (target !== null) enter(target, true, null);
 }
 
 function onFocusOut(event: FocusEvent): void {
