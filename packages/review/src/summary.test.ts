@@ -362,6 +362,8 @@ describe('bots + prompts', () => {
     // ...and a finding whose title begins with the word is not the verdict word.
     expect(parseBotBody('Approved users can edit another tenant\u2019s settings because the guard checks the role, not the tenant.', 'bugbot')).toMatchObject({ clean: false });
     expect(parseBotBody('Approved: Cursor Bugbot is skipped after a usage-limit failure, so that automated-review signal is omitted rather than treated as findings.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('**Approved**. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
+    expect(parseBotBody('**Approved**', 'bugbot')).toMatchObject({ clean: true });
     // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
