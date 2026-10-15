@@ -312,15 +312,21 @@ export interface DerivedBotVerdict {
  */
 export function refusalReason(body: string): string | null {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
-  // A line break ends a sentence too: a heading carries no full stop, and merged into the explanation under it the
-  // explanation's words would weigh on the heading's reading.
-  const text = untagged
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_>~#]/g, '')
-    .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter((line) => line !== '')
-    .map((line) => (/[.!?:;,]$/.test(line) ? line : `${line}.`))
+  // A block ends a sentence: a heading carries no full stop, and merged into the explanation under it the
+  // explanation's words would weigh on the heading's reading. Blocks are what a blank line or a heading line
+  // separates (HTML block tags became line breaks above); a soft-wrapped Markdown line is the same sentence.
+  const blocks: string[] = [];
+  for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').split('\n')) {
+    const heading = /^\s*#{1,6}\s/.test(raw);
+    const line = raw.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim();
+    const last = blocks.length - 1;
+    if (line === '' || heading || last < 0 || blocks[last] === '') blocks.push(line);
+    else blocks[last] = `${blocks[last]} ${line}`;
+    if (heading) blocks.push('');
+  }
+  const text = blocks
+    .filter((block) => block !== '')
+    .map((block) => (/[.!?:;,]$/.test(block) ? block : `${block}.`))
     .join(' ')
     .trim();
   if (text === '') return null;
@@ -447,7 +453,7 @@ const REFUSAL_SUBJECT = new RegExp(
     /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
     /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
     /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial|pull request|pr)\b/,
+    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
