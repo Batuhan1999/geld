@@ -312,10 +312,16 @@ export interface DerivedBotVerdict {
  */
 export function refusalReason(body: string): string | null {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
+  // A line break ends a sentence too: a heading carries no full stop, and merged into the explanation under it the
+  // explanation's words would weigh on the heading's reading.
   const text = untagged
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_>~#]/g, '')
-    .replace(/\s+/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line !== '')
+    .map((line) => (/[.!?:;,]$/.test(line) ? line : `${line}.`))
+    .join(' ')
     .trim();
   if (text === '') return null;
   // A notice headed by its reason, over an explanation too long for the cap below: Bugbot's "Bugbot couldn't run -
@@ -338,7 +344,7 @@ export function refusalReason(body: string): string | null {
   // cap below. "Auto reviews are disabled on base/target branches other than the default branch"; "Review was skipped
   // as selected files did not have any reviewable changes" (an incremental pass with nothing to read — a refusal only
   // for a bot that never reviewed here, as any refusal is).
-  const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== undefined && skipNotice[1].trim() !== '') return skipNotice[1].trim();
   if (text.length > 400) return null;
   // "Skipping Bugbot: …", "Skipped review: …" — a skip of the run, not of something in the code under review.
@@ -429,15 +435,19 @@ const REFUSAL_PHRASE = new RegExp(
 );
 
 /**
- * The sentence is about the bot or its review — a bot's name, "review(s)",
- * "this repository", "your account", credits — rather than about something
- * in the diff. A review bot's own login or title is one of these; so is the
- * second person, since a refusal addresses the reader ("You have no credits").
+ * The sentence is about the bot or its review — a bot's name, "the review" /
+ * "to review" / "code reviews", "this repository", "your account", credits —
+ * rather than about something in the diff. "review" alone is not enough:
+ * "Cannot run review tests on a fresh checkout" is about the code. A review
+ * bot's own login or title is one of these; so is the second person, since
+ * a refusal addresses the reader ("You have no credits").
  */
 const REFUSAL_SUBJECT = new RegExp(
   [
-    /\b(?:bot|reviews?|reviewer|reviewing|code review|analysis|scan)\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
+    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial|pull request|pr)\b/,
     /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
