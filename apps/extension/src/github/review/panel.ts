@@ -2580,8 +2580,10 @@ export function mountPanel(model: PanelModel, handlers: PanelHandlers, options: 
   // The latest round with no threads at all is the current one, not a settled one: nothing in it was ever to settle,
   // and what it holds (a reviewer's remark, a bot's note on the newest push) is the state of the conversation, so it
   // stands in the open group rather than folding away under "settled rounds".
-  const latest = withContent[withContent.length - 1];
-  const current = latest !== undefined && latest.items.length === 0 ? latest : null;
+  // The newest round of all, not the newest with something to show: a newer round whose only content is seated under
+  // Reports or Review bots is still the newer one, and the round before it is history, not the current conversation.
+  const latest = model.batches[model.batches.length - 1];
+  const current = latest !== undefined && withContent.includes(latest) && latest.items.length === 0 ? latest : null;
   const attention = model.grouping === 'batch' ? [] : withContent.filter((batch) => batch === current || batch.items.some((item) => isOpenStatus(item.status)));
   const settled = model.grouping === 'batch' ? [] : withContent.filter((batch) => !attention.includes(batch));
   if (attention.length > 0) {
