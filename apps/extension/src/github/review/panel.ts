@@ -2577,10 +2577,18 @@ export function mountPanel(model: PanelModel, handlers: PanelHandlers, options: 
   // is its review content, so a run of commits that nothing followed (the last pushes of a PR nobody has reviewed
   // yet) is no round at all - its commits are in the Commits fold. By push the same run is a push and stays.
   const withContent = model.batches.filter((batch) => batch.items.length + batch.comments.length + batch.reviews.length + batch.previews.length > 0);
-  const attention = model.grouping === 'batch' ? [] : withContent.filter((batch) => batch.items.some((item) => isOpenStatus(item.status)));
+  // The latest round with no threads at all is the current one, not a settled one: nothing in it was ever to settle,
+  // and what it holds (a reviewer's remark, a bot's note on the newest push) is the state of the conversation, so it
+  // stands in the open group rather than folding away under "settled rounds".
+  // The newest round of all, not the newest with something to show: a newer round whose only content is seated under
+  // Reports or Review bots is still the newer one, and the round before it is history, not the current conversation.
+  const latest = model.batches[model.batches.length - 1];
+  const current = latest !== undefined && withContent.includes(latest) && latest.items.length === 0 ? latest : null;
+  const attention = model.grouping === 'batch' ? [] : withContent.filter((batch) => batch === current || batch.items.some((item) => isOpenStatus(item.status)));
   const settled = model.grouping === 'batch' ? [] : withContent.filter((batch) => !attention.includes(batch));
   if (attention.length > 0) {
-    rows.append(groupHeading('open', `${plural(attention.length, 'round')} to review · ${plural(open.length, 'open thread')}`, model, handlers));
+    const toReview = attention.filter((batch) => batch !== current).length;
+    rows.append(groupHeading('open', toReview === 0 ? 'Current round' : `${plural(toReview, 'round')} to review · ${plural(open.length, 'open thread')}`, model, handlers));
     if (!model.collapsedGroups.has('open')) appendBatches(attention);
   }
   if (settled.length > 0) {
