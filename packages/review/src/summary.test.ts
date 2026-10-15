@@ -746,6 +746,8 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Permission denied. The guard drops permissions on every request.')).toBeNull();
     expect(refusalReason('Permission denied. The token currently lacks the required scopes.')).toBe('Permission denied');
     expect(refusalReason('Permission denied. The repository is private.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The bot needs access to this repository.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The review needs read access to the repository.')).toBe('Permission denied');
     expect(refusalReason('Permission denied. The new permissions now require an administrator for every read, breaking existing member access.')).toBeNull();
     expect(refusalReason('Permission denied. The guard rejects members because it checks the wrong permissions.')).toBeNull();
     expect(refusalReason('Billing is not configured for this integration. Please add a payment method.')).toBe('Billing is not configured for this integration');
