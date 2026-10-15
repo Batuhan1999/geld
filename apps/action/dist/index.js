@@ -19330,7 +19330,16 @@ function parseBotBody(body, botId) {
 }
 function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
-  const text = untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter((line) => line !== "").map((line) => /[.!?:;,]$/.test(line) ? line : `${line}.`).join(" ").trim();
+  const blocks = [];
+  for (const raw of untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").split("\n")) {
+    const heading2 = /^\s*#{1,6}\s/.test(raw);
+    const line = raw.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+    const last = blocks.length - 1;
+    if (line === "" || heading2 || last < 0 || blocks[last] === "") blocks.push(line);
+    else blocks[last] = `${blocks[last]} ${line}`;
+    if (heading2) blocks.push("");
+  }
+  const text = blocks.filter((block) => block !== "").map((block) => /[.!?:;,]$/.test(block) ? block : `${block}.`).join(" ").trim();
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
@@ -19486,7 +19495,7 @@ var REFUSAL_SUBJECT = new RegExp(
     /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
     /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
     /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial|pull request|pr)\b/,
+    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
