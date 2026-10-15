@@ -4,7 +4,7 @@
   "description": "Browser extension that hides test files (and other noise) from GitHub diffs.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "Brandon McConnell",
   "scripts": {
     "dev": "wxt",
