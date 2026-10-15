@@ -207,15 +207,30 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
       : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+)?(?:issue|finding|bug|problem)s?\b/i.exec(text));
-  const count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
+  let count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
+  // Greptile's summary (the one headed "Confidence Score: N/5") lists what it found under a "Findings" heading, one
+  // bold title per finding ("1. **Review cards lack test coverage** ▶" raw, "**Review cards lack test coverage** ▶"
+  // as the page reads a list item); a summary with no such section found nothing, whatever its risk sentence says
+  // ("appears safe to merge", "no blocking issue remains" — the wording varies run to run). The section's items are
+  // counted; a section whose items cannot be read leaves the count unknown rather than claiming a clean run.
+  if (botId === 'greptile' && count === null && /\bconfidence score\b/i.test(text)) {
+    // Raw, the headings are HTML (`<h2>Findings</h2>`, `<summary><h3>Summary</h3></summary>`); the tags go first.
+    const plain = text.replace(/<[^>]+>/g, '');
+    const section = /^\s*(?:#{1,6}\s*)?Findings\s*$\n([\s\S]*?)(?=^\s*(?:#{1,6}\s*)?(?:Summary|Reviews \(\d+\))\b|(?![\s\S]))/im.exec(plain);
+    if (section === null) count = 0;
+    else {
+      const items = (section[1] ?? '').split('\n').filter((line) => /\*\*[^*]+\*\*/.test(line)).length;
+      if (items > 0) count = items;
+    }
+  }
   // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
-  // generated in the recent review".
+  // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
   const clean =
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
     /\bno actionable comments\b/i.test(text) ||
     /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
-    (count === 0 && score === null);
+    (count === 0 && (score === null || botId === 'greptile'));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
   // "without security risk". The denied phrase goes before the words are weighed.
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, '');
