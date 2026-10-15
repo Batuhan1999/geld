@@ -233,10 +233,11 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
   // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
   // Cursor's automations post under the Bugbot login. A verdict beside a count of findings ("Didn't find any major
-  // issues. Found 2 minor issues.") is not clean: the count is.
+  // issues. Found 2 minor issues.") is not clean: the count is. The bare "Approved" must be the verdict word — followed
+  // by its punctuation or nothing — not the first word of a finding ("Approved users can edit another tenant's settings").
   const approved =
     (count === null || count === 0) &&
-    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\b/i.test(text));
+    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*\s]*)approved\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
   const clean =
     /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
     /\bno actionable comments\b/i.test(text) ||
