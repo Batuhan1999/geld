@@ -327,7 +327,10 @@ export function refusalReason(body: string): string | null {
     .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
     .find((line) => line !== '');
   if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
-    const aboutBot = REFUSAL_SUBJECT.test(heading) || /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => new RegExp(`\\b${bot.title}\\b`, 'i').test(heading) || bot.logins.some((login) => heading.toLowerCase().includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    // The heading must name the bot (a known title or login) or its usage, credits or quota: "review" alone would
+    // let "Cannot run review tests on a fresh checkout" through, and that heads a finding.
+    const lower = heading.toLowerCase();
+    const aboutBot = /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
     if (aboutBot) return heading.replace(/[.!?]\s*$/, '');
   }
   // CodeRabbit's skip notice: a "Review skipped" heading in an alert ("[!IMPORTANT]" raw, "Important" as the page
