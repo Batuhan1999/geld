@@ -19330,7 +19330,7 @@ function parseBotBody(body, botId) {
 }
 function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
-  const text = untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  const text = untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter((line) => line !== "").map((line) => /[.!?:;,]$/.test(line) ? line : `${line}.`).join(" ").trim();
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
@@ -19338,7 +19338,7 @@ function refusalReason(body) {
     const aboutBot = /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading) || REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
     if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
   }
-  const skipNotice = /^(?:\[!important\]\s*|important\s+)?review skipped\.?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== void 0 && skipNotice[1].trim() !== "") return skipNotice[1].trim();
   if (text.length > 400) return null;
   const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
@@ -19483,8 +19483,10 @@ var REFUSAL_PHRASE = new RegExp(
 );
 var REFUSAL_SUBJECT = new RegExp(
   [
-    /\b(?:bot|reviews?|reviewer|reviewing|code review|analysis|scan)\b/,
-    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
+    /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
+    /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+    /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial|pull request|pr)\b/,
     /\b(?:credits?|quota|billing|seats?)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
