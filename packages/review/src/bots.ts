@@ -417,7 +417,7 @@ function isBareAdvice(body: string, text: string): boolean {
   return unlinked
     .split(/(?<=[.!?])\s+/)
     .slice(1)
-    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || SETUP_NOUN.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+    .every((sentence) => sentence.trim() === '' || !STATEMENT_OPENER.test(sentence) || SETUP_SUBJECT.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 
 /** A sentence that opens on a thing rather than an instruction: a determiner or a third-person pronoun. */
@@ -427,10 +427,18 @@ const STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|the
  * needs — a credential ("The token must have the required scopes"), the
  * installation or account ("The app must be installed for this
  * organization"), billing, or a person with a say over them ("An
- * administrator must grant access"). A statement about the code names none
- * of these: "The guard should allow members but rejects every request".
+ * administrator must grant access") — as its subject, see `SETUP_SUBJECT`.
+ * A statement about the code has none of these for a subject: "The guard
+ * should allow members but rejects every request".
  */
-const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|installed|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+const SETUP_NOUN = /\b(?:tokens?|credentials?|permissions?|scopes?|access|installations?|app|account|organi[sz]ations?|org|plan|subscription|trial|billing|credits?|quota|seats?|dashboard|settings|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
+/**
+ * A statement whose subject is such a noun: the determiner, at most one word
+ * of modifier, then the noun ("The token must…", "An administrator must…",
+ * "The GitHub app must be…"). A setup noun further in — "The guard rejects
+ * members because it checks the wrong permissions" — is the code's business.
+ */
+const SETUP_SUBJECT = new RegExp(`^\\s*(?:the|this|that|an?|its|your|our)\\s+(?:[\\w-]+\\s+)?${SETUP_NOUN.source.replace(/^\\b|\\b$/g, '')}\\b`, 'i');
 
 /**
  * A sentence that refuses: it holds a refusal phrase, and it is about the bot

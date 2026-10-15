@@ -740,6 +740,8 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Permission denied. The guard should allow members but rejects every request.')).toBeNull();
     expect(refusalReason('Credits are unavailable because the new query excludes paid users.')).toBeNull();
     expect(refusalReason('Permission denied. The token must have the required scopes.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The GitHub app must be installed for this organization.')).toBe('Permission denied');
+    expect(refusalReason('Permission denied. The guard rejects members because it checks the wrong permissions.')).toBeNull();
     expect(refusalReason('Billing is not configured for this integration. Please add a payment method.')).toBe('Billing is not configured for this integration');
     expect(refusalReason('Credits are unavailable until the next billing cycle.')).toBe('Credits are unavailable until the next billing cycle');
     // CodeRabbit's skip notice (geld#48), raw and as the page reads it: long (its run configuration follows), so the
