@@ -18911,7 +18911,7 @@ var STATUS_RANK = {
   "done-manual": 4,
   resolved: 5
 };
-var BOT_VERDICTS = ["clean", "findings", "failed", "running", "loading"];
+var BOT_VERDICTS = ["clean", "findings", "failed", "running", "loading", "unknown"];
 var REVIEWER_STATES = ["approved", "changes_requested", "commented", "pending"];
 var SOURCE_KINDS = ["thread", "comment", "review"];
 var ADDRESSED_VERDICTS = ["yes", "partly", "no", "unclear"];
@@ -19617,7 +19617,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       }
     }
     if (existing === void 0) {
-      byId.set(id, { id, login, verdict: stale ? options.partial === true ? "loading" : "failed" : "running", reviewedSha: headSha, sourceId: anchor2 });
+      byId.set(id, { id, login, verdict: stale ? options.partial === true ? "loading" : options.closed === true ? "unknown" : "failed" : "running", reviewedSha: headSha, sourceId: anchor2 });
       continue;
     }
     if (!checkIsThisRun) {
@@ -20274,6 +20274,7 @@ function botPhrase(bot, headSha) {
   const tag = freshness(bot, headSha);
   if (bot.verdict === "running") return `${title} running (${tag})`;
   if (bot.verdict === "loading") return `${title} loading (${tag})`;
+  if (bot.verdict === "unknown") return `${title} no word (${tag})`;
   if (bot.verdict === "failed") return bot.reason === void 0 ? `${title} failed (${tag})` : `${title} skipped (${tag}): ${bot.reason}`;
   if (bot.verdict === "clean") return `${title} clean (${tag})`;
   if (bot.score !== void 0) return `${title} ${bot.score}/5 (${tag})`;

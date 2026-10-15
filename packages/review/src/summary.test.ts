@@ -5,7 +5,7 @@ import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parse
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
 import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
-import type { BotComment, DerivedBotVerdict } from './bots';
+import type { BotComment, DerivedBotVerdict, RawCheckRun, VerdictOptions } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
 const PRODUCER = { kind: 'action' as const, version: '0.1.0', ai: false };
@@ -543,6 +543,20 @@ describe('bots + prompts', () => {
     // is its (none) — not the earlier check's, which would read the later verdict as the earlier run's.
     const { startedAt: _started, completedAt: _completed, ...undatedCheck } = earlierCheck;
     expect(verdictsFrom([earlierCheck, undatedCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
+  });
+
+  it('has no word on a request that aged unanswered on a merged pull request', () => {
+    // mint#12962: "bugbot run" in a request comment, Devin and Greptile answered, Bugbot never did, and the pull
+    // request was merged — GitHub shows none of its checks any more, so Bugbot's silence is no failure.
+    const now = Date.UTC(2026, 9, 15, 0, 0);
+    const request: BotComment = { author: 'brandonmcconnell', body: '/devin review\nbugbot run\n@greptileai', anchor: 'issuecomment-1', createdAt: new Date(now - 2 * 3_600_000).toISOString() };
+    const bugbot = (checks: readonly RawCheckRun[], options: VerdictOptions): DerivedBotVerdict | undefined => verdictsFrom(checks, [request], 'aaa', [], now, options).find((bot) => bot.id === 'bugbot');
+    expect(bugbot([], { closed: true })).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-1' });
+    // Open, the same silence is a failure, as before; still reading, it is loading.
+    expect(bugbot([], {})?.verdict).toBe('failed');
+    expect(bugbot([], { closed: true, partial: true })?.verdict).toBe('loading');
+    // A check that did run on the closed pull request still speaks for it.
+    expect(bugbot([{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'success', sha: 'aaa', startedAt: new Date(now - 3_600_000).toISOString() }], { closed: true })?.verdict).toBe('clean');
   });
 
   it('does not keep a bot running on a status line that aged with nothing after it', () => {
