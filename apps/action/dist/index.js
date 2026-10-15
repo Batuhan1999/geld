@@ -19374,13 +19374,16 @@ function isBareAdvice(body, text) {
   if (unlinked.length > 200 || /`/.test(body)) return false;
   const raw = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "");
   if (/(?:\w[\w-]*[./]\w|\b\w*_\w+\b|\b[a-z]+[A-Z]\w*\b)/.test(raw)) return false;
-  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
+  return unlinked.split(/(?<=[.!?])\s+/).slice(1).every((sentence) => sentence.trim() === "" || !STATEMENT_OPENER.test(sentence) || ADVICE_MARK.test(sentence) || REFUSAL_SUBJECT.test(sentence) || /https?:\/\//.test(text));
 }
 var STATEMENT_OPENER = /^\s*(?:the|this|that|these|those|an?|it|its|we|our|they|their|there|each|every|some|all|no|none|one)\b/i;
+var ADVICE_MARK = /\b(?:must|should|needs? to|has to|have to|will need|admin(?:istrator)?s?|owners?|maintainers?)\b/i;
 function isRefusalSentence(sentence) {
   const match = REFUSAL_PHRASE.exec(sentence);
   if (match === null) return false;
-  return REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0]);
+  if (REFUSAL_SUBJECT.test(sentence) || REFUSAL_MONEY.test(match[0])) return true;
+  const before = sentence.slice(0, match.index).trim().split(/\s+/);
+  return REFUSAL_MONEY.test(before[before.length - 1] ?? "");
 }
 var SOURCE_LINK = /https?:\/\/\S*(?:\/(?:blob|tree)\/\S+|\/pull\/\d+\/(?:files|changes)(?:[/?#]|$)|#L\d+(?:[-C]L?\d+)*[.,;:)\]]*(?:\s|$))/;
 var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
