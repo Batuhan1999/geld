@@ -501,10 +501,14 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // (Sourcery), "All reported issues were addressed" (cubic: nothing outstanding), "The PR is ready to merge".
   // "Needs a human reviewer." (Sourcery's assessment), "Needs Human Approval" (Macroscope's verdict): the bot would
   // not sign off, whatever kind words came before ("they look great!").
-  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text);
+  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text.replace(/\b(?:not|no|never|without|doesn.t|does not|don.t|do not|didn.t|did not)\b(?:\s+\w+){0,2}\s+needs? (?:a )?human (?:review(?:er)?|approval)\b/gi, ''));
   // "The PR is ready to merge" (Amazon Q) — unless the sentence says it is not ("not yet ready to merge", "isn't
   // ready to merge", "before it is ready to merge").
-  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text);
+  const readyToMerge =
+    /\bready to merge\b/i.test(text) &&
+    !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text) &&
+    // ...nor with a condition after it ("ready to merge after the failing check is fixed", "once …", "if …").
+    !/\bready to merge\s+(?:after|once|when|if|provided|pending|following|as soon as|but|except|unless)\b/i.test(text);
   const clean =
     !needsHuman &&
     (count === null || count === 0) &&
@@ -627,7 +631,7 @@ export function refusalReason(body: string): string | null {
     // database" head findings. A heading that is itself about usage, credits or quota ("Usage limit reached") may
     // leave the bot unnamed.
     const lower = heading.toLowerCase();
-    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+    const named = botNamedIn(lower);
     const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
     const aboutBot = named || (!runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading));
     if (aboutBot) return heading.replace(/[.!?]\s*$/, '');
@@ -827,14 +831,25 @@ const REFUSAL_SUBJECT = new RegExp(
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
-    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
+    // A bot's title or login stem — except a title that is a plain lowercase word ("cubic"): "the cubic interpolation
+    // worker cannot run" is about the code; the login stem (`cubic-dev-ai`) still names the bot.
+    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [...(/^[a-z]+$/.test(bot.title) ? [] : [bot.title]), ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ''))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`),
   ]
     .map((part) => part.source)
     .join('|'),
   'i',
 );
+/**
+ * Whether lowercase `text` names a review bot: a title, or a login's stem —
+ * except a title that is a plain lowercase word ("cubic"), which is as often
+ * the word ("cubic interpolation") as the bot; its login stem still names it.
+ */
+function botNamedIn(text: string): boolean {
+  return REVIEW_BOTS.some((bot) => (!/^[a-z]+$/.test(bot.title) && text.includes(bot.title.toLowerCase())) || bot.logins.some((login) => text.includes(login.replace(/\[bot\]$/, '').toLowerCase())));
+}
+
 /** The money words: a subject only inside the refusal phrase itself ("no credits remaining"), see `isRefusalSentence`. */
-const REFUSAL_MONEY = /\b(?:credits?|quota|budget|billing|seats?)\b/i;
+const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 
 function withOptionalCount(base: DerivedBotVerdict, parsed: ParsedBotBody): DerivedBotVerdict {
   return {
@@ -875,11 +890,13 @@ export function isStatusLineComment(body: string): boolean {
   // words ("Currently processing changes this way is slow. Found 2 issues…") is a review, not a status.
   // Qodo's "Qodo is busy working. Check back in a few minutes." and Claude Code's "Reviewing PR #396 - [x] Gather
   // context - [ ] Read AGENTS.md …" (a checklist it ticks as it goes) are status lines whatever their length.
-  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\b/i.test(text)) return true;
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\s*(?:-\s*\[|$)/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
+  // A sentence that reports what was found is a report, however it opens ("Reviewing PR #396 revealed 2 bugs").
+  if (/\b\d+\s+(?:\w+\s+)?(?:issues?|bugs?|findings?|problems?)\b|\b(?:found|revealed|flagged)\b/i.test(text)) return false;
   const stated = /^(?:review|analysis|scan)\s+(?:in progress|started|queued|has started)\b/i;
   const promise = /\b(?:will|I'?ll)\s+(?:post|comment|report|reply|start|begin|review)\b.*\b(?:when|once|shortly|soon)\b/i;
   return underWay.test(text) || stated.test(text) || promise.test(text);

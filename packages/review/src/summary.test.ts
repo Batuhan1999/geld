@@ -498,6 +498,15 @@ describe('bots + prompts', () => {
     expect(verdictsFrom([], [{ author: 'macroscopeapp[bot]', body: '#### Approvability\n**Verdict:** Needs Human Approval\n\nMacroscope\'s review found this PR requires human approval.', anchor: 'issuecomment-3' }], 'aaa')[0]).toMatchObject({ id: 'macroscope', verdict: 'findings', sourceId: 'issuecomment-3' });
     expect(refusalReason('**Automatic Review Skipped**\n\nThis PR changes **132 files**, above the **100-file** limit for automatic reviews. Trigger a full review by commenting:\n```\n@entelligence review\n```')).toBe('This PR changes 132 files, above the 100-file limit for automatic reviews');
     expect(isStatusLineComment('Starting fresh pr review. This may take a few minutes')).toBe(true);
+    // CodeRabbit's pass over this block: words that happen to be a bot's, a budget, a merge condition, a negation.
+    expect(refusalReason('The cubic interpolation worker cannot run on the GPU path. Found 2 issues.')).toBeNull();
+    expect(refusalReason('The import job exhausted its daily budget before the last page. Found 2 issues.')).toBeNull();
+    expect(isStatusLineComment('Reviewing PR #396 revealed 2 bugs in the retry loop.')).toBe(false);
+    expect(parseBotBody('## Review Summary\nThe PR is ready to merge after the failing check is fixed.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody('## Review Summary\nThe PR is ready to merge once the snapshot is updated.', 'amazon-q').clean).toBe(false);
+    const approvedNoHuman = parseBotBody('#### Approvability\n**Verdict:** Approved at `2a60be7`\n\nThis does not need human approval: the change is a test-only fix.', 'macroscope');
+    expect(approvedNoHuman.clean).toBe(true);
+    expect(approvedNoHuman.verdict).toBeUndefined();
     // The Autofix sibling aside, each bot's check is its own.
     expect(verdictsFrom([{ name: 'Claude Code Review', status: 'completed', conclusion: 'neutral', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'claude', verdict: 'clean' });
     expect(verdictsFrom([{ name: 'Sourcery review', status: 'completed', conclusion: 'skipped', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'sourcery', verdict: 'failed', reason: 'Check skipped' });

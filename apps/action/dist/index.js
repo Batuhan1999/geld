@@ -19513,8 +19513,9 @@ function parseBotBody(body, botId) {
     }
   }
   const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\b(?:verdict|assessment)\W{0,6}(?:would\s+)?approved?\b/i.test(text) || /\breview complete\s*[\u2014\u2013-]+\s*approved\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
-  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text);
-  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text);
+  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text.replace(/\b(?:not|no|never|without|doesn.t|does not|don.t|do not|didn.t|did not)\b(?:\s+\w+){0,2}\s+needs? (?:a )?human (?:review(?:er)?|approval)\b/gi, ""));
+  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text) && // ...nor with a condition after it ("ready to merge after the failing check is fixed", "once …", "if …").
+  !/\bready to merge\s+(?:after|once|when|if|provided|pending|following|as soon as|but|except|unless)\b/i.test(text);
   const clean = !needsHuman && (count === null || count === 0) && (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) || readyToMerge || approved || count === 0 && (score === null || botId === "greptile" || shaped !== null));
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
@@ -19543,7 +19544,7 @@ function refusalReason(body) {
   }
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
     const lower = heading.toLowerCase();
-    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const named = botNamedIn(lower);
     const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
     const aboutBot = named || !runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading);
     if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
@@ -19765,11 +19766,16 @@ var REFUSAL_SUBJECT = new RegExp(
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
-    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
+    // A bot's title or login stem — except a title that is a plain lowercase word ("cubic"): "the cubic interpolation
+    // worker cannot run" is about the code; the login stem (`cubic-dev-ai`) still names the bot.
+    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [.../^[a-z]+$/.test(bot.title) ? [] : [bot.title], ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
   ].map((part) => part.source).join("|"),
   "i"
 );
-var REFUSAL_MONEY = /\b(?:credits?|quota|budget|billing|seats?)\b/i;
+function botNamedIn(text) {
+  return REVIEW_BOTS.some((bot) => !/^[a-z]+$/.test(bot.title) && text.includes(bot.title.toLowerCase()) || bot.logins.some((login) => text.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+}
+var REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 function withOptionalCount(base, parsed) {
   return {
     ...base,
@@ -19787,9 +19793,10 @@ function isStatusLineComment(body) {
   const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
   if (text === "") return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== "");
-  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\b/i.test(text)) return true;
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\s*(?:-\s*\[|$)/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? "");
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
+  if (/\b\d+\s+(?:\w+\s+)?(?:issues?|bugs?|findings?|problems?)\b|\b(?:found|revealed|flagged)\b/i.test(text)) return false;
   const stated = /^(?:review|analysis|scan)\s+(?:in progress|started|queued|has started)\b/i;
   const promise2 = /\b(?:will|I'?ll)\s+(?:post|comment|report|reply|start|begin|review)\b.*\b(?:when|once|shortly|soon)\b/i;
   return underWay.test(text) || stated.test(text) || promise2.test(text);
