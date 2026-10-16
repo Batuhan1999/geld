@@ -874,10 +874,16 @@ function reviewBotIdFor(login: string, extraLogins: readonly string[]): string |
  * status line, never a verdict. Short, one sentence, and shaped like one.
  */
 export function isStatusLineComment(body: string): boolean {
-  const text = body
+  const untagged = body
     .replace(/<!--[\s\S]*?-->/g, '')
     // Qodo's "<h3>Qodo is busy working</h3>" is HTML, raw.
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  // Claude Code's progress comment: "Reviewing PR #396" on a line of its own (a spinner image beside it, raw), then
+  // the checklist it ticks as it goes — "- [x] Gather context" raw, bare "Gather context" lines as the page reads a
+  // task list (`blockText` keeps no checkbox). The first line alone says it, whatever the length of the list below.
+  const firstLine = untagged.split('\n').find((line) => line.trim() !== '') ?? '';
+  if (/^\s*reviewing (?:pr|pull request) #?\d+\s*$/i.test(firstLine.replace(/[`*_>~#]/g, ' ').replace(/\s+/g, ' '))) return true;
+  const text = untagged
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_>~#]/g, '')
     .replace(/\s+/g, ' ')
@@ -889,9 +895,8 @@ export function isStatusLineComment(body: string): boolean {
   // "[!NOTE]" in the markdown, behind the "Note" heading GitHub renders it as on the page (`blockText` keeps it,
   // on its own line, no full stop). The whole first sentence must be that line: one that merely begins with the
   // words ("Currently processing changes this way is slow. Found 2 issues…") is a review, not a status.
-  // Qodo's "Qodo is busy working. Check back in a few minutes." and Claude Code's "Reviewing PR #396 - [x] Gather
-  // context - [ ] Read AGENTS.md …" (a checklist it ticks as it goes) are status lines whatever their length.
-  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\s*(?:-\s*\[|$)/i.test(text)) return true;
+  // Qodo's "Qodo is busy working. Check back in a few minutes." is a status line whatever its length.
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").

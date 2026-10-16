@@ -19790,10 +19790,13 @@ function reviewBotIdFor(login, extraLogins) {
   return extraLogins.some((entry2) => entry2.toLowerCase() === login.toLowerCase()) ? `custom:${login.toLowerCase()}` : null;
 }
 function isStatusLineComment(body) {
-  const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ");
+  const firstLine = untagged.split("\n").find((line) => line.trim() !== "") ?? "";
+  if (/^\s*reviewing (?:pr|pull request) #?\d+\s*$/i.test(firstLine.replace(/[`*_>~#]/g, " ").replace(/\s+/g, " "))) return true;
+  const text = untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
   if (text === "") return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== "");
-  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\s*(?:-\s*\[|$)/i.test(text)) return true;
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? "");
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
   if (/\b\d+\s+(?:\w+\s+)?(?:issues?|bugs?|findings?|problems?)\b|\b(?:found|revealed|flagged)\b/i.test(text)) return false;
