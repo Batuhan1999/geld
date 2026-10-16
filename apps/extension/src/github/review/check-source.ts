@@ -60,29 +60,20 @@ function keyOf(subject: CheckSubject, headSha: string): string {
   return `${subject.origin}/${subject.owner}/${subject.repo}@${headSha.toLowerCase()}`;
 }
 
-async function fetchChecks(subject: CheckSubject, headSha: string, reading: Reading): Promise<boolean> {
+async function fetchChecks(subject: CheckSubject, headSha: string, reading: Reading): Promise<void> {
   try {
     const url = `${subject.origin}/${encodeURIComponent(subject.owner)}/${encodeURIComponent(subject.repo)}/commit/${headSha}/status-details?popover=true`;
     const response = await fetch(url, { headers: fragmentHeaders(), credentials: 'same-origin', cache: 'no-store' });
     if (!response.ok) {
       reading.failed = true;
-      return false;
+      return;
     }
     const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
-    const checks = crawlCheckRuns(parsed, headSha);
-    const before = describe(reading.checks);
-    reading.checks = checks;
+    reading.checks = crawlCheckRuns(parsed, headSha);
     reading.failed = false;
-    return before !== describe(checks);
   } catch {
     reading.failed = true;
-    return false;
   }
-}
-
-/** Everything a reading is read for: the state, and the words and link the Reports row shows. */
-function describe(checks: readonly RawCheckRun[]): string {
-  return checks.map((check) => `${check.name}|${check.status}|${check.conclusion ?? ''}|${check.description ?? ''}|${check.detailsUrl ?? ''}`).join('\n');
 }
 
 function botCheckRunning(checks: readonly RawCheckRun[]): boolean {
@@ -94,9 +85,10 @@ function botCheckRunning(checks: readonly RawCheckRun[]): boolean {
  * far (empty before the first reading lands), with a read started when none
  * has been taken for this head, when `fingerprint` (the merge box's words)
  * differs from the last reading's, or when the last one is older than the
- * clock allows. `onChange` runs when a reading lands — whatever it says, so
- * the pass that follows can arm the clock for the next one
- * (`nextCheckRefresh`) now that `fetchedAt` has moved.
+ * clock allows. `onChange` runs when a read lands, whatever it says: the pass
+ * reads the new list (its state for the bots, its words and links for the
+ * Reports row) and arms the clock for the next read (`nextCheckRefresh`) now
+ * that `fetchedAt` has moved.
  */
 export function headChecks(subject: CheckSubject, headSha: string, fingerprint: string, onChange: () => void): readonly RawCheckRun[] {
   if (headSha === '') return [];
