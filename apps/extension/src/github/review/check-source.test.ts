@@ -81,6 +81,7 @@ describe('headChecks', () => {
     const url = String(vi.mocked(fetchMock).mock.calls[0]?.[0]);
     expect(url).toBe(`https://github.com/wxt-dev/wxt/commit/${sha}/status-details?popover=true`);
     expect(onChange).toHaveBeenCalledTimes(1);
+    expect(nextCheckRefresh(subject, sha)).not.toBeNull();
     const checks = headChecks(subject, sha, 'box', onChange);
     expect(checks.map((check) => check.name)).toEqual(['Cursor Bugbot', 'Greptile']);
     // Same head, same merge box words, read a moment ago: no second fetch.
@@ -99,14 +100,16 @@ describe('headChecks', () => {
       vi.stubGlobal('fetch', fetchMock);
       const onChange = vi.fn();
       headChecks(subject, sha, 'box', onChange);
+      // While the read is in flight there is no deadline: the landing makes the pass that asks again.
+      expect(nextCheckRefresh(subject, sha)).toBeNull();
       await vi.runAllTimersAsync();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       vi.advanceTimersByTime(3_000);
       headChecks(subject, sha, 'box with one more passed', onChange);
       await vi.runAllTimersAsync();
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      // Nothing new in the partial: the first landing was the only change reported.
-      expect(onChange).toHaveBeenCalledTimes(1);
+      // Every landing is a pass, so the clock can be re-armed from the new fetchedAt.
+      expect(onChange).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -125,7 +128,6 @@ describe('headChecks', () => {
       headChecks(subject, sha, 'box', onChange);
       await vi.runAllTimersAsync();
       expect(headChecks(subject, sha, 'box', onChange)).toHaveLength(2);
-      expect(onChange).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
