@@ -48,7 +48,7 @@ import type { Avatar, CheckAvatar, FoldRow, GroupId, PanelHandlers, PanelModel }
 import type { RepoBotsHint } from './panel-model';
 import { NO_REPO_BOTS, requestableBots } from './panel-model';
 import { outgoingMentions, renderMentionsView, renderQuickView, timeCommitRows } from './quick-view';
-import { chatNeedsRedress, redressComposer, renderChatView, renderCommentChat, sourceFocusKey, threadAnchorOf } from './chat';
+import { chatNeedsRedress, dressArrivals, redressComposer, renderChatView, renderCommentChat, sourceFocusKey, threadAnchorOf } from './chat';
 import type { ChatByline, ChatRerun, ChatThreadLink } from './chat';
 import { viaBotOf } from './via';
 import type { ChatHandlers, ChatSource } from './chat';
@@ -317,6 +317,11 @@ function watchLoans(root: Element): void {
   loanWatcher?.disconnect();
   loanWatched = root;
   loanWatcher ??= new MutationObserver((records) => {
+    // A comment GitHub appended to a loaned thread (the reader's reply, one over the socket) is dressed here and
+    // now, before paint, so it never shows as GitHub's raw card and the pass below finds nothing to redress.
+    // `loanWatched`, not `root`: the observer is made once and re-pointed at each mount's root, so the callback's own
+    // `root` is the first mount's, long detached.
+    if (loanWatched !== null && records.some((record) => record.type === 'childList' && record.addedNodes.length > 0 && record.target instanceof Element && record.target.closest(LOAN_VIEWS) !== null)) dressArrivals(loanWatched);
     // A swap GitHub made of a loaned node *is* the thread changing state (the classic Resolve answers with the
     // whole thread, resolved, in a fresh `<turbo-frame>`). Adoption hands the loan token to the newcomer, and
     // `touchesThreadState` reads a token as the panel's own move — so the adoption itself has to say "changed";

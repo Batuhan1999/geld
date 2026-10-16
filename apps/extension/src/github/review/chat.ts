@@ -132,6 +132,36 @@ export function chatNeedsRedress(chat: HTMLElement): boolean {
   return false;
 }
 
+/**
+ * Dress what GitHub has just added to a chat on loan, where it stands. A
+ * reply the reader posts (or one that arrives over the socket) is appended
+ * to the loaned thread as GitHub's raw card; the pass that would have read
+ * it (`chatNeedsRedress` → a full re-render of the slot, every loan going
+ * home and coming back) runs after a debounce, so the card showed raw for a
+ * moment and then the whole chat redrew around it (notra#1148). Called from
+ * the loan watcher's MutationObserver callback — a microtask, before the
+ * browser paints — this marks the newcomers and re-reads each message's
+ * place in its author's run (the one before a new reply is no longer the
+ * last of its run), so the reply is a bubble from its first frame and the
+ * pass that follows finds nothing to redress. True when something was dressed.
+ */
+export function dressArrivals(root: ParentNode = document): boolean {
+  let dressed = false;
+  const viewer = viewerLogin();
+  for (const body of root.querySelectorAll<HTMLElement>('.geld-review__chat[data-geld-chat="thread"] .geld-review__chat-body')) {
+    for (const thread of body.children) {
+      if (!(thread instanceof HTMLElement) || !isTeleported(thread)) continue;
+      const messages = messagesIn(thread, true);
+      const fresh = messages.filter((message) => !message.hasAttribute(ATTR_MESSAGE));
+      if (fresh.length === 0) continue;
+      annotateMessages(messages, viewer, false);
+      for (const message of fresh) placeControls(message);
+      dressed = true;
+    }
+  }
+  return dressed;
+}
+
 /** The thread's first comment anchor (its identity across rebuilds). */
 export function threadAnchorOf(thread: HTMLElement): string {
   return thread.querySelector('[id^="discussion_r"], [id^="issuecomment-"]')?.id ?? thread.id;
