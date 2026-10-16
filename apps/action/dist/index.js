@@ -19862,7 +19862,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
         const prior = threadRuns.get(asked.id);
         if (prior !== void 0) runsBeforeAsk.set(asked.id, prior);
         threadRuns.delete(asked.id);
-        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: false });
+        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: false, acknowledged: botById(asked.id)?.acknowledges === "reaction" && reactedBy(comment, asked.id) });
       }
       continue;
     }
@@ -19896,7 +19896,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       if (prior !== void 0) runsBeforeAsk.set(id, prior);
       threadRuns.delete(id);
       const at = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
-      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: true });
+      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: true, acknowledged: false });
       continue;
     }
     const parsed = parseBotBody(comment.body, id.startsWith("custom:") ? "" : id);
@@ -19916,7 +19916,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const verdict = parsed.clean ? "clean" : "findings";
     byId.set(id, withOptionalCount({ id, login, verdict, reviewedSha: headSha, sourceId: comment.anchor }, parsed));
   }
-  for (const [id, { login, anchor: anchor2, at, own: own2 }] of statusOnly) {
+  for (const [id, { login, anchor: anchor2, at, own: own2, acknowledged }] of statusOnly) {
     const existing = byId.get(id);
     const edited = lastEditBy.get(id);
     if (existing !== void 0 && at !== null && edited !== void 0 && edited > at) continue;
@@ -19931,7 +19931,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       }
     }
     if (existing === void 0) {
-      const silence = options.partial === true ? "loading" : options.closed === true || own2 ? "unknown" : "failed";
+      const silence = options.partial === true ? "loading" : options.closed !== true && !own2 && acknowledged ? "failed" : "unknown";
       byId.set(id, { id, login, verdict: stale ? silence : "running", reviewedSha: headSha, sourceId: anchor2 });
       continue;
     }
