@@ -3829,8 +3829,13 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   line-height: 20px;
 }
 
+/* The reader's own line reads from the picture inward too, so it hangs from the bubble's right edge and runs
+ * leftward past a narrower bubble (the line is as wide as the bubble, below, and its words overflow). GitHub's
+ * `.flex-row` utility is `!important`, so the direction stays row and the end alignment does the mirroring: the
+ * one visible child, the header text, sits against the right edge and overflows to the left. Read as a row it
+ * would start at the left edge and run right, under the picture (notra#1148). */
 .geld-review__chat [data-geld-mine] > [data-geld-part='meta'] {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 .geld-review__chat [data-geld-part='meta'] h3,
