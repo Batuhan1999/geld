@@ -928,8 +928,19 @@ export function crawlCheckRuns(root: ParentNode = document, headSha = ''): reado
     seen.add(name);
     // Where the check's title (React) or "Details" (classic) leads, and GitHub's one-line description: a status an
     // external service posted links to that service, which the check reporters are known by.
-    const details = row.querySelector<HTMLAnchorElement>('[class*="StatusCheckRow"] h4 a[href], .merge-status-item a.status-actions[href], .merge-status-item a[href]:not([href^="#"])');
-    const description = (row.querySelector('[class*="titleDescription"], [class*="StatusCheckRow"] [class*="description" i], .merge-status-item .status-meta, .merge-status-item .text-small')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // By preference, not by position: a selector list answers with the first match in document order, and in a
+    // classic row the App's avatar link (`/apps/cursor`) comes before "Details".
+    const details =
+      row.querySelector<HTMLAnchorElement>('[class*="StatusCheckRow"] h4 a[href], .merge-status-item a.status-actions[href]') ??
+      row.querySelector<HTMLAnchorElement>('.merge-status-item a[href]:not([href^="#"]):not([href^="/apps/"]):not([href*="/apps/"])');
+    const described = row.querySelector('[class*="titleDescription"], [class*="StatusCheckRow"] [class*="description" i], .merge-status-item .status-meta, .merge-status-item .text-small');
+    // The commit's status partial (`/commit/<sha>/status-details`) writes the description as loose text beside the
+    // name, in the same truncating cell: the cell's words minus the name's.
+    const cell = described === null ? row.querySelector('.merge-status-item strong')?.parentElement ?? null : null;
+    const nameText = (row.querySelector('.merge-status-item strong')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const description = (described !== null ? (described.textContent ?? '') : cell === null ? '' : (cell.textContent ?? '').replace(nameText, ''))
+      .replace(/\s+/g, ' ')
+      .trim();
     // A running check's description says when it started ("Started <relative-time>"); a finished one's does not.
     const startedAt = state.status === 'completed' ? null : (row.querySelector('[class*="titleDescription"] relative-time[datetime], .merge-status-item relative-time[datetime]')?.getAttribute('datetime') ?? null);
     out.push({
