@@ -7,8 +7,8 @@
 
 import { createElement } from '../dom';
 import type { GeldSettings } from '@geld/core';
-import type { BotVerdictRecord, CommentLane, GeldPrMeta, ReviewItem, ReviewerState } from '@geld/review';
-import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, parseBotBody, parsePreviews, refusalReason, REPORT_GRACE_MS, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
+import type { BotVerdictRecord, CommentLane, GeldPrMeta, RawCheckRun, ReviewItem, ReviewerState } from '@geld/review';
+import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, mergeCheckRuns, parseBotBody, parsePreviews, refusalReason, REPORT_GRACE_MS, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
 import type { Preview } from '@geld/review';
 import { detectHeadSha } from '../head-sha';
 import { describePage } from '../page';
@@ -24,6 +24,7 @@ import { crawlConversation } from './crawler';
 import { clickLoadMore, fragmentHeaders, hasLoadMore, sourceAnchorFromHash } from './deeplink';
 import { commitTimes, isRewritten } from './commit-dates';
 import { editedAt, editsVersion, resetEditTimes, revisionAsOf } from './edit-times';
+import { headChecks, nextCheckRefresh, resetHeadChecks } from './check-source';
 import { absoluteTimeText, relativeTimeText } from './time';
 import { stickyHeaderBottomAt } from './sticky';
 import { fetchReviewerCandidates, hasReviewActions, pressReviewAction, requestReviewers, reviewRequestForm } from './reviewers';
@@ -416,10 +417,12 @@ type Crawled = ReturnType<typeof crawlConversation>;
 function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: string, generatedAt: string, partial: boolean): GeldPrMeta {
   const comments = crawled.comments.map((entry) => entry.comment);
   const items = clusterComments(comments, settings.reviewBots);
-  // The merge box's check rows, as the Action would read them from the API: a bot whose run finished green and
-  // that flagged nothing is clean, whatever its opening comment said. A run's start (shown while it runs, kept
-  // after) is a run asked for as surely as a trigger comment, and a report is a word newer than that start.
-  const checks = withRunTimes(crawlCheckRuns(document, headSha), visit.pageKey, headSha, reapplySoon);
+  // The head's check rows, as the Action would read them from the API: a bot whose run finished green and that
+  // flagged nothing is clean, whatever its opening comment said. A run's start (shown while it runs, kept after)
+  // is a run asked for as surely as a trigger comment, and a report is a word newer than that start. The page's
+  // merge box has the rows only when expanded (and not at all once the pull request is merged or closed), so the
+  // commit's status partial fills in what it does not show (`check-source.ts`).
+  const checks = withRunTimes(pageChecks(headSha), visit.pageKey, headSha, reapplySoon);
   // The grace a finished check's report is given ends on a clock, not on a page change: a pass is due then.
   const graceEnd = nextRunGraceEnd(checks, REPORT_GRACE_MS);
   if (graceEnd !== null) reapplyAt(graceEnd);
@@ -2449,6 +2452,23 @@ function subjectOf(): MarkdownSubject | null {
   return { owner, repo, number: Number.parseInt(number, 10), origin: location.origin };
 }
 
+/**
+ * Every check of the head: the merge box's rows (live, with a running check's
+ * start) over the commit's status partial for the rest. The partial is read
+ * again when the merge box's words change and on its own clock
+ * (`headChecks`); that clock gets a pass of its own, as a report's grace does.
+ */
+function pageChecks(headSha: string): readonly RawCheckRun[] {
+  const fromPage = crawlCheckRuns(document, headSha);
+  const subject = subjectOf();
+  if (subject === null || headSha === '') return fromPage;
+  const checkSubject = { origin: subject.origin, owner: subject.owner, repo: subject.repo };
+  const fetched = headChecks(checkSubject, headSha, mergeBoxText(), reapplySoon);
+  const next = nextCheckRefresh(checkSubject, headSha);
+  if (next !== null) reapplyAt(next);
+  return mergeCheckRuns(fromPage, fetched);
+}
+
 /** What an open row shows in its slot: the item's thread(s), a fold's nodes, or the merge box's checks. */
 function quickViewFor(key: string, meta: GeldPrMeta, groups: readonly FoldGroup[]): readonly HTMLElement[] {
   // The Reviews and Previews rows render their own lists; the panel itself stands in for "something to show".
@@ -2586,6 +2606,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     resetFragments();
     forgetThreads();
     resetEditTimes();
+    resetHeadChecks();
     botLineMemo.clear();
     visit.manualDone = new Set();
     visit.rerunPending = new Map();
@@ -2684,7 +2705,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   // ...and the services that report through a check whose Details lead to their site (Chromatic), read from the merge box.
   const allReports = phase('reports', () => [
     ...reportsFrom(crawledDom.comments.filter((entry) => entry.author.bot).map((entry) => ({ author: entry.author.login, body: entry.comment.body, anchor: entry.comment.anchor, ...(entry.comment.createdAt === '' ? {} : { createdAt: entry.comment.createdAt }) }))),
-    ...reportsFromChecks(crawlCheckRuns(document, headSha)),
+    ...reportsFromChecks(pageChecks(headSha)),
   ]);
   const reports = latestReports(allReports);
   // A reporter's latest report is the Reports row's line, as a bot's latest summary is the Review bots row's: seated
