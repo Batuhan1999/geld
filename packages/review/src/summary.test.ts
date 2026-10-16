@@ -507,6 +507,7 @@ describe('bots + prompts', () => {
     const approvedNoHuman = parseBotBody('#### Approvability\n**Verdict:** Approved at `2a60be7`\n\nThis does not need human approval: the change is a test-only fix.', 'macroscope');
     expect(approvedNoHuman.clean).toBe(true);
     expect(approvedNoHuman.verdict).toBeUndefined();
+    expect(parseBotBody('They look great, but this not only needs human approval; it also needs a security signoff.', 'sourcery')).toMatchObject({ clean: false, verdict: 'needs-human' });
     // The Autofix sibling aside, each bot's check is its own.
     expect(verdictsFrom([{ name: 'Claude Code Review', status: 'completed', conclusion: 'neutral', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'claude', verdict: 'clean' });
     expect(verdictsFrom([{ name: 'Sourcery review', status: 'completed', conclusion: 'skipped', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'sourcery', verdict: 'failed', reason: 'Check skipped' });
