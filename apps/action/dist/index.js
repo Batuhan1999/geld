@@ -19443,6 +19443,9 @@ function botTitle(id, login) {
   if (id.startsWith("custom:")) return login.replace(/\[bot\]$/i, "");
   return login;
 }
+function isReviewShaped(parsed) {
+  return parsed.count !== null || parsed.score !== null || parsed.clean || parsed.verdict !== void 0;
+}
 function countShapedBy(botId, text) {
   switch (botId) {
     case "claude": {
@@ -19467,17 +19470,26 @@ function countShapedBy(botId, text) {
     }
     case "korbit": {
       if (!/review by korbit/i.test(text)) return null;
-      const rows = text.split("\n").filter((line) => /^\s*\|\s*<sub>/.test(line) || /^\s*\|\s*!\[/.test(line));
+      const rows = text.split("\n").filter((line) => /\u25b9\s*\[?view\b/i.test(line));
       return rows.filter((line) => !/fix detected/i.test(line)).length;
     }
     case "entelligence": {
       if (!/review scorecard/i.test(text)) return null;
-      const section = /\*\*Issues found:?\*\*:?\s*\n([\s\S]*?)(?=\n\s*\n|(?![\s\S]))/i.exec(text);
-      if (section === null) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
-      const lines2 = (section[1] ?? "").split("\n");
-      const listed = lines2.filter((line) => /^\s*[-*]\s+\*\*/.test(line)).length;
-      const more = /plus (\d+) more/i.exec(section[1] ?? "");
-      return listed + (more?.[1] === void 0 ? 0 : Number.parseInt(more[1], 10));
+      const lines2 = text.split("\n");
+      const start = lines2.findIndex((line) => /^\s*(?:[-*]\s+)?\*\*Issues found:?\*\*:?\s*$/i.test(line));
+      if (start < 0) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
+      let count = 0;
+      for (const line of lines2.slice(start + 1)) {
+        if (line.trim() === "") continue;
+        if (/^\s*(?:[-*]\s+)?\*\*[^*\n]+\*\*\s+\S/.test(line)) {
+          count += 1;
+          continue;
+        }
+        const more = /plus (\d+) more/i.exec(line);
+        if (more?.[1] !== void 0) count += Number.parseInt(more[1], 10);
+        break;
+      }
+      return count;
     }
     default:
       return null;
@@ -19502,10 +19514,11 @@ function parseBotBody(body, botId) {
   }
   const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\b(?:verdict|assessment)\W{0,6}(?:would\s+)?approved?\b/i.test(text) || /\breview complete\s*[\u2014\u2013-]+\s*approved\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
   const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text);
-  const clean = !needsHuman && (count === null || count === 0) && (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) || /\b(?<!not )ready to merge\b/i.test(text) || approved || count === 0 && (score === null || botId === "greptile" || shaped !== null));
+  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text);
+  const clean = !needsHuman && (count === null || count === 0) && (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) || readyToMerge || approved || count === 0 && (score === null || botId === "greptile" || shaped !== null));
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...needsHuman ? { verdict: "needs-human" } : {} };
 }
 function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
@@ -19877,7 +19890,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       continue;
     }
     const parsed = parseBotBody(comment.body, id.startsWith("custom:") ? "" : id);
-    if (botById(id)?.conversational === true && parsed.count === null && parsed.score === null && !parsed.clean) continue;
+    if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
     threadRuns.delete(id);
     statusOnly.delete(id);

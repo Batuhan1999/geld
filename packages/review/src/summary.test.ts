@@ -4,7 +4,7 @@ import type { RawPullRequest } from './build';
 import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parseSummaryBody, parseSummaryElement } from './summary-parse';
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
-import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
+import { botByTrigger, botsTriggeredBy, botTitle, isReviewShaped, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
 import type { BotComment, DerivedBotVerdict, RawCheckRun, VerdictOptions } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
@@ -469,6 +469,8 @@ describe('bots + prompts', () => {
     expect(parseBotBody('## Review Summary\nThis PR removes a single committed mock file. **No blocking defects were found in the changes introduced by this PR.**', 'amazon-q').clean).toBe(true);
     expect(parseBotBody('## Review Summary\nNo logic errors, security vulnerabilities, crashes, or behavioral regressions were found in the changed code. The PR is ready to merge.', 'amazon-q').clean).toBe(true);
     expect(parseBotBody('## Review Summary\nThis PR adds a guard, which is the right intent. However, the implementation has a gap that is not ready to merge.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody('## Review Summary\nThis PR is not yet ready to merge: the handler swallows the error.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody("## Review Summary\nThe migration isn't ready to merge until the index exists.", 'amazon-q').clean).toBe(false);
     expect(botsTriggeredBy('/q review').map((bot) => bot.id)).toEqual(['amazon-q']);
     // Ellipsis, Macroscope, Korbit, Entelligence.
     expect(parseBotBody('> [!IMPORTANT]\n> **Looks good to me! :+1:**\n> <details><summary>Reviewed everything up to d514768 in 10 seconds.</summary></details>', 'ellipsis').clean).toBe(true);
@@ -478,10 +480,22 @@ describe('bots + prompts', () => {
     expect(refusalReason('**Macroscope skipped reviewing this pull request.** Per-review cost limit exceeded (workspace setting). This review would cost an estimated $25.00, which exceeds your per-review limit of $10.00. An admin can raise the limit in workspace settings, or comment `@macroscope-app review` to run it anyway at the estimated cost shown above, which is billed to the workspace.')).toBe('Macroscope skipped reviewing this pull request');
     const korbit = '### Review by Korbit AI\n###### Korbit automatically attempts to detect when you fix issues in new commits.\n| Category | Issue | Status |\n|---|---|---|\n| <sub>![Security](https://img.shields.io/badge/Security-e11d48)</sub> | Overly broad exception handler ▹ [view](https://github.com/o/r/pull/1#discussion_r1) | ✅ Fix detected |\n| <sub>![Functionality](https://img.shields.io/badge/Functionality-0284c7)</sub> | Downgrade fails with duplicate tag names ▹ [view](https://github.com/o/r/pull/1#discussion_r2) ||';
     expect(parseBotBody(korbit, 'korbit')).toMatchObject({ clean: false, count: 1 });
+    // ...and as the page reads the table (a row per line, the cells' words run together, the badge image silent).
+    const korbitRendered = 'Review by Korbit AI\nKorbit automatically attempts to detect when you fix issues in new commits.\n\nCategory Issue Status\n\nOverly broad exception handler in database driver detection ▹ view ✅ Fix detected\n\nDowngrade fails with duplicate tag names ▹ view\n\nFiles scanned';
+    expect(parseBotBody(korbitRendered, 'korbit')).toMatchObject({ clean: false, count: 1 });
+    expect(parseBotBody(korbitRendered.replace('Downgrade fails with duplicate tag names ▹ view\n\n', ''), 'korbit')).toMatchObject({ clean: true, count: 0 });
     expect(refusalReason("By default, I don't review pull requests opened by bots. If you would like me to review this pull request anyway, you can request a review via the `/korbit-review` command.")).toBe("By default, I don't review pull requests opened by bots");
     const scorecard = (issues: string) => `## EntelligenceAI PR Summary\nAdds a feature.\n\n---\n\n## Review Scorecard\n\n| Dimension | Rating | Basis |\n|---|---|---|\n| **Code Quality** | ●●●○○ **3/5** — Needs Work | 1 significant finding(s) |\n| **Merge Confidence** | ●●○○○ **2/5** — Changes Needed | code quality 3/5 × High blast radius |\n\n${issues}`;
     expect(parseBotBody(scorecard('**Issues found:**\n- **Significant** `docs/user-api.md` — Keep guidance on the supported surface\n- **Unresolved** `.github/workflows/ci.yml` — Make the checks required *(unresolved from an earlier review)*\n- *…plus 2 more, posted as inline comment(s)*\n\nFix before merge.'), 'entelligence')).toMatchObject({ clean: false, count: 4, score: 2 });
     expect(parseBotBody(scorecard('Ready to merge; code quality rated Excellent (5/5): the review found nothing to flag.\n\n**Key Findings:**\n- No critical or significant issues found'), 'entelligence')).toMatchObject({ clean: true, count: 0, score: 2 });
+    // ...and as the page reads it: list items on their own lines with blank lines between, no bullets.
+    expect(parseBotBody(scorecard('**Issues found:**\n\n**Significant** `docs/user-api.md` — Keep guidance on the supported surface\n\n**Unresolved** `.github/workflows/ci.yml` — Make the checks required *(unresolved from an earlier review)*\n\n*…plus 2 more, posted as inline comment(s)*\n\nFix before merge.'), 'entelligence')).toMatchObject({ clean: false, count: 4, score: 2 });
+    // A stated verdict with no count or score is still a review: a conversational bot's "needs a human" is not chat.
+    const human = parseBotBody("Hey - I've reviewed your changes and they look great!\n\n### Sourcery assessment\n\n**Needs a human reviewer.**", 'sourcery');
+    expect(human.verdict).toBe('needs-human');
+    expect(isReviewShaped(human)).toBe(true);
+    expect(isReviewShaped(parseBotBody("## Reviewer's Guide\nThis PR preserves alignment.", 'sourcery'))).toBe(false);
+    expect(verdictsFrom([], [{ author: 'macroscopeapp[bot]', body: '#### Approvability\n**Verdict:** Needs Human Approval\n\nMacroscope\'s review found this PR requires human approval.', anchor: 'issuecomment-3' }], 'aaa')[0]).toMatchObject({ id: 'macroscope', verdict: 'findings', sourceId: 'issuecomment-3' });
     expect(refusalReason('**Automatic Review Skipped**\n\nThis PR changes **132 files**, above the **100-file** limit for automatic reviews. Trigger a full review by commenting:\n```\n@entelligence review\n```')).toBe('This PR changes 132 files, above the 100-file limit for automatic reviews');
     expect(isStatusLineComment('Starting fresh pr review. This may take a few minutes')).toBe(true);
     // The Autofix sibling aside, each bot's check is its own.

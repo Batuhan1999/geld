@@ -357,6 +357,22 @@ export interface ParsedBotBody {
   readonly clean: boolean;
   /** Worst severity the bot named ("high severity", "critical", "security"). */
   readonly severity: FindingSeverity | null;
+  /**
+   * The comment states a verdict in so many words without a count or a
+   * score to show for it: "Needs a human reviewer." (Sourcery), "Needs Human
+   * Approval" (Macroscope). Review-shaped (`isReviewShaped`) though nothing
+   * else about it is.
+   */
+  readonly verdict?: 'needs-human';
+}
+
+/**
+ * Whether a bot's comment is its review rather than something else it said:
+ * a conversational bot's chat, guide, summary or progress note votes for
+ * nothing. A count, a score, a clean word or a stated verdict make a review.
+ */
+export function isReviewShaped(parsed: ParsedBotBody): boolean {
+  return parsed.count !== null || parsed.score !== null || parsed.clean || parsed.verdict !== undefined;
 }
 
 /**
@@ -402,18 +418,32 @@ function countShapedBy(botId: string, text: string): number | null {
     }
     case 'korbit': {
       if (!/review by korbit/i.test(text)) return null;
-      const rows = text.split('\n').filter((line) => /^\s*\|\s*<sub>/.test(line) || /^\s*\|\s*!\[/.test(line));
+      // Each issue row ends its title with "▹ [view](…)" to the thread, raw ("| <sub>![Security](…)</sub> | Overly
+      // broad … ▹ [view](…) | ✅ Fix detected |") and as the page reads it (a `tr` is a line, its cells' words run
+      // together: "Overly broad … ▹ view ✅ Fix detected"); the badge image has no words of its own.
+      const rows = text.split('\n').filter((line) => /\u25b9\s*\[?view\b/i.test(line));
       return rows.filter((line) => !/fix detected/i.test(line)).length;
     }
     case 'entelligence': {
       if (!/review scorecard/i.test(text)) return null;
-      // The list ends at a blank line; "*…plus 23 more, posted as inline comment(s)*" closes a long one.
-      const section = /\*\*Issues found:?\*\*:?\s*\n([\s\S]*?)(?=\n\s*\n|(?![\s\S]))/i.exec(text);
-      if (section === null) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
-      const lines = (section[1] ?? '').split('\n');
-      const listed = lines.filter((line) => /^\s*[-*]\s+\*\*/.test(line)).length;
-      const more = /plus (\d+) more/i.exec(section[1] ?? '');
-      return listed + (more?.[1] === undefined ? 0 : Number.parseInt(more[1], 10));
+      const lines = text.split('\n');
+      const start = lines.findIndex((line) => /^\s*(?:[-*]\s+)?\*\*Issues found:?\*\*:?\s*$/i.test(line));
+      if (start < 0) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
+      // One item per line — "- **Significant** `path` — title" raw, "**Significant** `path` — title" as the page reads
+      // a list item (blank lines between them there) — until a line that is neither an item nor the "*…plus 23 more,
+      // posted as inline comment(s)*" that closes a long list.
+      let count = 0;
+      for (const line of lines.slice(start + 1)) {
+        if (line.trim() === '') continue;
+        if (/^\s*(?:[-*]\s+)?\*\*[^*\n]+\*\*\s+\S/.test(line)) {
+          count += 1;
+          continue;
+        }
+        const more = /plus (\d+) more/i.exec(line);
+        if (more?.[1] !== undefined) count += Number.parseInt(more[1], 10);
+        break;
+      }
+      return count;
     }
     default:
       return null;
@@ -472,13 +502,16 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // "Needs a human reviewer." (Sourcery's assessment), "Needs Human Approval" (Macroscope's verdict): the bot would
   // not sign off, whatever kind words came before ("they look great!").
   const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text);
+  // "The PR is ready to merge" (Amazon Q) — unless the sentence says it is not ("not yet ready to merge", "isn't
+  // ready to merge", "before it is ready to merge").
+  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text);
   const clean =
     !needsHuman &&
     (count === null || count === 0) &&
     (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
       /\bno actionable comments\b/i.test(text) ||
       /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) ||
-      /\b(?<!not )ready to merge\b/i.test(text) ||
+      readyToMerge ||
       approved ||
       (count === 0 && (score === null || botId === 'greptile' || shaped !== null)));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
@@ -491,7 +524,7 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
       : /\blow(?: severity| risk)?\b/i.test(affirmed)
         ? 'low'
         : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...(needsHuman ? { verdict: 'needs-human' as const } : {}) };
 }
 
 export interface RawCheckRun {
@@ -1079,7 +1112,7 @@ export function verdictsFrom(
     }
     const parsed = parseBotBody(comment.body, id.startsWith('custom:') ? '' : id);
     // A coding agent's reply to a person or to another bot is not its review; only a review-shaped comment votes.
-    if (botById(id)?.conversational === true && parsed.count === null && parsed.score === null && !parsed.clean) continue;
+    if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
     threadRuns.delete(id);
     statusOnly.delete(id);
