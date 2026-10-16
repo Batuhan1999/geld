@@ -10,7 +10,7 @@ const HEAD = '4b1e9d0c7a2f1e3d5c6b7a8f9e0d1c2b3a4f5e6d';
 const BASE = '9f0e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e';
 
 export const EXAMPLE_SUMMARY = {
-  schema: 'urf/v0',
+  schema: 'crf/v0',
   bot: { name: 'Greptile', app: 'greptile-apps' },
   kind: 'summary',
   run: {
@@ -45,7 +45,7 @@ export const EXAMPLE_SUMMARY = {
 } as const;
 
 export const EXAMPLE_FINDING = {
-  schema: 'urf/v0',
+  schema: 'crf/v0',
   bot: { name: 'Greptile', app: 'greptile-apps' },
   kind: 'finding',
   run: { id: 'rv_8f2c' },
@@ -58,14 +58,14 @@ export const EXAMPLE_FINDING = {
 } as const;
 
 export const EXAMPLE_STATUS = {
-  schema: 'urf/v0',
+  schema: 'crf/v0',
   bot: { name: 'CodeRabbit', app: 'coderabbitai' },
   kind: 'status',
   run: { id: 'rv_91aa', state: 'running', headSha: HEAD, scope: 'incremental', coverage: { from: BASE, to: HEAD } },
 } as const;
 
 export const EXAMPLE_REFUSAL = {
-  schema: 'urf/v0',
+  schema: 'crf/v0',
   bot: { name: 'Bugbot', app: 'cursor' },
   kind: 'refusal',
   run: { id: 'rv_77d0', state: 'refused', headSha: HEAD },
@@ -73,7 +73,7 @@ export const EXAMPLE_REFUSAL = {
   links: { settings: { type: 'url', url: 'https://cursor.com/dashboard' } },
 } as const;
 
-const EXAMPLE_REPLY = { schema: 'urf/v0', bot: { name: 'Devin' }, kind: 'reply' } as const;
+const EXAMPLE_REPLY = { schema: 'crf/v0', bot: { name: 'Devin' }, kind: 'reply' } as const;
 
 /** The conformance suite: a schema that agrees with every `valid` here accepts and rejects what the spec does. */
 export const FIXTURES: readonly Fixture[] = [
@@ -89,13 +89,13 @@ export const FIXTURES: readonly Fixture[] = [
   { name: 'refusal without a refusal', valid: false, value: { ...EXAMPLE_REFUSAL, refusal: undefined } },
   { name: 'vendor severity in the severity field', valid: false, value: { ...EXAMPLE_FINDING, finding: { ...EXAMPLE_FINDING.finding, severity: 'P1' } } },
   { name: 'short head SHA', valid: false, value: { ...EXAMPLE_STATUS, run: { ...EXAMPLE_STATUS.run, headSha: 'abc123' } } },
-  { name: 'another version', valid: false, value: { ...EXAMPLE_STATUS, schema: 'urf/v1' } },
+  { name: 'another version', valid: false, value: { ...EXAMPLE_STATUS, schema: 'crf/v1' } },
   { name: 'unknown kind', valid: false, value: { ...EXAMPLE_REPLY, kind: 'walkthrough' } },
   { name: 'empty rerun comment', valid: false, value: { ...EXAMPLE_REPLY, links: { rerun: { type: 'comment', body: '' } } } },
   { name: 'view as a comment', valid: false, value: { ...EXAMPLE_REPLY, links: { view: { type: 'comment', body: 'see' } } } },
   { name: 'location without a path', valid: false, value: { ...EXAMPLE_FINDING, finding: { ...EXAMPLE_FINDING.finding, location: { line: 3 } } } },
   { name: 'confidence above 1', valid: false, value: { ...EXAMPLE_FINDING, finding: { ...EXAMPLE_FINDING.finding, confidence: 1.5 } } },
-  { name: 'missing bot', valid: false, value: { schema: 'urf/v0', kind: 'reply' } },
+  { name: 'missing bot', valid: false, value: { schema: 'crf/v0', kind: 'reply' } },
 ];
 
 /** Runs the fixtures through any Standard Schema and names each one it disagrees with the spec on. An empty list means it conforms. */

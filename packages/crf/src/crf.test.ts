@@ -6,63 +6,63 @@ import {
   EXAMPLE_STATUS,
   EXAMPLE_SUMMARY,
   FIXTURES,
-  UrfBlock,
+  CrfBlock,
   checkConformance,
   encodeBlock,
   extractBlocks,
   parseBlock,
   readBlock,
-  urfJsonSchemaText,
+  crfJsonSchemaText,
 } from './index';
 
-const summary = UrfBlock.parse(EXAMPLE_SUMMARY);
+const summary = CrfBlock.parse(EXAMPLE_SUMMARY);
 
 describe('schema', () => {
   it('conforms to its own fixtures', async () => {
-    expect(await checkConformance(UrfBlock)).toEqual([]);
+    expect(await checkConformance(CrfBlock)).toEqual([]);
   });
 
   it('drops fields it does not know rather than rejecting them', () => {
-    const parsed = UrfBlock.parse({ ...EXAMPLE_STATUS, vendor: { anything: true } });
+    const parsed = CrfBlock.parse({ ...EXAMPLE_STATUS, vendor: { anything: true } });
     expect(parsed).not.toHaveProperty('vendor');
   });
 
   it('shares the finding shape between a summary and a thread comment', () => {
     const fromSummary = summary.kind === 'summary' ? summary.result?.findings?.[0] : undefined;
-    const fromThread = UrfBlock.parse(EXAMPLE_FINDING);
+    const fromThread = CrfBlock.parse(EXAMPLE_FINDING);
     expect(fromThread.kind === 'finding' ? fromThread.finding.id : undefined).toBe(fromSummary?.id);
   });
 });
 
 describe('carrier', () => {
   it('round-trips through the HTML comment, including a title holding -->', () => {
-    const block = UrfBlock.parse({
+    const block = CrfBlock.parse({
       ...EXAMPLE_FINDING,
       finding: { ...EXAMPLE_FINDING.finding, title: 'Closes early --> <script>' },
     });
     const comment = encodeBlock(block);
     expect(comment.indexOf('-->')).toBe(comment.length - 3);
-    expect(comment.startsWith('<!-- urf:v0 {')).toBe(true);
+    expect(comment.startsWith('<!-- crf:v0 {')).toBe(true);
     expect(parseBlock(`Some review prose.\n\n${comment}\n`)).toEqual(block);
   });
 
   it('takes the last block in a comment', () => {
-    const body = `${encodeBlock(UrfBlock.parse(EXAMPLE_STATUS))}\n…\n${encodeBlock(summary)}`;
+    const body = `${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n…\n${encodeBlock(summary)}`;
     expect(parseBlock(body)?.kind).toBe('summary');
   });
 
   it('makes no claim for malformed or invalid blocks', () => {
-    expect(extractBlocks('<!-- urf:v0 {"schema": nope} -->')).toEqual([]);
-    expect(parseBlock('<!-- urf:v0 {"schema":"urf/v0","kind":"reply"} -->')).toBeUndefined();
+    expect(extractBlocks('<!-- crf:v0 {"schema": nope} -->')).toEqual([]);
+    expect(parseBlock('<!-- crf:v0 {"schema":"crf/v0","kind":"reply"} -->')).toBeUndefined();
     expect(parseBlock('No block here.')).toBeUndefined();
   });
 
   it('leaves other bots’ markers alone and reads blocks of other versions without validating them', () => {
     const body = [
       '<!-- codex-review-state:v1 {"code_review":{"status":"completed"}} -->',
-      '<!-- urf:v1 {"schema":"urf/v1","kind":"future"} -->',
+      '<!-- crf:v1 {"schema":"crf/v1","kind":"future"} -->',
     ].join('\n');
-    expect(extractBlocks(body)).toEqual([{ version: 'v1', value: { schema: 'urf/v1', kind: 'future' } }]);
+    expect(extractBlocks(body)).toEqual([{ version: 'v1', value: { schema: 'crf/v1', kind: 'future' } }]);
     expect(parseBlock(body)).toBeUndefined();
   });
 
@@ -72,7 +72,7 @@ describe('carrier', () => {
         version: 1,
         vendor: 'hand-written',
         validate: (value) => {
-          const parsed = UrfBlock.safeParse(value);
+          const parsed = CrfBlock.safeParse(value);
           if (parsed.success && parsed.data.kind === 'refusal') {
             return { value: { kind: 'refusal', code: parsed.data.refusal.code } };
           }
@@ -80,24 +80,24 @@ describe('carrier', () => {
         },
       },
     };
-    expect(await readBlock(encodeBlock(UrfBlock.parse(EXAMPLE_REFUSAL)), refusalsOnly)).toEqual({ kind: 'refusal', code: 'quota' });
+    expect(await readBlock(encodeBlock(CrfBlock.parse(EXAMPLE_REFUSAL)), refusalsOnly)).toEqual({ kind: 'refusal', code: 'quota' });
     expect(await readBlock(encodeBlock(summary), refusalsOnly)).toBeUndefined();
     expect(await checkConformance(refusalsOnly)).not.toEqual([]);
   });
 });
 
 describe('JSON Schema', () => {
-  it('is committed and current (run `pnpm --filter @geld/urf schema` after changing the schema)', () => {
-    const committed = readFileSync(new URL('../schema/urf-v0.schema.json', import.meta.url), 'utf8');
-    expect(committed).toBe(urfJsonSchemaText());
+  it('is committed and current (run `pnpm --filter @geld/crf schema` after changing the schema)', () => {
+    const committed = readFileSync(new URL('../schema/crf-v0.schema.json', import.meta.url), 'utf8');
+    expect(committed).toBe(crfJsonSchemaText());
   });
 
   it('keeps objects open, as readers ignore unknown fields', () => {
-    expect(urfJsonSchemaText()).not.toContain('"additionalProperties": false');
+    expect(crfJsonSchemaText()).not.toContain('"additionalProperties": false');
   });
 
   it('has a fixture for every kind', () => {
-    const kinds = new Set(FIXTURES.filter((f) => f.valid).map((f) => UrfBlock.parse(f.value).kind));
+    const kinds = new Set(FIXTURES.filter((f) => f.valid).map((f) => CrfBlock.parse(f.value).kind));
     expect([...kinds].sort()).toEqual(['finding', 'refusal', 'reply', 'status', 'summary']);
   });
 });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export const URF_VERSION = 'v0' as const;
-export const URF_SCHEMA = `urf/${URF_VERSION}` as const;
+export const CRF_VERSION = 'v0' as const;
+export const CRF_SCHEMA = `crf/${CRF_VERSION}` as const;
 
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const;
 export const RUN_STATES = ['queued', 'running', 'completed', 'superseded', 'refused', 'failed', 'cancelled'] as const;
@@ -123,7 +123,7 @@ export const Refusal = z.object({
 });
 
 const base = {
-  schema: z.literal(URF_SCHEMA),
+  schema: z.literal(CRF_SCHEMA),
   bot: Bot,
   links: Links.optional(),
 };
@@ -134,8 +134,8 @@ export const RefusalBlock = z.object({ ...base, kind: z.literal('refusal'), run:
 export const FindingBlock = z.object({ ...base, kind: z.literal('finding'), run: RunRef, finding: Finding });
 export const ReplyBlock = z.object({ ...base, kind: z.literal('reply'), run: RunRef.optional() });
 
-/** One block per comment. Also a Standard Schema (`UrfBlock['~standard']`), so any Standard Schema consumer can use it directly. */
-export const UrfBlock = z.discriminatedUnion('kind', [SummaryBlock, StatusBlock, RefusalBlock, FindingBlock, ReplyBlock]);
+/** One block per comment. Also a Standard Schema (`CrfBlock['~standard']`), so any Standard Schema consumer can use it directly. */
+export const CrfBlock = z.discriminatedUnion('kind', [SummaryBlock, StatusBlock, RefusalBlock, FindingBlock, ReplyBlock]);
 
 export type Severity = z.infer<typeof Severity>;
 export type UrlAction = z.infer<typeof UrlAction>;
@@ -156,5 +156,5 @@ export type StatusBlock = z.infer<typeof StatusBlock>;
 export type RefusalBlock = z.infer<typeof RefusalBlock>;
 export type FindingBlock = z.infer<typeof FindingBlock>;
 export type ReplyBlock = z.infer<typeof ReplyBlock>;
-export type UrfBlock = z.infer<typeof UrfBlock>;
-export type BlockKind = UrfBlock['kind'];
+export type CrfBlock = z.infer<typeof CrfBlock>;
+export type BlockKind = CrfBlock['kind'];

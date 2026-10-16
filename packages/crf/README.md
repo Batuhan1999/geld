@@ -1,27 +1,27 @@
-# Universal Review Format (URF)
+# Common Review Format (CRF)
 
-**Status: draft v0.** Lives in the Geld repository for now (`@geld/urf`) and will move to its own repository and npm package once the shape settles.
+**Status: draft v0.** Lives in the Geld repository for now (`@geld/crf`) and will move to its own repository and npm package once the shape settles (`common-review-format` is free on npm and as a GitHub organisation; the bare `crf` package name is taken).
 
-URF is a small, versioned JSON block that a code review bot hides in each comment it posts on a pull request. People see the bot's comment exactly as before. Tools see a machine-readable account of the review: which commit was reviewed, whether the run is still going, what it found, why it refused, and how to view or rerun it.
+CRF is a small, versioned JSON block that a code review bot hides in each comment it posts on a pull request. People see the bot's comment exactly as before. Tools see a machine-readable account of the review: which commit was reviewed, whether the run is still going, what it found, why it refused, and how to view or rerun it.
 
 ```html
 Found 2 issues in this pull request. …the bot's usual comment…
 
-<!-- urf:v0 {"schema":"urf/v0","bot":{"name":"Greptile","app":"greptile-apps"},"kind":"summary","run":{"id":"rv_8f2c","state":"completed","headSha":"4b1e9d0c7a2f1e3d5c6b7a8f9e0d1c2b3a4f5e6d"},"result":{"verdict":"findings","counts":{"medium":1,"low":1}}} -->
+<!-- crf:v0 {"schema":"crf/v0","bot":{"name":"Greptile","app":"greptile-apps"},"kind":"summary","run":{"id":"rv_8f2c","state":"completed","headSha":"4b1e9d0c7a2f1e3d5c6b7a8f9e0d1c2b3a4f5e6d"},"result":{"verdict":"findings","counts":{"medium":1,"low":1}}} -->
 ```
 
 ## Why
 
 Every review bot writes its verdict in its own words. A tool that wants to show "Greptile: 4/5, 2 findings · Bugbot: skipped, usage limit · CodeRabbit: still running" has to parse each bot's prose and keep up as it changes: "Actionable comments posted: 0" means clean for one bot, a "Findings" heading means findings for another, a status line edited in place means a run finished for a third. Geld does this today for ten bots, with regular expressions and a decision model as a fallback, and it breaks whenever a bot rewords a sentence.
 
-Most bots already hide metadata in their comments for their own use (see [Prior art](#prior-art)). URF asks them to hide one more thing, in a shape every tool can read.
+Most bots already hide metadata in their comments for their own use (see [Prior art](#prior-art)). CRF asks them to hide one more thing, in a shape every tool can read.
 
 ## Where the block goes
 
 One HTML comment, normally at the end of the bot's comment, on a line of its own:
 
 ```html
-<!-- urf:v0 {…JSON…} -->
+<!-- crf:v0 {…JSON…} -->
 ```
 
 - **Invisible to readers.** GitHub strips HTML comments from the rendered page, so nobody sees it and no bot has to change its UI.
@@ -79,7 +79,7 @@ Required unless marked optional. Unknown fields are ignored by readers, so a bot
 
 | Field | Type | |
 |---|---|---|
-| `schema` | `"urf/v0"` | Required |
+| `schema` | `"crf/v0"` | Required |
 | `kind` | `summary` · `status` · `refusal` · `finding` · `reply` | Required |
 | `bot.name` | string | Required. The product's name: "Greptile", "Bugbot" |
 | `bot.app` | string | Optional. The GitHub App's slug |
@@ -151,7 +151,7 @@ A summary:
 
 ```json
 {
-  "schema": "urf/v0",
+  "schema": "crf/v0",
   "bot": { "name": "Greptile", "app": "greptile-apps" },
   "kind": "summary",
   "run": {
@@ -190,7 +190,7 @@ The same finding on its thread comment:
 
 ```json
 {
-  "schema": "urf/v0",
+  "schema": "crf/v0",
   "bot": { "name": "Greptile", "app": "greptile-apps" },
   "kind": "finding",
   "run": { "id": "rv_8f2c" },
@@ -207,7 +207,7 @@ A status line, then a refusal:
 
 ```json
 {
-  "schema": "urf/v0",
+  "schema": "crf/v0",
   "bot": { "name": "CodeRabbit", "app": "coderabbitai" },
   "kind": "status",
   "run": { "id": "rv_91aa", "state": "running", "headSha": "4b1e9d0c7a2f1e3d5c6b7a8f9e0d1c2b3a4f5e6d", "scope": "incremental" }
@@ -216,7 +216,7 @@ A status line, then a refusal:
 
 ```json
 {
-  "schema": "urf/v0",
+  "schema": "crf/v0",
   "bot": { "name": "Bugbot", "app": "cursor" },
   "kind": "refusal",
   "run": { "id": "rv_77d0", "state": "refused", "headSha": "4b1e9d0c7a2f1e3d5c6b7a8f9e0d1c2b3a4f5e6d" },
@@ -233,7 +233,7 @@ A status line, then a refusal:
 4. **Readers ignore fields they do not know.** Bots may add their own, ideally under one key named for themselves.
 5. **A block that fails validation makes no claim.** Readers fall back to whatever they did before.
 6. **Keep it small.** GitHub limits a comment's size, and the block shares that room with the bot's own text. List at most about 50 findings in a summary, set `truncated`, and keep `counts` whole.
-7. **Versions:** additions that old readers can ignore stay in `v0` while it is a draft. A change that would make an old reader misread a block gets a new version (`urf:v1`, `"schema": "urf/v1"`).
+7. **Versions:** additions that old readers can ignore stay in `v0` while it is a draft. A change that would make an old reader misread a block gets a new version (`crf:v1`, `"schema": "crf/v1"`).
 
 ## Validating
 
@@ -242,17 +242,17 @@ The schema is written in [Zod](https://zod.dev) and published three ways.
 **TypeScript and Zod:**
 
 ```ts
-import { UrfBlock, encodeBlock, parseBlock } from '@geld/urf';
+import { CrfBlock, encodeBlock, parseBlock } from '@geld/crf';
 
-const block: UrfBlock = UrfBlock.parse(json);
-const html = encodeBlock(block); // '<!-- urf:v0 {…} -->'
-const read = parseBlock(commentBody); // UrfBlock | undefined
+const block: CrfBlock = CrfBlock.parse(json);
+const html = encodeBlock(block); // '<!-- crf:v0 {…} -->'
+const read = parseBlock(commentBody); // CrfBlock | undefined
 ```
 
-**Any [Standard Schema](https://standardschema.dev) library.** `UrfBlock` is itself a Standard Schema, and the readers take any Standard Schema, so a team using Valibot, ArkType or their own validator plugs straight in:
+**Any [Standard Schema](https://standardschema.dev) library.** `CrfBlock` is itself a Standard Schema, and the readers take any Standard Schema, so a team using Valibot, ArkType or their own validator plugs straight in:
 
 ```ts
-import { readBlock, checkConformance } from '@geld/urf';
+import { readBlock, checkConformance } from '@geld/crf';
 
 const block = await readBlock(commentBody, myValibotSchema);
 const mismatches = await checkConformance(myValibotSchema); // [] means it accepts and rejects what the spec does
@@ -260,7 +260,7 @@ const mismatches = await checkConformance(myValibotSchema); // [] means it accep
 
 `checkConformance` runs the spec's fixtures (`FIXTURES`: valid and invalid blocks for every kind) through the schema it is given and names every fixture it disagrees with.
 
-**JSON Schema**, for bots written in Python, Go or anything else: [`schema/urf-v0.schema.json`](./schema/urf-v0.schema.json) (draft 2020-12), also exported as `@geld/urf/schema.json`. It is generated from the Zod schema (`pnpm --filter @geld/urf schema`) and a test fails when it is out of date. Its objects stay open, like the readers.
+**JSON Schema**, for bots written in Python, Go or anything else: [`schema/crf-v0.schema.json`](./schema/crf-v0.schema.json) (draft 2020-12), also exported as `@geld/crf/schema.json`. It is generated from the Zod schema (`pnpm --filter @geld/crf schema`) and a test fails when it is out of date. Its objects stay open, like the readers.
 
 ## Prior art
 
@@ -282,10 +282,10 @@ A survey of five recent public pull requests per bot (Oct 2026) found most revie
 
 | Export | |
 |---|---|
-| `UrfBlock` and every part (`Finding`, `Run`, `Result`, `Links`…) | Zod schemas, each with its inferred TypeScript type of the same name |
+| `CrfBlock` and every part (`Finding`, `Run`, `Result`, `Links`…) | Zod schemas, each with its inferred TypeScript type of the same name |
 | `encodeBlock(block)` | The HTML comment to append, validated and escaped |
-| `extractBlocks(markdown)` | Every URF block in a comment, JSON-parsed, any version |
+| `extractBlocks(markdown)` | Every CRF block in a comment, JSON-parsed, any version |
 | `parseBlock(markdown)` | The comment's block, validated, or `undefined` |
 | `readBlock(markdown, schema)` | The same through any Standard Schema |
 | `FIXTURES`, `checkConformance(schema)` | The conformance suite |
-| `urfJsonSchema()`, `@geld/urf/schema.json` | JSON Schema |
+| `crfJsonSchema()`, `@geld/crf/schema.json` | JSON Schema |

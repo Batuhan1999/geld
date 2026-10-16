@@ -15,9 +15,9 @@ packages/review/     @geld/review — pure TypeScript, no browser/Node APIs. PR 
 packages/github/     @geld/github — pure TypeScript, no browser APIs. Geld GitHub App user
                      authorization (device flow, web flow, token-refresh coordinator, revoke) and,
                      to come, the API clients behind the dashboard. Packaged like core.
-packages/urf/        @geld/urf — Universal Review Format (draft v0): the `<!-- urf:v0 {…} -->` block
+packages/crf/        @geld/crf — Common Review Format (draft v0): the `<!-- crf:v0 {…} -->` block
                      review bots hide in their comments, as Zod schemas, a Standard Schema reader,
-                     conformance fixtures and a committed JSON Schema (`pnpm --filter @geld/urf
+                     conformance fixtures and a committed JSON Schema (`pnpm --filter @geld/crf
                      schema` regenerates it). Spec in its README. Not yet read by Geld; meant to
                      move to its own repository and npm package.
 apps/extension/      @geld/extension — the WXT extension (Chrome, Edge, Firefox, Safari).

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://www.geld.sh/schema/urf-v0.schema.json",
-  "title": "Universal Review Format block",
+  "$id": "https://www.geld.sh/schema/crf-v0.schema.json",
+  "title": "Common Review Format block",
   "oneOf": [
     {
       "type": "object",
@@ -267,7 +267,7 @@
   "$defs": {
     "__schema0": {
       "type": "string",
-      "const": "urf/v0"
+      "const": "crf/v0"
     },
     "__schema1": {
       "type": "object",

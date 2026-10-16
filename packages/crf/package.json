@@ -1,13 +1,13 @@
 {
-  "name": "@geld/urf",
+  "name": "@geld/crf",
   "version": "0.0.0",
-  "description": "Universal Review Format: a small versioned JSON block code review bots hide in their GitHub comments so tools can read verdicts, findings and run state without parsing prose.",
+  "description": "Common Review Format: a small versioned JSON block code review bots hide in their GitHub comments so tools can read verdicts, findings and run state without parsing prose.",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
   "exports": {
     ".": "./src/index.ts",
-    "./schema.json": "./schema/urf-v0.schema.json"
+    "./schema.json": "./schema/crf-v0.schema.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
