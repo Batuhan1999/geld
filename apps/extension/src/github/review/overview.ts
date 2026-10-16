@@ -1643,7 +1643,11 @@ function botTitleFor(login: string): string {
 function botCardLine(record: BotVerdictRecord): string {
   if (record.verdict === 'running') return 'Reviewing this pull request now';
   if (record.verdict === 'loading') return 'Still reading this pull request\u2019s timeline for its review';
-  if (record.verdict === 'unknown') return 'No word from it on this pull request: the run it announced or was asked for never reported here, and nothing on the page says how it went';
+  if (record.verdict === 'unknown') {
+    // A draft is the usual reason a request goes unanswered: most bots skip drafts unless their settings say otherwise.
+    const draft = pullRequestDraft() ? '. This pull request is a draft, which most review bots skip unless their settings allow it' : '';
+    return `No word from it on this pull request: the run it announced or was asked for never reported here, and nothing on the page says how it went${draft}`;
+  }
   if (record.verdict === 'failed') return record.reason === undefined ? 'Its review of this pull request failed' : `Did not review this pull request: ${record.reason}`;
   const scored = record.score === undefined ? '' : `Scored this pull request ${record.score}/5`;
   if (record.verdict === 'clean') return scored === '' ? 'Found nothing on this pull request' : `${scored} and found nothing`;
@@ -2497,9 +2501,17 @@ function hoverPreviewFor(row: HTMLElement, meta: GeldPrMeta, groups: readonly Fo
  * there is no verdict (`VerdictOptions.closed`).
  */
 function pullRequestClosed(): boolean {
+  return /^(?:status:\s*)?(?:merged|closed)$/i.test(pullRequestStateWords());
+}
+
+/** GitHub's state label reads "Draft" while the pull request is one. */
+function pullRequestDraft(): boolean {
+  return /^(?:status:\s*)?draft$/i.test(pullRequestStateWords());
+}
+
+function pullRequestStateWords(): string {
   const label = document.querySelector('[data-component="StateLabel"], .gh-header-meta .State, .State[title]');
-  const words = (label?.getAttribute('title') ?? label?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  return /^(?:status:\s*)?(?:merged|closed)$/i.test(words);
+  return (label?.getAttribute('title') ?? label?.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function subjectOf(): MarkdownSubject | null {

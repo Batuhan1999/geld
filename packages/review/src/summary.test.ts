@@ -718,8 +718,10 @@ describe('bots + prompts', () => {
     const request: BotComment = { author: 'brandonmcconnell', body: '/devin review\nbugbot run\n@greptileai', anchor: 'issuecomment-1', createdAt: new Date(now - 2 * 3_600_000).toISOString() };
     const bugbot = (checks: readonly RawCheckRun[], options: VerdictOptions): DerivedBotVerdict | undefined => verdictsFrom(checks, [request], 'aaa', [], now, options).find((bot) => bot.id === 'bugbot');
     expect(bugbot([], { closed: true })).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-1' });
-    // Open, the same silence is a failure, as before; still reading, it is loading.
-    expect(bugbot([], {})?.verdict).toBe('failed');
+    // Open, the same silence is no word either: Bugbot acknowledges nothing, so nothing says it saw the request —
+    // mint#12998, a draft (which Bugbot skips by default), six "bugbot run" unanswered, no check, read red. Still
+    // reading, it is loading.
+    expect(bugbot([], {})?.verdict).toBe('unknown');
     expect(bugbot([], { closed: true, partial: true })?.verdict).toBe('loading');
     // A check that did run on the closed pull request still speaks for it.
     expect(bugbot([{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'success', sha: 'aaa', startedAt: new Date(now - 3_600_000).toISOString() }], { closed: true })?.verdict).toBe('clean');
@@ -741,8 +743,8 @@ describe('bots + prompts', () => {
     // A bot that only ever said "starting", long ago, and nothing on the page says how it went: no word, not a
     // failure (geld#57: CodeRabbit's "Currently processing…" left standing read as failed, red).
     expect(verdictsFrom([], devin.slice(2), 'aaa', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-2' });
-    // A person's request the bot never answered is a failure to answer, as before.
-    expect(verdictsFrom([], [{ author: 'brandonmcconnell', body: '/devin review', anchor: 'issuecomment-9', createdAt: t(0) }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'failed', sourceId: 'issuecomment-9' });
+    // A person's request the bot never acknowledged or answered is no word either (Devin acknowledges nothing).
+    expect(verdictsFrom([], [{ author: 'brandonmcconnell', body: '/devin review', anchor: 'issuecomment-9', createdAt: t(0) }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-9' });
     // A check run says how the run ended, however old the line.
     expect(verdictsFrom([{ name: 'Devin Review', status: 'completed', conclusion: 'success', sha: 'aaa' }], devin.slice(2), 'aaa', [], now)[0]?.verdict).toBe('clean');
     // Without a timestamp nothing ages.
@@ -1001,7 +1003,11 @@ describe('a bot that refuses to run', () => {
     const now = Date.UTC(2026, 9, 6, 22, 0);
     const comments = [{ author: 'brandonmcconnell', body: '@greptileai', anchor: 'issuecomment-9', createdAt: '2026-10-06T20:00:00Z', reactedBy: ['greptile-apps[bot]'] }];
     expect(verdictsFrom([], comments, 'aaa', [], now, { partial: true })[0]).toMatchObject({ id: 'greptile', verdict: 'loading', sourceId: 'issuecomment-9' });
+    // Greptile reacted to the request and then never reviewed: it took the run, so the silence is the run's failure.
     expect(verdictsFrom([], comments, 'aaa', [], now)[0]).toMatchObject({ id: 'greptile', verdict: 'failed' });
+    // The same request with no reaction is dropped within the grace as never seen — and past it, were it kept, would
+    // be no word: nothing says the bot saw it.
+    expect(verdictsFrom([], [{ author: 'brandonmcconnell', body: 'bugbot run', anchor: 'issuecomment-9', createdAt: '2026-10-06T20:00:00Z' }], 'aaa', [], now)[0]).toMatchObject({ id: 'bugbot', verdict: 'unknown' });
     // A fresh request is running either way.
     expect(verdictsFrom([], comments, 'aaa', [], Date.UTC(2026, 9, 6, 20, 1), { partial: true })[0]?.verdict).toBe('running');
   });

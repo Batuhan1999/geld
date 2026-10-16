@@ -1046,7 +1046,12 @@ export function verdictsFrom(
   }
 
   /** Bots whose latest comment so far is a status line (the run it announced has not reported), with that line. */
-  const statusOnly = new Map<string, { readonly login: string; readonly anchor: string; readonly at: number | null; readonly own: boolean }>();
+  /**
+   * `own`: the line is the bot's ("Currently processing…"), not a person's request. `acknowledged`: the bot said it
+   * took the request (Greptile's 👀) — the one case where its silence afterwards is the run's failure rather than
+   * no word at all.
+   */
+  const statusOnly = new Map<string, { readonly login: string; readonly anchor: string; readonly at: number | null; readonly own: boolean; readonly acknowledged: boolean }>();
   const threadRuns = new Map<string, ThreadRun>();
   /** The thread run a request set aside, in case the request is refused and that run is still the bot's last real one. */
   const runsBeforeAsk = new Map<string, ThreadRun>();
@@ -1090,7 +1095,7 @@ export function verdictsFrom(
         const prior = threadRuns.get(asked.id);
         if (prior !== undefined) runsBeforeAsk.set(asked.id, prior);
         threadRuns.delete(asked.id);
-        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: false });
+        statusOnly.set(asked.id, { login: asked.login, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: false, acknowledged: botById(asked.id)?.acknowledges === 'reaction' && reactedBy(comment, asked.id) });
       }
       continue;
     }
@@ -1130,7 +1135,7 @@ export function verdictsFrom(
       if (prior !== undefined) runsBeforeAsk.set(id, prior);
       threadRuns.delete(id);
       const at = comment.createdAt === undefined ? NaN : Date.parse(comment.createdAt);
-      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: true });
+      statusOnly.set(id, { login: comment.author, anchor: comment.anchor, at: Number.isNaN(at) ? null : at, own: true, acknowledged: false });
       continue;
     }
     const parsed = parseBotBody(comment.body, id.startsWith('custom:') ? '' : id);
@@ -1157,7 +1162,7 @@ export function verdictsFrom(
   // A bot whose latest word is "starting" has a run under way or just finished: what it found before belongs to
   // an earlier run (those threads are items in their own right). The check says how this run ended; with no
   // check to go by the bot is running until it says more.
-  for (const [id, { login, anchor, at, own }] of statusOnly) {
+  for (const [id, { login, anchor, at, own, acknowledged }] of statusOnly) {
     const existing = byId.get(id);
     // The bot rewrote its summary after the run was asked for: that is the report, and the summary's verdict (read
     // above, from its words as they are now) stands. Greptile re-reviews into the same comment.
@@ -1185,12 +1190,14 @@ export function verdictsFrom(
       }
     }
     if (existing === undefined) {
-      // With the timeline still loading, an old request and silence is not yet a verdict on the bot. On a merged or
-      // closed pull request the silence is no verdict at all: the checks of the time are gone. And the bot's own
-      // "Currently processing…" that aged with no report is no word either way — nothing on the page says the run
-      // failed (CodeRabbit leaves the note standing when it decides not to review) — where a person's request the
-      // bot never answered is a failure to answer.
-      const silence = options.partial === true ? 'loading' : options.closed === true || own ? 'unknown' : 'failed';
+      // With the timeline still loading, an old request and silence is not yet a verdict on the bot. Otherwise the
+      // silence is no word at all — `unknown`, grey — unless the bot acknowledged the request (Greptile's 👀) and
+      // then never reported: it said it had taken the run, so that silence is the run's failure. A request the bot
+      // never acknowledged says nothing about whether it saw it (Bugbot acknowledges nothing, and skips drafts by
+      // default: six "bugbot run" on mint#12998, a draft, went unanswered and read red), on a closed pull request
+      // the checks of the time are gone, and the bot's own "Currently processing…" left standing is CodeRabbit
+      // deciding not to review (geld#57). A failed check or a refusal still says failed/skipped in so many words.
+      const silence = options.partial === true ? 'loading' : options.closed !== true && !own && acknowledged ? 'failed' : 'unknown';
       byId.set(id, { id, login, verdict: stale ? silence : 'running', reviewedSha: headSha, sourceId: anchor });
       continue;
     }
