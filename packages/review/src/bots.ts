@@ -501,7 +501,8 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // (Sourcery), "All reported issues were addressed" (cubic: nothing outstanding), "The PR is ready to merge".
   // "Needs a human reviewer." (Sourcery's assessment), "Needs Human Approval" (Macroscope's verdict): the bot would
   // not sign off, whatever kind words came before ("they look great!").
-  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text.replace(/\b(?:not|no|never|without|doesn.t|does not|don.t|do not|didn.t|did not)\b(?:\s+\w+){0,2}\s+needs? (?:a )?human (?:review(?:er)?|approval)\b/gi, ''));
+  // ...a negated one ("does not need human approval") is no verdict; "not only needs human approval" is one still.
+  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text.replace(/\b(?:not|no|never|without|doesn.t|does not|don.t|do not|didn.t|did not)\b(?!\s+(?:only|just|merely)\b)(?:\s+\w+){0,2}\s+needs? (?:a )?human (?:review(?:er)?|approval)\b/gi, ''));
   // "The PR is ready to merge" (Amazon Q) — unless the sentence says it is not ("not yet ready to merge", "isn't
   // ready to merge", "before it is ready to merge").
   const readyToMerge =
