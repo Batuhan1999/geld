@@ -1645,7 +1645,7 @@ function botCardLine(record: BotVerdictRecord): string {
   if (record.verdict === 'loading') return 'Still reading this pull request\u2019s timeline for its review';
   if (record.verdict === 'unknown') {
     // A draft is the usual reason a request goes unanswered: most bots skip drafts unless their settings say otherwise.
-    const draft = pullRequestDraft() ? ' \u2014 this pull request is a draft, which most review bots skip unless their settings allow it' : '';
+    const draft = pullRequestDraft() ? '. This pull request is a draft, which most review bots skip unless their settings allow it' : '';
     return `No word from it on this pull request: the run it announced or was asked for never reported here, and nothing on the page says how it went${draft}`;
   }
   if (record.verdict === 'failed') return record.reason === undefined ? 'Its review of this pull request failed' : `Did not review this pull request: ${record.reason}`;
