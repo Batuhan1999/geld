@@ -80,8 +80,9 @@ async function fetchChecks(subject: CheckSubject, headSha: string, reading: Read
   }
 }
 
+/** Everything a reading is read for: the state, and the words and link the Reports row shows. */
 function describe(checks: readonly RawCheckRun[]): string {
-  return checks.map((check) => `${check.name}|${check.status}|${check.conclusion ?? ''}`).join('\n');
+  return checks.map((check) => `${check.name}|${check.status}|${check.conclusion ?? ''}|${check.description ?? ''}|${check.detailsUrl ?? ''}`).join('\n');
 }
 
 function botCheckRunning(checks: readonly RawCheckRun[]): boolean {
@@ -93,7 +94,9 @@ function botCheckRunning(checks: readonly RawCheckRun[]): boolean {
  * far (empty before the first reading lands), with a read started when none
  * has been taken for this head, when `fingerprint` (the merge box's words)
  * differs from the last reading's, or when the last one is older than the
- * clock allows. `onChange` runs when a reading lands that says something new.
+ * clock allows. `onChange` runs when a reading lands — whatever it says, so
+ * the pass that follows can arm the clock for the next one
+ * (`nextCheckRefresh`) now that `fetchedAt` has moved.
  */
 export function headChecks(subject: CheckSubject, headSha: string, fingerprint: string, onChange: () => void): readonly RawCheckRun[] {
   if (headSha === '') return [];
@@ -108,22 +111,26 @@ export function headChecks(subject: CheckSubject, headSha: string, fingerprint: 
   const due = reading.fetchedAt === 0 || age >= refreshAfter || (reading.fingerprint !== fingerprint && age >= 2_000);
   if (reading.pending === null && due) {
     const current = reading;
-    const first = current.fetchedAt === 0;
     current.fingerprint = fingerprint;
-    current.pending = fetchChecks(subject, headSha, current).then((changed) => {
+    current.pending = fetchChecks(subject, headSha, current).then(() => {
       current.fetchedAt = Date.now();
       current.pending = null;
-      // The first answer is news even when the commit has no checks: a chip waiting on it can now say "Not run".
-      if (changed || first) onChange();
+      onChange();
     });
   }
   return reading.checks;
 }
 
-/** When the next scheduled read of `headSha`'s checks is due (epoch ms), or null when none is kept for it. */
+/**
+ * When the next scheduled read of `headSha`'s checks is due (epoch ms); null
+ * when none is kept for it, and while a read is in flight — its landing makes
+ * a pass of its own, which asks again with a fresh `fetchedAt` (a deadline
+ * computed from the old one would already be past, and a pass every tick
+ * until the response came).
+ */
 export function nextCheckRefresh(subject: CheckSubject, headSha: string): number | null {
   const reading = readings.get(keyOf(subject, headSha));
-  if (reading === undefined || reading.fetchedAt === 0) return null;
+  if (reading === undefined || reading.fetchedAt === 0 || reading.pending !== null) return null;
   return reading.fetchedAt + (botCheckRunning(reading.checks) ? REFRESH_RUNNING_MS : REFRESH_SETTLED_MS);
 }
 
