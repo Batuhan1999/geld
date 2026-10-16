@@ -19188,6 +19188,8 @@ var REVIEW_BOTS = [
     appId: 1210556,
     logins: ["cursor[bot]", "cursor-bugs[bot]", "bugbot[bot]", "cursor-com[bot]"],
     checkNames: ["Cursor Bugbot", "Bugbot"],
+    notCheckNames: ["Cursor Bugbot Autofix", "Bugbot Autofix"],
+    neutralConclusion: "findings",
     triggers: ["bugbot run", "cursor review", "@cursor review"],
     configFiles: [".cursor/BUGBOT.md"]
   },
@@ -19289,7 +19291,7 @@ function botByLogin(login) {
 }
 function botByCheckName(name) {
   const lower = name.toLowerCase();
-  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check2) => lower.includes(check2.toLowerCase()))) ?? null;
+  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check2) => lower.includes(check2.toLowerCase())) && !(bot.notCheckNames ?? []).some((check2) => lower.includes(check2.toLowerCase()))) ?? null;
 }
 function looksLikeBotLogin(login) {
   return login.endsWith("[bot]") || botByLogin(login) !== null;
@@ -19598,23 +19600,29 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const byId = /* @__PURE__ */ new Map();
   const checkVerdict = /* @__PURE__ */ new Map();
   const checkStartedAt = /* @__PURE__ */ new Map();
+  const checkFoundSomething = /* @__PURE__ */ new Set();
   for (const check2 of checks) {
     const bot = botByCheckName(check2.name);
     if (bot === null) continue;
     const login = bot.logins[0] ?? bot.id;
     const running = check2.status !== "completed";
-    const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled";
-    const verdict = running ? "running" : failed ? "failed" : "clean";
+    const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled" || check2.conclusion === "action_required" || check2.conclusion === "stale";
+    const skipped = check2.conclusion === "skipped";
+    const neutralFindings = check2.conclusion === "neutral" && bot.neutralConclusion === "findings";
+    const verdict = running ? "running" : failed || skipped ? "failed" : "clean";
     checkVerdict.set(bot.id, verdict);
+    if (neutralFindings) checkFoundSomething.add(bot.id);
+    else checkFoundSomething.delete(bot.id);
     const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
     if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
     else checkStartedAt.set(bot.id, started);
     const record3 = {
       id: bot.id,
       login,
-      verdict,
+      verdict: neutralFindings ? "findings" : verdict,
       reviewedSha: check2.sha || headSha,
-      checkName: check2.name
+      checkName: check2.name,
+      ...skipped ? { reason: "Check skipped" } : {}
     };
     byId.set(bot.id, record3);
   }
@@ -19776,7 +19784,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     byId.set(bot.id, {
       id: bot.id,
       login: existing.login,
-      verdict: awaiting ? "running" : checkVerdict.get(bot.id) ?? "clean",
+      // Bugbot's neutral is findings the bot has not posted (yet): findings with no count, not a clean run.
+      verdict: awaiting ? "running" : checkFoundSomething.has(bot.id) && checkVerdict.get(bot.id) === "clean" ? "findings" : checkVerdict.get(bot.id) ?? "clean",
       reviewedSha: existing.reviewedSha,
       checkName: check2.name,
       ...existing.sourceId === void 0 ? {} : { sourceId: existing.sourceId },

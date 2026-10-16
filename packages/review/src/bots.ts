@@ -17,6 +17,20 @@ export interface ReviewBot {
   readonly title: string;
   readonly logins: readonly string[];
   readonly checkNames: readonly string[];
+  /**
+   * Check runs of the same App that are not its review, by name: a row named
+   * like one of these is left alone though it contains a `checkNames` entry
+   * ("Cursor Bugbot Autofix" is not the Bugbot review).
+   */
+  readonly notCheckNames?: readonly string[];
+  /**
+   * What the bot means by a `neutral` conclusion on its check. Bugbot's
+   * docs: `success` is a run that found nothing, `neutral` one that found
+   * something (its default for findings), `failure` only when configured to
+   * fail on unresolved findings. Unset: neutral is a run that completed
+   * without a word on the code (CodeRabbit's, Claude Code Review's).
+   */
+  readonly neutralConclusion?: 'findings';
   readonly triggers: readonly string[];
   readonly configFiles: readonly string[];
   /**
@@ -56,6 +70,8 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     appId: 1210556,
     logins: ['cursor[bot]', 'cursor-bugs[bot]', 'bugbot[bot]', 'cursor-com[bot]'],
     checkNames: ['Cursor Bugbot', 'Bugbot'],
+    notCheckNames: ['Cursor Bugbot Autofix', 'Bugbot Autofix'],
+    neutralConclusion: 'findings',
     triggers: ['bugbot run', 'cursor review', '@cursor review'],
     configFiles: ['.cursor/BUGBOT.md'],
   },
@@ -161,7 +177,19 @@ export function botByLogin(login: string): ReviewBot | null {
 
 export function botByCheckName(name: string): ReviewBot | null {
   const lower = name.toLowerCase();
-  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check) => lower.includes(check.toLowerCase()))) ?? null;
+  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check) => lower.includes(check.toLowerCase())) && !(bot.notCheckNames ?? []).some((check) => lower.includes(check.toLowerCase()))) ?? null;
+}
+
+/**
+ * Two readings of the same head's checks as one list: `primary` (the page's
+ * merge box rows, live — a running row shows its spinner and start) for
+ * every check it names, `secondary` (the commit's status partial, which
+ * lists every check whether or not the merge box is expanded) for the rest.
+ * Names are compared whole, case-insensitively.
+ */
+export function mergeCheckRuns(primary: readonly RawCheckRun[], secondary: readonly RawCheckRun[]): readonly RawCheckRun[] {
+  const named = new Set(primary.map((check) => check.name.toLowerCase()));
+  return [...primary, ...secondary.filter((check) => !named.has(check.name.toLowerCase()))];
 }
 
 /** GitHub Apps and the `[bot]` suffix, plus any login in the registry. */
@@ -697,15 +725,23 @@ export function verdictsFrom(
   const checkVerdict = new Map<string, 'clean' | 'failed' | 'running'>();
   /** When each bot's check began (epoch ms), when the page or the API said: which run a finished check belongs to. */
   const checkStartedAt = new Map<string, number>();
+  /** Bots whose check concluded `neutral` where that is their word for findings (Bugbot). */
+  const checkFoundSomething = new Set<string>();
 
   for (const check of checks) {
     const bot = botByCheckName(check.name);
     if (bot === null) continue;
     const login = bot.logins[0] ?? bot.id;
     const running = check.status !== 'completed';
-    const failed = check.conclusion === 'failure' || check.conclusion === 'timed_out' || check.conclusion === 'cancelled';
-    const verdict = running ? 'running' : failed ? 'failed' : 'clean';
+    const failed = check.conclusion === 'failure' || check.conclusion === 'timed_out' || check.conclusion === 'cancelled' || check.conclusion === 'action_required' || check.conclusion === 'stale';
+    // A skipped check is a run the bot did not make; its row is the word on that, as a "Review skipped" comment is.
+    const skipped = check.conclusion === 'skipped';
+    // `neutral` is the bot's own word: findings for one whose docs say so (Bugbot), else a run with nothing to say.
+    const neutralFindings = check.conclusion === 'neutral' && bot.neutralConclusion === 'findings';
+    const verdict = running ? 'running' : failed || skipped ? 'failed' : 'clean';
     checkVerdict.set(bot.id, verdict);
+    if (neutralFindings) checkFoundSomething.add(bot.id);
+    else checkFoundSomething.delete(bot.id);
     // The start goes with the verdict: a later check for the same bot with no start of its own must not keep
     // the earlier one's, or its verdict would be read as the earlier run's below.
     const started = check.startedAt === undefined ? NaN : Date.parse(check.startedAt);
@@ -714,9 +750,10 @@ export function verdictsFrom(
     const record: DerivedBotVerdict = {
       id: bot.id,
       login,
-      verdict,
+      verdict: neutralFindings ? 'findings' : verdict,
       reviewedSha: check.sha || headSha,
       checkName: check.name,
+      ...(skipped ? { reason: 'Check skipped' } : {}),
     };
     byId.set(bot.id, record);
   }
@@ -945,7 +982,8 @@ export function verdictsFrom(
     byId.set(bot.id, {
       id: bot.id,
       login: existing.login,
-      verdict: awaiting ? 'running' : (checkVerdict.get(bot.id) ?? 'clean'),
+      // Bugbot's neutral is findings the bot has not posted (yet): findings with no count, not a clean run.
+      verdict: awaiting ? 'running' : checkFoundSomething.has(bot.id) && checkVerdict.get(bot.id) === 'clean' ? 'findings' : (checkVerdict.get(bot.id) ?? 'clean'),
       reviewedSha: existing.reviewedSha,
       checkName: check.name,
       ...(existing.sourceId === undefined ? {} : { sourceId: existing.sourceId }),
