@@ -502,6 +502,8 @@ describe('bots + prompts', () => {
     expect(refusalReason('The cubic interpolation worker cannot run on the GPU path. Found 2 issues.')).toBeNull();
     expect(refusalReason('The import job exhausted its daily budget before the last page. Found 2 issues.')).toBeNull();
     expect(isStatusLineComment('Reviewing PR #396 revealed 2 bugs in the retry loop.')).toBe(false);
+    // ...and the checklist as the page reads it: no checkbox marks, one item per line, however long it runs.
+    expect(isStatusLineComment(`Reviewing PR #396\n\nGather context\n\nRead AGENTS.md\n\nReview diff (oidata, likelihood, plotting, docs, tests)\n\nCheck the fixtures under tests/ against the new loader and the two notebooks that import it\n\nRun the unit tests and the notebook smoke test\n\nPost inline findings and submit the verdict`)).toBe(true);
     expect(parseBotBody('## Review Summary\nThe PR is ready to merge after the failing check is fixed.', 'amazon-q').clean).toBe(false);
     expect(parseBotBody('## Review Summary\nThe PR is ready to merge once the snapshot is updated.', 'amazon-q').clean).toBe(false);
     const approvedNoHuman = parseBotBody('#### Approvability\n**Verdict:** Approved at `2a60be7`\n\nThis does not need human approval: the change is a test-only fix.', 'macroscope');
