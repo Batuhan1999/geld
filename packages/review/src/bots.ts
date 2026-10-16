@@ -160,6 +160,140 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     configFiles: [],
     conversational: true,
   },
+  {
+    // Claude Code Review (Anthropic's managed GitHub App, `claude[bot]`): findings as inline comments ranked by
+    // severity, a summary review ("I reviewed this PR and found no bugs (no blocking findings)", "Nothing blocking.",
+    // "## Code review / No issues found") and a check run named "Claude Code Review" that never concludes failure.
+    // `@claude review` starts one (`always` subscribes the PR, `once` does not); Claude reacts 👀 when it takes the
+    // comment. The same login is Claude Code's GitHub Action and the "PR Steward", which narrate ("Claude finished
+    // @x's task in 45s", "Picking this one up…"), so only a review-shaped comment votes. REVIEW.md holds the review
+    // rules (CLAUDE.md is read too, but every Claude Code user has one). Docs read Oct 2026 (code.claude.com/docs/en/code-review).
+    id: 'claude',
+    title: 'Claude Code Review',
+    appId: 1236702,
+    logins: ['claude[bot]'],
+    checkNames: ['Claude Code Review'],
+    triggers: ['@claude review', '@claude review always', '@claude review once'],
+    // REVIEW.md only: CLAUDE.md is every Claude Code user's file and says nothing about Code Review being on.
+    configFiles: ['REVIEW.md'],
+    conversational: true,
+    acknowledges: 'reaction',
+  },
+  {
+    // cubic (cubic.dev, `cubic-dev-ai[bot]`): a review per push with a bold count line — "**N issues found** across
+    // M files", "**No issues found**", "**All reported issues were addressed**", "**1 existing issue remains and 3
+    // new issues found**" — sometimes with a "Confidence score: **N/5**". `@cubic-dev-ai review this PR` (or the bare
+    // mention) runs a full review, `@cubic-dev-ai incremental review` the changes since the last; it reacts 👀 to
+    // the comment. `cubic.yaml` at the root configures it; the review shows as a check run that can be cancelled
+    // from the Checks UI. Docs read Oct 2026 (docs.cubic.dev).
+    id: 'cubic',
+    title: 'cubic',
+    appId: 1082092,
+    logins: ['cubic-dev-ai[bot]'],
+    checkNames: ['cubic'],
+    triggers: ['@cubic-dev-ai review this PR', '@cubic-dev-ai review', '@cubic-dev-ai incremental review', '@cubic-dev-ai', '@cubic review'],
+    configFiles: ['cubic.yaml'],
+    acknowledges: 'reaction',
+    conversational: true,
+  },
+  {
+    // Sourcery (`sourcery-ai[bot]`): a "Reviewer's Guide" comment maps the change, then a review — "Hey - I've
+    // reviewed your changes and they look great!" with "### Sourcery assessment **Approved.**", or "Hey - I've found
+    // N issues". A status check named "Sourcery review" reports in progress / success / failure (blocking security
+    // findings) / skipped (rate limit, the five-re-review cap). Budget refusals: "Sorry @x, you've used your own
+    // review budget of 250,000 diff characters for the last 7 days", "your pull request is larger than the review
+    // limit". `@sourcery-ai review` re-reviews from scratch. Docs read Oct 2026 (docs.sourcery.ai/reviews).
+    id: 'sourcery',
+    title: 'Sourcery',
+    appId: 48477,
+    logins: ['sourcery-ai[bot]'],
+    checkNames: ['Sourcery review', 'Sourcery'],
+    triggers: ['@sourcery-ai review', '@sourceryai review'],
+    configFiles: ['.sourcery.yaml'],
+    conversational: true,
+  },
+  {
+    // Qodo (qodo.ai, `qodo-code-review[bot]`; Qodo Merge / PR-Agent before it): a "PR Summary by Qodo" and a "Code
+    // Review by Qodo" headed by counts in code pills ("🐞 Bugs (0)", "📘 Rule violations (0)" …), a "Qodo is busy
+    // working" status line while it runs, and billing notices ("Qodo reviews are paused because your trial has
+    // ended"). `/agentic_review` runs a review (`/review` and `/improve` are the deprecated PR-Agent forms);
+    // `.pr_agent.toml` configures it. Docs read Oct 2026 (docs.qodo.ai/code-review).
+    id: 'qodo',
+    title: 'Qodo',
+    appId: 484649,
+    logins: ['qodo-code-review[bot]', 'qodo-merge-pro[bot]', 'codiumai-pr-agent-pro[bot]', 'qodo-merge-for-open-source[bot]'],
+    checkNames: ['Qodo'],
+    triggers: ['/agentic_review', '/review', '@qodo review'],
+    configFiles: ['.pr_agent.toml'],
+    conversational: true,
+  },
+  {
+    // Amazon Q Developer (`amazon-q-developer[bot]`): a review headed "## Review Summary" with the findings as
+    // threads; "No blocking defects were found", "No blocking issues found", "No logic errors, security
+    // vulnerabilities, crashes, or behavioral regressions were found" when clean. Reviews run on open/reopen only;
+    // `/q review` in a new comment runs one again, `/q <question>` asks. Docs read Oct 2026 (docs.aws.amazon.com/amazonq).
+    id: 'amazon-q',
+    title: 'Amazon Q Developer',
+    appId: 1220912,
+    logins: ['amazon-q-developer[bot]'],
+    checkNames: ['Amazon Q Developer'],
+    triggers: ['/q review'],
+    configFiles: [],
+  },
+  {
+    // Ellipsis (ellipsis.dev, `ellipsis-dev[bot]`): one review per admitted push combining its reviewers' findings;
+    // an important-alert "**Looks good to me! :+1:**" with "Reviewed everything up to <sha>" when clean, a request
+    // for changes with the comments otherwise. Configured by `.ellipsis/code-review.yaml`; reviews are push-driven
+    // (no comment command documented). Docs read Oct 2026 (ellipsis.dev/docs/code-review).
+    id: 'ellipsis',
+    title: 'Ellipsis',
+    appId: 64358,
+    logins: ['ellipsis-dev[bot]'],
+    checkNames: ['Ellipsis'],
+    triggers: ['@ellipsis-dev review'],
+    configFiles: ['.ellipsis/code-review.yaml', 'ellipsis.yaml'],
+  },
+  {
+    // Macroscope (macroscope.com, `macroscopeapp[bot]`): findings as comments, then an "#### Approvability" comment
+    // with "**Verdict:** Approved at `sha`" / "Would Approve" / "Needs Human Approval"; "Macroscope skipped reviewing
+    // this pull request. Per-review cost limit exceeded" when it will not run. `@macroscope-app review` starts one.
+    // Docs read Oct 2026 (docs.macroscope.com).
+    id: 'macroscope',
+    title: 'Macroscope',
+    appId: 900172,
+    logins: ['macroscopeapp[bot]', 'macroscope-app[bot]'],
+    checkNames: ['Macroscope'],
+    triggers: ['@macroscope-app review', '@macroscopeapp review'],
+    configFiles: [],
+    conversational: true,
+  },
+  {
+    // Korbit (korbit.ai, `korbit-ai[bot]`): a review headed "### Review by Korbit AI" with a table of issues and
+    // their fix status ("✅ Fix detected"); "By default, I don't review pull requests opened by bots" when it skips.
+    // `/korbit-review` requests one. Seen on apache/superset, Oct 2026.
+    id: 'korbit',
+    title: 'Korbit',
+    appId: 322216,
+    logins: ['korbit-ai[bot]'],
+    checkNames: ['Korbit'],
+    triggers: ['/korbit-review'],
+    configFiles: ['.korbit/'],
+  },
+  {
+    // Entelligence (entelligence.ai, `entelligence-ai-pr-reviews[bot]`): an "## EntelligenceAI PR Summary", a
+    // "## Walkthrough", findings as threads plus "## Findings outside the diff (N)" comments, and "Starting fresh pr
+    // review. This may take a few minutes" while it runs; "**Automatic Review Skipped** This PR changes N files,
+    // above the 100-file limit" when it will not. `@entelligence review` runs one; `@entelligence help` lists the
+    // commands. Seen Oct 2026.
+    id: 'entelligence',
+    title: 'Entelligence',
+    appId: 932812,
+    logins: ['entelligence-ai-pr-reviews[bot]', 'entelligence-ai[bot]'],
+    checkNames: ['Entelligence'],
+    triggers: ['@entelligence review'],
+    configFiles: [],
+    conversational: true,
+  },
 ];
 
 const LOGIN_INDEX = new Map<string, ReviewBot>();
@@ -229,18 +363,79 @@ export interface ParsedBotBody {
  * Pull a findings count or score out of a bot's summary comment. Conservative:
  * unknown shapes return nulls rather than inventing numbers.
  */
+/**
+ * Counts in a bot's own shape, where the generic "N issues" reading misses or
+ * misreads: null when the body is not in that shape.
+ *
+ * - Claude: "Review complete — changes requested (0 P1, 3 P2, 3 P3)" and "Has
+ *   P1/P2 findings, changes requested: 1 P1, 1 P2, 2 P3" — P1 + P2 are the
+ *   findings, P3 the nits ("2 P3" read as two issues otherwise).
+ * - cubic: "**1 existing issue remains and 3 new issues found**" — both.
+ * - Qodo: "🐞 Bugs (0) 📘 Rule violations (0) 📎 Requirement gaps (0) …" — the
+ *   pills' sum.
+ * - Korbit: a "Review by Korbit AI" table, one row per issue, "✅ Fix detected"
+ *   on the rows since fixed.
+ * - Entelligence: the "**Issues found:**" list under its scorecard; a
+ *   scorecard with no such list found nothing.
+ */
+function countShapedBy(botId: string, text: string): number | null {
+  switch (botId) {
+    case 'claude': {
+      const match = /(\d+)\s*P1,\s*(\d+)\s*P2/i.exec(text);
+      return match?.[1] !== undefined && match[2] !== undefined ? Number.parseInt(match[1], 10) + Number.parseInt(match[2], 10) : null;
+    }
+    case 'cubic': {
+      const existing = /(\d+)\s+existing\s+issues?\s+remains?/i.exec(text);
+      const found = /(\d+)\s+(?:new\s+)?issues?\s+found/i.exec(text);
+      if (existing === null && found === null) return /\bno (?:new )?issues found\b|\ball reported issues were addressed\b/i.test(text) ? 0 : null;
+      return (existing?.[1] === undefined ? 0 : Number.parseInt(existing[1], 10)) + (found?.[1] === undefined ? 0 : Number.parseInt(found[1], 10));
+    }
+    case 'qodo': {
+      if (!/code review by qodo/i.test(text)) return null;
+      let sum = 0;
+      let any = false;
+      for (const match of text.matchAll(/(?:bugs|rule violations|requirement gaps|cross-repo conflicts|skill insights)\s*\((\d+)\)/gi)) {
+        sum += Number.parseInt(match[1] ?? '0', 10);
+        any = true;
+      }
+      return any ? sum : null;
+    }
+    case 'korbit': {
+      if (!/review by korbit/i.test(text)) return null;
+      const rows = text.split('\n').filter((line) => /^\s*\|\s*<sub>/.test(line) || /^\s*\|\s*!\[/.test(line));
+      return rows.filter((line) => !/fix detected/i.test(line)).length;
+    }
+    case 'entelligence': {
+      if (!/review scorecard/i.test(text)) return null;
+      // The list ends at a blank line; "*…plus 23 more, posted as inline comment(s)*" closes a long one.
+      const section = /\*\*Issues found:?\*\*:?\s*\n([\s\S]*?)(?=\n\s*\n|(?![\s\S]))/i.exec(text);
+      if (section === null) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
+      const lines = (section[1] ?? '').split('\n');
+      const listed = lines.filter((line) => /^\s*[-*]\s+\*\*/.test(line)).length;
+      const more = /plus (\d+) more/i.exec(section[1] ?? '');
+      return listed + (more?.[1] === undefined ? 0 : Number.parseInt(more[1], 10));
+    }
+    default:
+      return null;
+  }
+}
+
 export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // HTML comments are the bots' own markers (Cursor's automation ids, Greptile's score), never words to weigh.
   const text = body.replace(/\r\n/g, '\n').replace(/<!--[\s\S]*?-->/g, '').trim();
-  const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
+  // Entelligence's scorecard has two N/5 rows; "Merge Confidence" is the verdict (Code Quality feeds it). Qodo's
+  // summaries carry no score out of five, whatever fraction appears in them.
+  const scoreMatch = botId === 'qodo' ? null : (botId === 'entelligence' ? /merge confidence\W+(?:[\u25cf\u25cb\s]*)\**(\d+(?:\.\d+)?)\s*\/\s*5\b/i.exec(text) : null) ?? /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== undefined ? Number.parseFloat(scoreMatch[1]) : null;
   // "found 1 potential issue", "2 new bugs": one qualifier between the number and the noun is allowed through.
   // CodeRabbit counts the other way round: "Actionable comments posted: 1" on each review.
   const countMatch =
     botId === 'greptile'
       ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text)
-      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text));
+      : (/\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open|existing)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text));
   let count = countMatch?.[1] !== undefined ? Number.parseInt(countMatch[1], 10) : null;
+  const shaped = countShapedBy(botId, text);
+  if (shaped !== null) count = shaped;
   // Greptile's summary (the one headed "Confidence Score: N/5") lists what it found under a "Findings" heading, one
   // bold title per finding ("1. **Review cards lack test coverage** ▶" raw, "**Review cards lack test coverage** ▶"
   // as the page reads a list item); a summary with no such section found nothing, whatever its risk sentence says
@@ -263,15 +458,29 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   // Cursor's automations post under the Bugbot login. A verdict beside a count of findings ("Didn't find any major
   // issues. Found 2 minor issues.") is not clean: the count is. The bare "Approved" must be the verdict word — followed
   // by its punctuation or nothing — not the first word of a finding ("Approved users can edit another tenant's settings").
+  // "**Verdict:** Approved at `sha`" / "Would Approve" (Macroscope), "Sourcery assessment **Approved.**", "Review
+  // complete — approved (0 P1, 0 P2, 2 P3)" (Claude): the verdict word after its label, through the bold marks.
   const approved =
     (count === null || count === 0) &&
-    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
+    (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) ||
+      /\b(?:verdict|assessment)\W{0,6}(?:would\s+)?approved?\b/i.test(text) ||
+      /\breview complete\s*[\u2014\u2013-]+\s*approved\b/i.test(text) ||
+      /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
+  // A count of findings is findings, whatever else the summary says ("1 existing issue remains and no new issues
+  // found", cubic). "Nothing blocking." (Claude), "No blocking defects were found" (Amazon Q), "they look great"
+  // (Sourcery), "All reported issues were addressed" (cubic: nothing outstanding), "The PR is ready to merge".
+  // "Needs a human reviewer." (Sourcery's assessment), "Needs Human Approval" (Macroscope's verdict): the bot would
+  // not sign off, whatever kind words came before ("they look great!").
+  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text);
   const clean =
-    /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) ||
-    /\bno actionable comments\b/i.test(text) ||
-    /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) ||
-    approved ||
-    (count === 0 && (score === null || botId === 'greptile'));
+    !needsHuman &&
+    (count === null || count === 0) &&
+    (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
+      /\bno actionable comments\b/i.test(text) ||
+      /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) ||
+      /\b(?<!not )ready to merge\b/i.test(text) ||
+      approved ||
+      (count === 0 && (score === null || botId === 'greptile' || shaped !== null)));
   // A severity word under a negation is not a severity: "no established behavioral blocker", "no critical issues",
   // "without security risk". The denied phrase goes before the words are weighed.
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, '');
@@ -369,6 +578,16 @@ export function refusalReason(body: string): string | null {
     .split('\n')
     .map((line) => line.replace(/[`*_>~#]/g, '').replace(/\s+/g, ' ').trim())
     .find((line) => line !== '');
+  // A bot naming itself in a heading that says it did not run — "**Macroscope skipped reviewing this pull request.**"
+  // over the cost explanation, "**Claude encountered an error after 48s** —— [View job](…)" over what it was doing.
+  // The heading is the reason, without the job link after the dash.
+  if (heading !== undefined && /^[A-Z][\w.-]*(?:\[bot\])?\s+(?:skipped reviewing\b|encountered an error\b)/.test(heading)) {
+    const lower = heading.toLowerCase();
+    if (REVIEW_BOTS.some((bot) => lower.startsWith(bot.title.toLowerCase()) || bot.logins.some((login) => lower.startsWith(login.replace(/\[bot\]$/, '').toLowerCase())))) {
+      const first = heading.replace(/\s*[\u2014\u2013-]{2,}.*$/, '').split(/(?<=[.!?])\s+/)[0] ?? heading;
+      return first.replace(/[.!?]\s*$/, '');
+    }
+  }
   if (heading !== undefined && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
     // A run-failure heading ("couldn't run …") must name the bot (a known title or login): "review" or "quota" in it
     // is not enough — "Cannot run review tests on a fresh checkout", "Cannot run quota migrations on a fresh
@@ -385,11 +604,16 @@ export function refusalReason(body: string): string | null {
   // cap below. "Auto reviews are disabled on base/target branches other than the default branch"; "Review was skipped
   // as selected files did not have any reviewable changes" (an incremental pass with nothing to read — a refusal only
   // for a bot that never reviewed here, as any refusal is).
-  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?(?:automatic\s+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|trigger a|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== undefined && skipNotice[1].trim() !== '') return skipNotice[1].trim();
   if (text.length > 400) return null;
   // "Skipping Bugbot: …", "Skipped review: …" — a skip of the run, not of something in the code under review.
-  const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
+  // "Macroscope skipped reviewing this pull request." names itself first; "Claude encountered an error" is a run that
+  // broke, in the bot's own words — the sentence is the reason.
+  const skipped =
+    /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|reviewing|pull request|pr|run|analysis|scan)\b)/i.test(text) ||
+    /^[A-Z][\w.-]*(?:\[bot\])?\s+skipped\s+reviewing\b/i.test(text) ||
+    /^[A-Z][\w.-]*(?:\[bot\])?\s+encountered an error\b/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
   // Otherwise the sentence must say it about the bot or the review, not about the code: "is disabled" alone
   // describes a feature flag as readily as a bot, and a short review can say exactly that. The one exception is
@@ -539,7 +763,9 @@ const BARE_REFUSAL_WORDS = new Set([
 const REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
-    /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:no|out of|insufficient|exceeded|reached|used(?: up)?|exhausted)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:larger|bigger|longer)\s+than\s+(?:the|our|your)\s+(?:\w+\s+)?limit\b/,
+    /\b(?:don.t|do not|won.t|will not)\s+review\s+(?:pull requests|prs|changes)\b/,
     /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
     /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
@@ -564,7 +790,7 @@ const REFUSAL_SUBJECT = new RegExp(
   [
     /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
     /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
-    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t|don.t|do not)\s+review\b/,
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
@@ -575,7 +801,7 @@ const REFUSAL_SUBJECT = new RegExp(
   'i',
 );
 /** The money words: a subject only inside the refusal phrase itself ("no credits remaining"), see `isRefusalSentence`. */
-const REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
+const REFUSAL_MONEY = /\b(?:credits?|quota|budget|billing|seats?)\b/i;
 
 function withOptionalCount(base: DerivedBotVerdict, parsed: ParsedBotBody): DerivedBotVerdict {
   return {
@@ -601,6 +827,8 @@ function reviewBotIdFor(login: string, extraLogins: readonly string[]): string |
 export function isStatusLineComment(body: string): boolean {
   const text = body
     .replace(/<!--[\s\S]*?-->/g, '')
+    // Qodo's "<h3>Qodo is busy working</h3>" is HTML, raw.
+    .replace(/<[^>]+>/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_>~#]/g, '')
     .replace(/\s+/g, ' ')
@@ -612,6 +840,9 @@ export function isStatusLineComment(body: string): boolean {
   // "[!NOTE]" in the markdown, behind the "Note" heading GitHub renders it as on the page (`blockText` keeps it,
   // on its own line, no full stop). The whole first sentence must be that line: one that merely begins with the
   // words ("Currently processing changes this way is slow. Found 2 issues…") is a review, not a status.
+  // Qodo's "Qodo is busy working. Check back in a few minutes." and Claude Code's "Reviewing PR #396 - [x] Gather
+  // context - [ ] Read AGENTS.md …" (a checklist it ticks as it goes) are status lines whatever their length.
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text) || /^reviewing (?:pr|pull request) #?\d+\b/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? '');
   // The verb of a run under way, with what it is running on named in the same sentence ("Starting Devin Review.",
   // "Bugbot is reviewing your changes"), never a sentence that merely begins with such a word ("Starting from line 12, …").
@@ -1014,8 +1245,24 @@ function reactedBy(comment: BotComment, id: string): boolean {
  * come from: every registered bot whose trigger phrase the comment contains
  * as a whole, and `@handle` for a user-listed bot.
  */
+/**
+ * A comment's words with the emphasis marks off, for matching against trigger
+ * phrases: backticks, asterisks, tildes, quote marks, and underscores that
+ * wrap a word (`_review_`) — not the ones inside one: Qodo's command is
+ * `/agentic_review`.
+ */
+function plainTrigger(text: string): string {
+  return text
+    .replace(/[`*>~]/g, '')
+    .replace(/(^|\s)_+(?=\S)/g, '$1')
+    .replace(/(?<=\S)_+(?=\s|$)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 export function botsTriggeredBy(body: string, extraLogins: readonly string[] = []): readonly { readonly id: string; readonly login: string }[] {
-  const text = ` ${body.replace(/[`*_>~]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()} `;
+  const text = ` ${plainTrigger(body)} `;
   const out: { readonly id: string; readonly login: string }[] = [];
   for (const bot of REVIEW_BOTS) {
     if (bot.triggers.some((trigger) => text.includes(` ${trigger.toLowerCase()} `) || text.includes(` ${trigger.toLowerCase()}.`) || text.includes(` ${trigger.toLowerCase()}!`))) {
@@ -1048,7 +1295,7 @@ export function rerunTriggerFor(botId: string): string | null {
  */
 export function botByTrigger(body: string): ReviewBot | null {
   for (const raw of body.split(/\r?\n/)) {
-    const line = raw.replace(/[`*_>~]/g, '').trim().toLowerCase();
+    const line = plainTrigger(raw);
     if (line === '') continue;
     const bot = REVIEW_BOTS.find((candidate) => candidate.triggers.some((trigger) => trigger.toLowerCase() === line));
     if (bot !== null && bot !== undefined) return bot;
@@ -1085,7 +1332,7 @@ function knownTriggers(extraLogins: readonly string[]): readonly string[] {
 }
 
 function isTriggerSequence(body: string, extraLogins: readonly string[]): boolean {
-  let text = body.replace(/[`*_~]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  let text = plainTrigger(body);
   if (text === '' || text.length > 240) return false;
   const triggers = knownTriggers(extraLogins);
   let count = 0;
@@ -1100,12 +1347,7 @@ function isTriggerSequence(body: string, extraLogins: readonly string[]): boolea
 }
 
 function isSingleTrigger(body: string, extraLogins: readonly string[]): boolean {
-  const text = body
-    .replace(/[`*_~]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!]+$/, '')
-    .toLowerCase();
+  const text = plainTrigger(body).replace(/[.!]+$/, '');
   if (text === '' || text.length > 60) return false;
   for (const bot of REVIEW_BOTS) {
     if (bot.triggers.some((trigger) => trigger.toLowerCase() === text)) return true;
