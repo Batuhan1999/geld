@@ -97,6 +97,14 @@ interface VisitState {
    * grace period and only given up once the conversation stays gone.
    */
   openSubMissingSince: number | null;
+  /**
+   * The comment anchors of the open item (thread row), as of the last pass
+   * that found it. An item's id hashes every anchor in its conversation, so
+   * a reply the reader posts into it gives the item a new id; the open row
+   * follows the conversation by these anchors (`reseatOpenItem`) instead of
+   * closing because its key matched nothing.
+   */
+  openItemAnchors: ReadonlySet<string> | null;
   /** "At least N approving reviews" as last stated by the merge box; it stops saying so once met. */
   knownRequired: number | null;
   /** The last reading, kept while React re-renders the merge box (a blank pass must not drop the row). */
@@ -150,6 +158,7 @@ const visit: VisitState = {
   openPreviews: new Set<string>(),
   flash: null,
   openSubMissingSince: null,
+  openItemAnchors: null,
   knownRequired: null,
   lastReviews: null,
   checksExpanded: false,
@@ -360,6 +369,39 @@ function reseatOpenLine(batches: readonly Batch[]): void {
   if (current !== undefined && holds(current)) return;
   const home = batches.find(holds);
   if (home !== undefined) visit.openKey = home.key;
+}
+
+/**
+ * The open item (a thread row, inside a round or by push) follows its
+ * conversation. Its key is `item:<id>` and the id hashes every comment
+ * anchor in the conversation (`itemIdFor`), so the reply the reader has just
+ * posted into the thread — GitHub appends the comment to the loaned node, the
+ * crawl reads one more anchor — gives the item a new id, and the key the
+ * reader opened matched nothing: the row they were writing in closed under
+ * them once the missing-line grace ran out (notra#1148). The anchors are
+ * remembered while the item is found, and when it is not, the item that
+ * shares one of them is the same conversation and takes the open key.
+ */
+function reseatOpenItem(meta: GeldPrMeta): void {
+  const field = visit.openSubKey?.startsWith('item:') === true ? 'openSubKey' : visit.openKey?.startsWith('item:') === true ? 'openKey' : null;
+  if (field === null) {
+    visit.openItemAnchors = null;
+    return;
+  }
+  const key = visit[field];
+  const found = meta.items.find((item) => itemKey(item.id) === key);
+  if (found !== undefined) {
+    visit.openItemAnchors = new Set(found.sources.map((source) => source.anchor));
+    return;
+  }
+  const anchors = visit.openItemAnchors;
+  if (anchors === null) return;
+  const successor = meta.items.find((item) => item.sources.some((source) => anchors.has(source.anchor)));
+  if (successor === undefined) return;
+  visit[field] = itemKey(successor.id);
+  visit.openItemAnchors = new Set(successor.sources.map((source) => source.anchor));
+  // A settle armed for the old key (the reply mutated the loaned node) is about this same conversation.
+  if (visit.settling !== null && visit.settling.itemKey === key) visit.settling = { ...visit.settling, itemKey: visit[field] };
 }
 
 /** How long an open line's conversation may be absent from the crawl before the line is given up. */
@@ -2594,6 +2636,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     visit.openPreviews = new Set<string>();
     visit.flash = null;
     visit.openSubMissingSince = null;
+    visit.openItemAnchors = null;
     visit.knownRequired = null;
     resetRefs();
     resetWholePaths();
@@ -2745,6 +2788,7 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     }),
   );
   settleAfterResolve(meta, batches);
+  reseatOpenItem(meta);
   reseatOpenLine(batches);
   // A round's bot comment lines and its preview pills both stand for their comments: neither needs a fold row too.
   const batchedAnchors = new Set([...batches.flatMap((batch) => [...batch.comments.map((entry) => entry.anchor), ...batch.previews.map((entry) => entry.anchor)]), ...botLineAnchors, ...reportLineAnchors]);
