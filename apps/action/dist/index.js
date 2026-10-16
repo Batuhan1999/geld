@@ -19600,7 +19600,6 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const byId = /* @__PURE__ */ new Map();
   const checkVerdict = /* @__PURE__ */ new Map();
   const checkStartedAt = /* @__PURE__ */ new Map();
-  const checkFoundSomething = /* @__PURE__ */ new Set();
   for (const check2 of checks) {
     const bot = botByCheckName(check2.name);
     if (bot === null) continue;
@@ -19609,17 +19608,15 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled" || check2.conclusion === "action_required" || check2.conclusion === "stale";
     const skipped = check2.conclusion === "skipped";
     const neutralFindings = check2.conclusion === "neutral" && bot.neutralConclusion === "findings";
-    const verdict = running ? "running" : failed || skipped ? "failed" : "clean";
+    const verdict = running ? "running" : failed || skipped ? "failed" : neutralFindings ? "findings" : "clean";
     checkVerdict.set(bot.id, verdict);
-    if (neutralFindings) checkFoundSomething.add(bot.id);
-    else checkFoundSomething.delete(bot.id);
     const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
     if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
     else checkStartedAt.set(bot.id, started);
     const record3 = {
       id: bot.id,
       login,
-      verdict: neutralFindings ? "findings" : verdict,
+      verdict,
       reviewedSha: check2.sha || headSha,
       checkName: check2.name,
       ...skipped ? { reason: "Check skipped" } : {}
@@ -19749,7 +19746,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const edited = existing?.sourceId === void 0 ? void 0 : editedAtOf.get(existing.sourceId);
     if (existing?.sourceId !== void 0 && (existing.verdict === "clean" || existing.verdict === "findings") && edited !== void 0 && run2.lastAt !== null && edited > run2.lastAt + RERUN_EDIT_GAP_MS) continue;
     const fromCheck = checkName === void 0 ? null : checkVerdict.get(id) ?? null;
-    if (fromCheck !== null && fromCheck !== "clean") {
+    if (fromCheck !== null && fromCheck !== "clean" && fromCheck !== "findings") {
       byId.set(id, { id, login: run2.login, verdict: fromCheck, reviewedSha, ...named, sourceId: run2.lastAnchor });
       continue;
     }
@@ -19784,8 +19781,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     byId.set(bot.id, {
       id: bot.id,
       login: existing.login,
-      // Bugbot's neutral is findings the bot has not posted (yet): findings with no count, not a clean run.
-      verdict: awaiting ? "running" : checkFoundSomething.has(bot.id) && checkVerdict.get(bot.id) === "clean" ? "findings" : checkVerdict.get(bot.id) ?? "clean",
+      verdict: awaiting ? "running" : checkVerdict.get(bot.id) ?? "clean",
       reviewedSha: existing.reviewedSha,
       checkName: check2.name,
       ...existing.sourceId === void 0 ? {} : { sourceId: existing.sourceId },

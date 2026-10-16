@@ -394,6 +394,20 @@ describe('bots + prompts', () => {
       'aaa',
     );
     expect(threads[0]).toMatchObject({ verdict: 'findings', count: 1 });
+    // A request the bot answered only through its check (the partial shows no start): the neutral still speaks.
+    const asked = verdictsFrom(
+      [{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }],
+      [{ author: 'octocat', body: 'bugbot run', anchor: 'issuecomment-9', createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }],
+      'aaa',
+    );
+    expect(asked[0]).toMatchObject({ id: 'bugbot', verdict: 'findings' });
+    // Every thread of a neutral run resolved: resolved, as with a green check.
+    const resolved = verdictsFrom(
+      [{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }],
+      [{ author: 'cursor[bot]', body: 'Unused import.', anchor: 'discussion_r2', resolved: true }],
+      'aaa',
+    );
+    expect(resolved[0]).toMatchObject({ verdict: 'findings', count: 0 });
     // A skipped check is a run the bot did not make, in its word.
     expect(verdictsFrom([{ name: 'CodeRabbit', status: 'completed', conclusion: 'skipped', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ verdict: 'failed', reason: 'Check skipped' });
     // A finished check whose start is known and that no word followed: neutral is still findings.

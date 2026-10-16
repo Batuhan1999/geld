@@ -721,12 +721,14 @@ export function verdictsFrom(
   options: VerdictOptions = {},
 ): readonly DerivedBotVerdict[] {
   const byId = new Map<string, DerivedBotVerdict>();
-  /** What each bot's check alone said, for a run its comments have not spoken about. */
-  const checkVerdict = new Map<string, 'clean' | 'failed' | 'running'>();
+  /**
+   * What each bot's check alone said, for a run its comments have not spoken about. `findings` is a neutral
+   * conclusion from a bot whose word that is for a run that found something (Bugbot), with no count until its
+   * threads give one.
+   */
+  const checkVerdict = new Map<string, 'clean' | 'findings' | 'failed' | 'running'>();
   /** When each bot's check began (epoch ms), when the page or the API said: which run a finished check belongs to. */
   const checkStartedAt = new Map<string, number>();
-  /** Bots whose check concluded `neutral` where that is their word for findings (Bugbot). */
-  const checkFoundSomething = new Set<string>();
 
   for (const check of checks) {
     const bot = botByCheckName(check.name);
@@ -738,10 +740,8 @@ export function verdictsFrom(
     const skipped = check.conclusion === 'skipped';
     // `neutral` is the bot's own word: findings for one whose docs say so (Bugbot), else a run with nothing to say.
     const neutralFindings = check.conclusion === 'neutral' && bot.neutralConclusion === 'findings';
-    const verdict = running ? 'running' : failed || skipped ? 'failed' : 'clean';
+    const verdict = running ? 'running' : failed || skipped ? 'failed' : neutralFindings ? 'findings' : 'clean';
     checkVerdict.set(bot.id, verdict);
-    if (neutralFindings) checkFoundSomething.add(bot.id);
-    else checkFoundSomething.delete(bot.id);
     // The start goes with the verdict: a later check for the same bot with no start of its own must not keep
     // the earlier one's, or its verdict would be read as the earlier run's below.
     const started = check.startedAt === undefined ? NaN : Date.parse(check.startedAt);
@@ -750,7 +750,7 @@ export function verdictsFrom(
     const record: DerivedBotVerdict = {
       id: bot.id,
       login,
-      verdict: neutralFindings ? 'findings' : verdict,
+      verdict,
       reviewedSha: check.sha || headSha,
       checkName: check.name,
       ...(skipped ? { reason: 'Check skipped' } : {}),
@@ -938,8 +938,9 @@ export function verdictsFrom(
     // A check that failed or is still running says so; one that passed does not turn resolved findings into a run
     // that found nothing — the bot has not looked again — so they read "resolved" (findings, none open), which
     // the request menu still offers a rerun for.
+    // ...and a neutral that means findings says the run found these threads, which are resolved: "resolved" too.
     const fromCheck = checkName === undefined ? null : checkVerdict.get(id) ?? null;
-    if (fromCheck !== null && fromCheck !== 'clean') {
+    if (fromCheck !== null && fromCheck !== 'clean' && fromCheck !== 'findings') {
       byId.set(id, { id, login: run.login, verdict: fromCheck, reviewedSha, ...named, sourceId: run.lastAnchor });
       continue;
     }
@@ -982,8 +983,7 @@ export function verdictsFrom(
     byId.set(bot.id, {
       id: bot.id,
       login: existing.login,
-      // Bugbot's neutral is findings the bot has not posted (yet): findings with no count, not a clean run.
-      verdict: awaiting ? 'running' : checkFoundSomething.has(bot.id) && checkVerdict.get(bot.id) === 'clean' ? 'findings' : (checkVerdict.get(bot.id) ?? 'clean'),
+      verdict: awaiting ? 'running' : (checkVerdict.get(bot.id) ?? 'clean'),
       reviewedSha: existing.reviewedSha,
       checkName: check.name,
       ...(existing.sourceId === undefined ? {} : { sourceId: existing.sourceId }),
