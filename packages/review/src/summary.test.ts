@@ -4,7 +4,7 @@ import type { RawPullRequest } from './build';
 import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parseSummaryBody, parseSummaryElement } from './summary-parse';
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
-import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
+import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
 import type { BotComment, DerivedBotVerdict, RawCheckRun, VerdictOptions } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
@@ -377,6 +377,58 @@ describe('bots + prompts', () => {
       'aaa',
     );
     expect(verdicts[0]?.verdict).toBe('clean');
+  });
+
+  it("reads a check's conclusion in the bot's own words", () => {
+    // Bugbot's docs: `neutral` is its default for a run that found something; `failure` only when configured to
+    // fail on unresolved findings. CodeRabbit's check is neutral on completion and says nothing about the code.
+    expect(verdictsFrom([{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'bugbot', verdict: 'findings', checkName: 'Cursor Bugbot' });
+    expect(verdictsFrom([{ name: 'CodeRabbit', status: 'completed', conclusion: 'neutral', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'coderabbit', verdict: 'clean' });
+    // Findings the bot then posted as threads carry the count.
+    const threads = verdictsFrom(
+      [{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }],
+      [
+        { author: 'cursor[bot]', body: 'Off by one.', anchor: 'discussion_r1', resolved: false },
+        { author: 'cursor[bot]', body: 'Unused import.', anchor: 'discussion_r2', resolved: true },
+      ],
+      'aaa',
+    );
+    expect(threads[0]).toMatchObject({ verdict: 'findings', count: 1 });
+    // A request the bot answered only through its check (the partial shows no start): the neutral still speaks.
+    const asked = verdictsFrom(
+      [{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }],
+      [{ author: 'octocat', body: 'bugbot run', anchor: 'issuecomment-9', createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }],
+      'aaa',
+    );
+    expect(asked[0]).toMatchObject({ id: 'bugbot', verdict: 'findings' });
+    // Every thread of a neutral run resolved: resolved, as with a green check.
+    const resolved = verdictsFrom(
+      [{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa' }],
+      [{ author: 'cursor[bot]', body: 'Unused import.', anchor: 'discussion_r2', resolved: true }],
+      'aaa',
+    );
+    expect(resolved[0]).toMatchObject({ verdict: 'findings', count: 0 });
+    // A skipped check is a run the bot did not make, in its word.
+    expect(verdictsFrom([{ name: 'CodeRabbit', status: 'completed', conclusion: 'skipped', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ verdict: 'failed', reason: 'Check skipped' });
+    // A finished check whose start is known and that no word followed: neutral is still findings.
+    const started = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const finished = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    expect(verdictsFrom([{ name: 'Cursor Bugbot', status: 'completed', conclusion: 'neutral', sha: 'aaa', startedAt: started, completedAt: finished }], [], 'aaa')[0]).toMatchObject({ verdict: 'findings', runJudged: true });
+    // The Autofix check is the same App's other job, not the review.
+    expect(verdictsFrom([{ name: 'Cursor Bugbot Autofix', status: 'completed', conclusion: 'success', sha: 'aaa' }], [], 'aaa')).toEqual([]);
+    // Two readings of the head's checks: the page's live rows win by name, the commit partial fills in the rest.
+    expect(
+      mergeCheckRuns(
+        [{ name: 'Cursor Bugbot', status: 'in_progress', conclusion: null, sha: 'aaa', startedAt: started }],
+        [
+          { name: 'cursor bugbot', status: 'completed', conclusion: 'success', sha: 'aaa' },
+          { name: 'Greptile', status: 'completed', conclusion: 'success', sha: 'aaa' },
+        ],
+      ),
+    ).toEqual([
+      { name: 'Cursor Bugbot', status: 'in_progress', conclusion: null, sha: 'aaa', startedAt: started },
+      { name: 'Greptile', status: 'completed', conclusion: 'success', sha: 'aaa' },
+    ]);
   });
 
   it('lets a green check speak for a bot whose only comment says it started', () => {

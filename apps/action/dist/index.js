@@ -19188,6 +19188,8 @@ var REVIEW_BOTS = [
     appId: 1210556,
     logins: ["cursor[bot]", "cursor-bugs[bot]", "bugbot[bot]", "cursor-com[bot]"],
     checkNames: ["Cursor Bugbot", "Bugbot"],
+    notCheckNames: ["Cursor Bugbot Autofix", "Bugbot Autofix"],
+    neutralConclusion: "findings",
     triggers: ["bugbot run", "cursor review", "@cursor review"],
     configFiles: [".cursor/BUGBOT.md"]
   },
@@ -19289,7 +19291,7 @@ function botByLogin(login) {
 }
 function botByCheckName(name) {
   const lower = name.toLowerCase();
-  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check2) => lower.includes(check2.toLowerCase()))) ?? null;
+  return REVIEW_BOTS.find((bot) => bot.checkNames.some((check2) => lower.includes(check2.toLowerCase())) && !(bot.notCheckNames ?? []).some((check2) => lower.includes(check2.toLowerCase()))) ?? null;
 }
 function looksLikeBotLogin(login) {
   return login.endsWith("[bot]") || botByLogin(login) !== null;
@@ -19603,8 +19605,10 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     if (bot === null) continue;
     const login = bot.logins[0] ?? bot.id;
     const running = check2.status !== "completed";
-    const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled";
-    const verdict = running ? "running" : failed ? "failed" : "clean";
+    const failed = check2.conclusion === "failure" || check2.conclusion === "timed_out" || check2.conclusion === "cancelled" || check2.conclusion === "action_required" || check2.conclusion === "stale";
+    const skipped = check2.conclusion === "skipped";
+    const neutralFindings = check2.conclusion === "neutral" && bot.neutralConclusion === "findings";
+    const verdict = running ? "running" : failed || skipped ? "failed" : neutralFindings ? "findings" : "clean";
     checkVerdict.set(bot.id, verdict);
     const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
     if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
@@ -19614,7 +19618,8 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       login,
       verdict,
       reviewedSha: check2.sha || headSha,
-      checkName: check2.name
+      checkName: check2.name,
+      ...skipped ? { reason: "Check skipped" } : {}
     };
     byId.set(bot.id, record3);
   }
@@ -19741,7 +19746,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const edited = existing?.sourceId === void 0 ? void 0 : editedAtOf.get(existing.sourceId);
     if (existing?.sourceId !== void 0 && (existing.verdict === "clean" || existing.verdict === "findings") && edited !== void 0 && run2.lastAt !== null && edited > run2.lastAt + RERUN_EDIT_GAP_MS) continue;
     const fromCheck = checkName === void 0 ? null : checkVerdict.get(id) ?? null;
-    if (fromCheck !== null && fromCheck !== "clean") {
+    if (fromCheck !== null && fromCheck !== "clean" && fromCheck !== "findings") {
       byId.set(id, { id, login: run2.login, verdict: fromCheck, reviewedSha, ...named, sourceId: run2.lastAnchor });
       continue;
     }
