@@ -3952,6 +3952,37 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   background: var(--geld-chat-mine-bg);
 }
 
+/* A bubble that ends (or opens) on a boxed block — a suggested change, a code block, a table, a quote, an alert, an
+ * image — gets the sides' 12px on that edge too. 6px seats a line of text, whose line box carries its own slack;
+ * against a hard edge it reads as cramped, and GitHub's own card never shows it (16px of body padding). Keyed on
+ * the block's shape, not its words: GitHub zeroes the last child's margin (`!important`), so the room comes from
+ * the bubble's padding, through `:has()` on the body's first and last child. */
+.geld-review__chat [data-geld-part='bubble']:has(:is(.comment-body, .markdown-body) > :last-child:is(.js-suggested-changes-blob, .border, pre, table, blockquote, .highlight, .snippet-clipboard-content, .markdown-alert, img, video, hr)) {
+  padding-bottom: 12px !important;
+}
+
+.geld-review__chat [data-geld-part='bubble']:has(:is(.comment-body, .markdown-body) > :first-child:is(.js-suggested-changes-blob, .border, pre, table, blockquote, .highlight, .snippet-clipboard-content, .markdown-alert, img, video, hr)) {
+  padding-top: 12px !important;
+}
+
+/* A suggested change inside a bubble keeps GitHub's box: the hunk rule for the thread's own diff (above, `.blob-wrapper`
+ * squared and underlined) does not apply to it — the box has a border of its own — and the wrapper takes the box's
+ * corner radius on the edge it ends on, so the coloured cells, which it already clips (`overflow: auto`), stop at
+ * the curve instead of poking past it. */
+.geld-review__chat [data-geld-part='bubble'] .js-suggested-changes-blob > .blob-wrapper {
+  border-bottom: 0 !important;
+}
+
+.geld-review__chat [data-geld-part='bubble'] .js-suggested-changes-blob > .blob-wrapper:last-child {
+  border-bottom-right-radius: 5px !important;
+  border-bottom-left-radius: 5px !important;
+}
+
+.geld-review__chat [data-geld-part='bubble'] .js-suggested-changes-blob > .blob-wrapper:first-child {
+  border-top-left-radius: 5px !important;
+  border-top-right-radius: 5px !important;
+}
+
 /* The comment the URL points at: GitHub rings whatever `.timeline-comment` sits inside the target with a 1px
  * accent shadow, which in the chat layout is the content box, not the message. The ring moves to the bubble. */
 .geld-review__chat :target .timeline-comment,
