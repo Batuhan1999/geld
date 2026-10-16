@@ -321,7 +321,9 @@ function watchLoans(root: Element): void {
     // now, before paint, so it never shows as GitHub's raw card and the pass below finds nothing to redress.
     // `loanWatched`, not `root`: the observer is made once and re-pointed at each mount's root, so the callback's own
     // `root` is the first mount's, long detached.
-    if (loanWatched !== null && records.some((record) => record.type === 'childList' && record.addedNodes.length > 0 && record.target instanceof Element && record.target.closest(LOAN_VIEWS) !== null)) dressArrivals(loanWatched);
+    // Not in a hidden tab: nobody sees the card, and the pass deferred until the tab shows (`reapplySoon`) redresses
+    // the chat then (`chatNeedsRedress`), as before.
+    if (!document.hidden && loanWatched !== null && records.some((record) => record.type === 'childList' && record.addedNodes.length > 0 && record.target instanceof Element && record.target.closest(LOAN_VIEWS) !== null)) dressArrivals(loanWatched);
     // A swap GitHub made of a loaned node *is* the thread changing state (the classic Resolve answers with the
     // whole thread, resolved, in a fresh `<turbo-frame>`). Adoption hands the loan token to the newcomer, and
     // `touchesThreadState` reads a token as the panel's own move — so the adoption itself has to say "changed";
