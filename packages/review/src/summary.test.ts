@@ -4,7 +4,7 @@ import type { RawPullRequest } from './build';
 import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parseSummaryBody, parseSummaryElement } from './summary-parse';
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
-import { botByTrigger, botsTriggeredBy, botTitle, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
+import { botByTrigger, botsTriggeredBy, botTitle, isReviewShaped, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
 import type { BotComment, DerivedBotVerdict, RawCheckRun, VerdictOptions } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
@@ -429,6 +429,90 @@ describe('bots + prompts', () => {
       { name: 'Cursor Bugbot', status: 'in_progress', conclusion: null, sha: 'aaa', startedAt: started },
       { name: 'Greptile', status: 'completed', conclusion: 'success', sha: 'aaa' },
     ]);
+  });
+
+  it('reads the bots added in Oct 2026 in their own words (public pull requests, survey)', () => {
+    // Claude Code Review: summaries, the P1/P2 count line, status checklists, errors and skips.
+    expect(parseBotBody('I reviewed this PR and found no bugs (no blocking findings). The change alters when consolidation merges rows, so someone should still check the tradeoff.', 'claude').clean).toBe(true);
+    expect(parseBotBody('**Nothing blocking.** The comments below are optional suggestions. There is no need to push a fix for them before merging.', 'claude').clean).toBe(true);
+    expect(parseBotBody('## Code review\nNo issues found. Checked for bugs and CLAUDE.md compliance at f60572f.', 'claude').clean).toBe(true);
+    expect(parseBotBody("**Claude finished @x's task in 9m 35s** —— [View job](https://github.com/o/r/actions/runs/1)\n\n---\n### Review complete — approved (0 P1, 0 P2, 2 P3)", 'claude')).toMatchObject({ clean: true, count: 0 });
+    expect(parseBotBody("**Claude finished @x's task in 8m 41s** —— [View job](https://github.com/o/r/actions/runs/1)\n\n---\n### Review complete — changes requested (0 P1, 3 P2, 3 P3)", 'claude')).toMatchObject({ clean: false, count: 3 });
+    expect(parseBotBody('Has P1/P2 findings, changes requested: 1 P1, 1 P2, 2 P3. P1 — `_ensure` attaches the wrong id.', 'claude').count).toBe(2);
+    expect(isStatusLineComment('Reviewing PR #396 <img src="x" width="14px">\n- [x] Gather context\n- [ ] Read AGENTS.md\n- [ ] Review diff (oidata, likelihood, plotting, docs, tests)\n- [ ] Post inline findings')).toBe(true);
+    expect(refusalReason('**Claude encountered an error after 48s** —— [View job](https://github.com/o/r/actions/runs/1)\n\n---\n### Review in progress <img src="x">\n- [x] Read repo conventions\n- [ ] Review the diff and all the files it touches, one by one, with the surrounding code in view, then write the findings up')).toBe('Claude encountered an error after 48s');
+    expect(refusalReason('## Claude Code Review\nThis pull request is from a fork — automated review is disabled. A repository maintainer can comment `@claude review` to run a one-time review.')).toBe('This pull request is from a fork — automated review is disabled');
+    expect(refusalReason("⚠️ **Code review skipped:** your organization has reached its API usage limit, so Code Review can't run right now. An organization admin can review the limit in your organization's usage and billing settings.")).toBe('⚠️ Code review skipped: your organization has reached its API usage limit, so Code Review can\'t run right now');
+    expect(botsTriggeredBy('@claude review always').map((bot) => bot.id)).toEqual(['claude']);
+    // cubic: the bold count line, existing + new, "all addressed".
+    expect(parseBotBody('**1 existing issue remains and 3 new issues found** across 26 files', 'cubic')).toMatchObject({ clean: false, count: 4 });
+    expect(parseBotBody('**1 existing issue remains and no new issues found** across 1 file', 'cubic')).toMatchObject({ clean: false, count: 1 });
+    expect(parseBotBody('**No issues found** across 2 files', 'cubic')).toMatchObject({ clean: true, count: 0 });
+    expect(parseBotBody('**All reported issues were addressed** across 3 files', 'cubic')).toMatchObject({ clean: true, count: 0 });
+    expect(parseBotBody('**0 issues found across 3 files (changes from recent commits).**\n\nConfidence score: **5/5**', 'cubic')).toMatchObject({ clean: true, count: 0, score: 5 });
+    expect(parseBotBody('**2 issues found** across 9 files\n\nConfidence score: **3/5**', 'cubic')).toMatchObject({ clean: false, count: 2, score: 3 });
+    expect(botsTriggeredBy('@cubic-dev-ai review this PR').map((bot) => bot.id)).toEqual(['cubic']);
+    // Sourcery: the assessment, the budget and size refusals, the guide (not a verdict).
+    expect(parseBotBody("Hey - I've reviewed your changes and they look great!\n\n### Sourcery assessment\n\n**Approved.**", 'sourcery').clean).toBe(true);
+    expect(parseBotBody("Hey - I've reviewed your changes and they look great!\n\n### Sourcery assessment\n\n**Needs a human reviewer.** When lane-3 credits run out the narrator falls back silently.", 'sourcery').clean).toBe(false);
+    expect(parseBotBody("Hey - I've found 2 issues\n\n<details><summary>Prompt for AI Agents</summary>…</details>", 'sourcery').count).toBe(2);
+    expect(refusalReason("Sorry @arthrod, you've used your own review budget of 250,000 diff characters for the last 7 days. You can request another review in 3 days and 3 hours by commenting `@sourcery-ai review`.")).toBe("Sorry @arthrod, you've used your own review budget of 250,000 diff characters for the last 7 days");
+    expect(refusalReason('Sorry @leynos, your pull request is larger than the review limit of 150,000 diff characters')).toBe('Sorry @leynos, your pull request is larger than the review limit of 150,000 diff characters');
+    expect(parseBotBody("## Reviewer's Guide\nThis PR preserves header and footer alignment across round trips.", 'sourcery')).toMatchObject({ clean: false, count: null, score: null });
+    // Qodo: the pills, the busy line, the billing pause.
+    expect(parseBotBody('<h3>Code Review by Qodo</h3>\n\n<code>🐞 Bugs (0)</code> <code>📘 Rule violations (0)</code> <code>📎 Requirement gaps (0)</code> <code>🔗 Cross-repo conflicts (0)</code> <code>📜 Skill insights (0)</code>', 'qodo')).toMatchObject({ clean: true, count: 0, score: null });
+    expect(parseBotBody('<h3>Code Review by Qodo</h3>\n\n<code>🐞 Bugs (2)</code> <code>📘 Rule violations (1)</code> <code>📎 Requirement gaps (0)</code>', 'qodo')).toMatchObject({ clean: false, count: 3 });
+    expect(isStatusLineComment("<h3>Qodo is busy working</h3>\nCheck back in a few minutes. Qodo's code review agents are on it.")).toBe(true);
+    expect(refusalReason('**ⓘ Qodo reviews are paused because your trial has ended.** Ask your workspace admin to add credits to resume reviews. [Manage billing](https://app.qodo.ai/account/billing)')).toBe('ⓘ Qodo reviews are paused because your trial has ended');
+    expect(botsTriggeredBy('/agentic_review').map((bot) => bot.id)).toEqual(['qodo']);
+    // Amazon Q Developer: the summary's closing sentence.
+    expect(parseBotBody('## Review Summary\nThis PR removes a single committed mock file. **No blocking defects were found in the changes introduced by this PR.**', 'amazon-q').clean).toBe(true);
+    expect(parseBotBody('## Review Summary\nNo logic errors, security vulnerabilities, crashes, or behavioral regressions were found in the changed code. The PR is ready to merge.', 'amazon-q').clean).toBe(true);
+    expect(parseBotBody('## Review Summary\nThis PR adds a guard, which is the right intent. However, the implementation has a gap that is not ready to merge.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody('## Review Summary\nThis PR is not yet ready to merge: the handler swallows the error.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody("## Review Summary\nThe migration isn't ready to merge until the index exists.", 'amazon-q').clean).toBe(false);
+    expect(botsTriggeredBy('/q review').map((bot) => bot.id)).toEqual(['amazon-q']);
+    // Ellipsis, Macroscope, Korbit, Entelligence.
+    expect(parseBotBody('> [!IMPORTANT]\n> **Looks good to me! :+1:**\n> <details><summary>Reviewed everything up to d514768 in 10 seconds.</summary></details>', 'ellipsis').clean).toBe(true);
+    expect(parseBotBody('#### Approvability\n**Verdict:** Approved at `2a60be7`\n\nMacroscope\'s review found this PR approvable — a narrowly scoped fix.', 'macroscope').clean).toBe(true);
+    expect(parseBotBody('#### Approvability\n**Verdict:** Would Approve\n\nMacroscope\'s review found this PR approvable.', 'macroscope').clean).toBe(true);
+    expect(parseBotBody('#### Approvability\n**Verdict:** Needs Human Approval\n\nMacroscope\'s review found this PR requires human approval — an unresolved finding.', 'macroscope').clean).toBe(false);
+    expect(refusalReason('**Macroscope skipped reviewing this pull request.** Per-review cost limit exceeded (workspace setting). This review would cost an estimated $25.00, which exceeds your per-review limit of $10.00. An admin can raise the limit in workspace settings, or comment `@macroscope-app review` to run it anyway at the estimated cost shown above, which is billed to the workspace.')).toBe('Macroscope skipped reviewing this pull request');
+    const korbit = '### Review by Korbit AI\n###### Korbit automatically attempts to detect when you fix issues in new commits.\n| Category | Issue | Status |\n|---|---|---|\n| <sub>![Security](https://img.shields.io/badge/Security-e11d48)</sub> | Overly broad exception handler ▹ [view](https://github.com/o/r/pull/1#discussion_r1) | ✅ Fix detected |\n| <sub>![Functionality](https://img.shields.io/badge/Functionality-0284c7)</sub> | Downgrade fails with duplicate tag names ▹ [view](https://github.com/o/r/pull/1#discussion_r2) ||';
+    expect(parseBotBody(korbit, 'korbit')).toMatchObject({ clean: false, count: 1 });
+    // ...and as the page reads the table (a row per line, the cells' words run together, the badge image silent).
+    const korbitRendered = 'Review by Korbit AI\nKorbit automatically attempts to detect when you fix issues in new commits.\n\nCategory Issue Status\n\nOverly broad exception handler in database driver detection ▹ view ✅ Fix detected\n\nDowngrade fails with duplicate tag names ▹ view\n\nFiles scanned';
+    expect(parseBotBody(korbitRendered, 'korbit')).toMatchObject({ clean: false, count: 1 });
+    expect(parseBotBody(korbitRendered.replace('Downgrade fails with duplicate tag names ▹ view\n\n', ''), 'korbit')).toMatchObject({ clean: true, count: 0 });
+    expect(refusalReason("By default, I don't review pull requests opened by bots. If you would like me to review this pull request anyway, you can request a review via the `/korbit-review` command.")).toBe("By default, I don't review pull requests opened by bots");
+    const scorecard = (issues: string) => `## EntelligenceAI PR Summary\nAdds a feature.\n\n---\n\n## Review Scorecard\n\n| Dimension | Rating | Basis |\n|---|---|---|\n| **Code Quality** | ●●●○○ **3/5** — Needs Work | 1 significant finding(s) |\n| **Merge Confidence** | ●●○○○ **2/5** — Changes Needed | code quality 3/5 × High blast radius |\n\n${issues}`;
+    expect(parseBotBody(scorecard('**Issues found:**\n- **Significant** `docs/user-api.md` — Keep guidance on the supported surface\n- **Unresolved** `.github/workflows/ci.yml` — Make the checks required *(unresolved from an earlier review)*\n- *…plus 2 more, posted as inline comment(s)*\n\nFix before merge.'), 'entelligence')).toMatchObject({ clean: false, count: 4, score: 2 });
+    expect(parseBotBody(scorecard('Ready to merge; code quality rated Excellent (5/5): the review found nothing to flag.\n\n**Key Findings:**\n- No critical or significant issues found'), 'entelligence')).toMatchObject({ clean: true, count: 0, score: 2 });
+    // ...and as the page reads it: list items on their own lines with blank lines between, no bullets.
+    expect(parseBotBody(scorecard('**Issues found:**\n\n**Significant** `docs/user-api.md` — Keep guidance on the supported surface\n\n**Unresolved** `.github/workflows/ci.yml` — Make the checks required *(unresolved from an earlier review)*\n\n*…plus 2 more, posted as inline comment(s)*\n\nFix before merge.'), 'entelligence')).toMatchObject({ clean: false, count: 4, score: 2 });
+    // A stated verdict with no count or score is still a review: a conversational bot's "needs a human" is not chat.
+    const human = parseBotBody("Hey - I've reviewed your changes and they look great!\n\n### Sourcery assessment\n\n**Needs a human reviewer.**", 'sourcery');
+    expect(human.verdict).toBe('needs-human');
+    expect(isReviewShaped(human)).toBe(true);
+    expect(isReviewShaped(parseBotBody("## Reviewer's Guide\nThis PR preserves alignment.", 'sourcery'))).toBe(false);
+    expect(verdictsFrom([], [{ author: 'macroscopeapp[bot]', body: '#### Approvability\n**Verdict:** Needs Human Approval\n\nMacroscope\'s review found this PR requires human approval.', anchor: 'issuecomment-3' }], 'aaa')[0]).toMatchObject({ id: 'macroscope', verdict: 'findings', sourceId: 'issuecomment-3' });
+    expect(refusalReason('**Automatic Review Skipped**\n\nThis PR changes **132 files**, above the **100-file** limit for automatic reviews. Trigger a full review by commenting:\n```\n@entelligence review\n```')).toBe('This PR changes 132 files, above the 100-file limit for automatic reviews');
+    expect(isStatusLineComment('Starting fresh pr review. This may take a few minutes')).toBe(true);
+    // CodeRabbit's pass over this block: words that happen to be a bot's, a budget, a merge condition, a negation.
+    expect(refusalReason('The cubic interpolation worker cannot run on the GPU path. Found 2 issues.')).toBeNull();
+    expect(refusalReason('The import job exhausted its daily budget before the last page. Found 2 issues.')).toBeNull();
+    expect(isStatusLineComment('Reviewing PR #396 revealed 2 bugs in the retry loop.')).toBe(false);
+    // ...and the checklist as the page reads it: no checkbox marks, one item per line, however long it runs.
+    expect(isStatusLineComment(`Reviewing PR #396\n\nGather context\n\nRead AGENTS.md\n\nReview diff (oidata, likelihood, plotting, docs, tests)\n\nCheck the fixtures under tests/ against the new loader and the two notebooks that import it\n\nRun the unit tests and the notebook smoke test\n\nPost inline findings and submit the verdict`)).toBe(true);
+    expect(parseBotBody('## Review Summary\nThe PR is ready to merge after the failing check is fixed.', 'amazon-q').clean).toBe(false);
+    expect(parseBotBody('## Review Summary\nThe PR is ready to merge once the snapshot is updated.', 'amazon-q').clean).toBe(false);
+    const approvedNoHuman = parseBotBody('#### Approvability\n**Verdict:** Approved at `2a60be7`\n\nThis does not need human approval: the change is a test-only fix.', 'macroscope');
+    expect(approvedNoHuman.clean).toBe(true);
+    expect(approvedNoHuman.verdict).toBeUndefined();
+    expect(parseBotBody('They look great, but this not only needs human approval; it also needs a security signoff.', 'sourcery')).toMatchObject({ clean: false, verdict: 'needs-human' });
+    // The Autofix sibling aside, each bot's check is its own.
+    expect(verdictsFrom([{ name: 'Claude Code Review', status: 'completed', conclusion: 'neutral', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'claude', verdict: 'clean' });
+    expect(verdictsFrom([{ name: 'Sourcery review', status: 'completed', conclusion: 'skipped', sha: 'aaa' }], [], 'aaa')[0]).toMatchObject({ id: 'sourcery', verdict: 'failed', reason: 'Check skipped' });
   });
 
   it('lets a green check speak for a bot whose only comment says it started', () => {

@@ -19277,6 +19277,140 @@ var REVIEW_BOTS = [
     triggers: ["/replicas run code-review", "@tryreplicas review", "@tryreplicas", "@replicas"],
     configFiles: [],
     conversational: true
+  },
+  {
+    // Claude Code Review (Anthropic's managed GitHub App, `claude[bot]`): findings as inline comments ranked by
+    // severity, a summary review ("I reviewed this PR and found no bugs (no blocking findings)", "Nothing blocking.",
+    // "## Code review / No issues found") and a check run named "Claude Code Review" that never concludes failure.
+    // `@claude review` starts one (`always` subscribes the PR, `once` does not); Claude reacts 👀 when it takes the
+    // comment. The same login is Claude Code's GitHub Action and the "PR Steward", which narrate ("Claude finished
+    // @x's task in 45s", "Picking this one up…"), so only a review-shaped comment votes. REVIEW.md holds the review
+    // rules (CLAUDE.md is read too, but every Claude Code user has one). Docs read Oct 2026 (code.claude.com/docs/en/code-review).
+    id: "claude",
+    title: "Claude Code Review",
+    appId: 1236702,
+    logins: ["claude[bot]"],
+    checkNames: ["Claude Code Review"],
+    triggers: ["@claude review", "@claude review always", "@claude review once"],
+    // REVIEW.md only: CLAUDE.md is every Claude Code user's file and says nothing about Code Review being on.
+    configFiles: ["REVIEW.md"],
+    conversational: true,
+    acknowledges: "reaction"
+  },
+  {
+    // cubic (cubic.dev, `cubic-dev-ai[bot]`): a review per push with a bold count line — "**N issues found** across
+    // M files", "**No issues found**", "**All reported issues were addressed**", "**1 existing issue remains and 3
+    // new issues found**" — sometimes with a "Confidence score: **N/5**". `@cubic-dev-ai review this PR` (or the bare
+    // mention) runs a full review, `@cubic-dev-ai incremental review` the changes since the last; it reacts 👀 to
+    // the comment. `cubic.yaml` at the root configures it; the review shows as a check run that can be cancelled
+    // from the Checks UI. Docs read Oct 2026 (docs.cubic.dev).
+    id: "cubic",
+    title: "cubic",
+    appId: 1082092,
+    logins: ["cubic-dev-ai[bot]"],
+    checkNames: ["cubic"],
+    triggers: ["@cubic-dev-ai review this PR", "@cubic-dev-ai review", "@cubic-dev-ai incremental review", "@cubic-dev-ai", "@cubic review"],
+    configFiles: ["cubic.yaml"],
+    acknowledges: "reaction",
+    conversational: true
+  },
+  {
+    // Sourcery (`sourcery-ai[bot]`): a "Reviewer's Guide" comment maps the change, then a review — "Hey - I've
+    // reviewed your changes and they look great!" with "### Sourcery assessment **Approved.**", or "Hey - I've found
+    // N issues". A status check named "Sourcery review" reports in progress / success / failure (blocking security
+    // findings) / skipped (rate limit, the five-re-review cap). Budget refusals: "Sorry @x, you've used your own
+    // review budget of 250,000 diff characters for the last 7 days", "your pull request is larger than the review
+    // limit". `@sourcery-ai review` re-reviews from scratch. Docs read Oct 2026 (docs.sourcery.ai/reviews).
+    id: "sourcery",
+    title: "Sourcery",
+    appId: 48477,
+    logins: ["sourcery-ai[bot]"],
+    checkNames: ["Sourcery review", "Sourcery"],
+    triggers: ["@sourcery-ai review", "@sourceryai review"],
+    configFiles: [".sourcery.yaml"],
+    conversational: true
+  },
+  {
+    // Qodo (qodo.ai, `qodo-code-review[bot]`; Qodo Merge / PR-Agent before it): a "PR Summary by Qodo" and a "Code
+    // Review by Qodo" headed by counts in code pills ("🐞 Bugs (0)", "📘 Rule violations (0)" …), a "Qodo is busy
+    // working" status line while it runs, and billing notices ("Qodo reviews are paused because your trial has
+    // ended"). `/agentic_review` runs a review (`/review` and `/improve` are the deprecated PR-Agent forms);
+    // `.pr_agent.toml` configures it. Docs read Oct 2026 (docs.qodo.ai/code-review).
+    id: "qodo",
+    title: "Qodo",
+    appId: 484649,
+    logins: ["qodo-code-review[bot]", "qodo-merge-pro[bot]", "codiumai-pr-agent-pro[bot]", "qodo-merge-for-open-source[bot]"],
+    checkNames: ["Qodo"],
+    triggers: ["/agentic_review", "/review", "@qodo review"],
+    configFiles: [".pr_agent.toml"],
+    conversational: true
+  },
+  {
+    // Amazon Q Developer (`amazon-q-developer[bot]`): a review headed "## Review Summary" with the findings as
+    // threads; "No blocking defects were found", "No blocking issues found", "No logic errors, security
+    // vulnerabilities, crashes, or behavioral regressions were found" when clean. Reviews run on open/reopen only;
+    // `/q review` in a new comment runs one again, `/q <question>` asks. Docs read Oct 2026 (docs.aws.amazon.com/amazonq).
+    id: "amazon-q",
+    title: "Amazon Q Developer",
+    appId: 1220912,
+    logins: ["amazon-q-developer[bot]"],
+    checkNames: ["Amazon Q Developer"],
+    triggers: ["/q review"],
+    configFiles: []
+  },
+  {
+    // Ellipsis (ellipsis.dev, `ellipsis-dev[bot]`): one review per admitted push combining its reviewers' findings;
+    // an important-alert "**Looks good to me! :+1:**" with "Reviewed everything up to <sha>" when clean, a request
+    // for changes with the comments otherwise. Configured by `.ellipsis/code-review.yaml`; reviews are push-driven
+    // (no comment command documented). Docs read Oct 2026 (ellipsis.dev/docs/code-review).
+    id: "ellipsis",
+    title: "Ellipsis",
+    appId: 64358,
+    logins: ["ellipsis-dev[bot]"],
+    checkNames: ["Ellipsis"],
+    triggers: ["@ellipsis-dev review"],
+    configFiles: [".ellipsis/code-review.yaml", "ellipsis.yaml"]
+  },
+  {
+    // Macroscope (macroscope.com, `macroscopeapp[bot]`): findings as comments, then an "#### Approvability" comment
+    // with "**Verdict:** Approved at `sha`" / "Would Approve" / "Needs Human Approval"; "Macroscope skipped reviewing
+    // this pull request. Per-review cost limit exceeded" when it will not run. `@macroscope-app review` starts one.
+    // Docs read Oct 2026 (docs.macroscope.com).
+    id: "macroscope",
+    title: "Macroscope",
+    appId: 900172,
+    logins: ["macroscopeapp[bot]", "macroscope-app[bot]"],
+    checkNames: ["Macroscope"],
+    triggers: ["@macroscope-app review", "@macroscopeapp review"],
+    configFiles: [],
+    conversational: true
+  },
+  {
+    // Korbit (korbit.ai, `korbit-ai[bot]`): a review headed "### Review by Korbit AI" with a table of issues and
+    // their fix status ("✅ Fix detected"); "By default, I don't review pull requests opened by bots" when it skips.
+    // `/korbit-review` requests one. Seen on apache/superset, Oct 2026.
+    id: "korbit",
+    title: "Korbit",
+    appId: 322216,
+    logins: ["korbit-ai[bot]"],
+    checkNames: ["Korbit"],
+    triggers: ["/korbit-review"],
+    configFiles: [".korbit/"]
+  },
+  {
+    // Entelligence (entelligence.ai, `entelligence-ai-pr-reviews[bot]`): an "## EntelligenceAI PR Summary", a
+    // "## Walkthrough", findings as threads plus "## Findings outside the diff (N)" comments, and "Starting fresh pr
+    // review. This may take a few minutes" while it runs; "**Automatic Review Skipped** This PR changes N files,
+    // above the 100-file limit" when it will not. `@entelligence review` runs one; `@entelligence help` lists the
+    // commands. Seen Oct 2026.
+    id: "entelligence",
+    title: "Entelligence",
+    appId: 932812,
+    logins: ["entelligence-ai-pr-reviews[bot]", "entelligence-ai[bot]"],
+    checkNames: ["Entelligence"],
+    triggers: ["@entelligence review"],
+    configFiles: [],
+    conversational: true
   }
 ];
 var LOGIN_INDEX = /* @__PURE__ */ new Map();
@@ -19309,12 +19443,66 @@ function botTitle(id, login) {
   if (id.startsWith("custom:")) return login.replace(/\[bot\]$/i, "");
   return login;
 }
+function isReviewShaped(parsed) {
+  return parsed.count !== null || parsed.score !== null || parsed.clean || parsed.verdict !== void 0;
+}
+function countShapedBy(botId, text) {
+  switch (botId) {
+    case "claude": {
+      const match = /(\d+)\s*P1,\s*(\d+)\s*P2/i.exec(text);
+      return match?.[1] !== void 0 && match[2] !== void 0 ? Number.parseInt(match[1], 10) + Number.parseInt(match[2], 10) : null;
+    }
+    case "cubic": {
+      const existing = /(\d+)\s+existing\s+issues?\s+remains?/i.exec(text);
+      const found = /(\d+)\s+(?:new\s+)?issues?\s+found/i.exec(text);
+      if (existing === null && found === null) return /\bno (?:new )?issues found\b|\ball reported issues were addressed\b/i.test(text) ? 0 : null;
+      return (existing?.[1] === void 0 ? 0 : Number.parseInt(existing[1], 10)) + (found?.[1] === void 0 ? 0 : Number.parseInt(found[1], 10));
+    }
+    case "qodo": {
+      if (!/code review by qodo/i.test(text)) return null;
+      let sum = 0;
+      let any2 = false;
+      for (const match of text.matchAll(/(?:bugs|rule violations|requirement gaps|cross-repo conflicts|skill insights)\s*\((\d+)\)/gi)) {
+        sum += Number.parseInt(match[1] ?? "0", 10);
+        any2 = true;
+      }
+      return any2 ? sum : null;
+    }
+    case "korbit": {
+      if (!/review by korbit/i.test(text)) return null;
+      const rows = text.split("\n").filter((line) => /\u25b9\s*\[?view\b/i.test(line));
+      return rows.filter((line) => !/fix detected/i.test(line)).length;
+    }
+    case "entelligence": {
+      if (!/review scorecard/i.test(text)) return null;
+      const lines2 = text.split("\n");
+      const start = lines2.findIndex((line) => /^\s*(?:[-*]\s+)?\*\*Issues found:?\*\*:?\s*$/i.test(line));
+      if (start < 0) return /\bnothing to flag\b|\bno (?:critical or significant |significant )?issues found\b/i.test(text) ? 0 : null;
+      let count = 0;
+      for (const line of lines2.slice(start + 1)) {
+        if (line.trim() === "") continue;
+        if (/^\s*(?:[-*]\s+)?\*\*[^*\n]+\*\*\s+\S/.test(line)) {
+          count += 1;
+          continue;
+        }
+        const more = /plus (\d+) more/i.exec(line);
+        if (more?.[1] !== void 0) count += Number.parseInt(more[1], 10);
+        break;
+      }
+      return count;
+    }
+    default:
+      return null;
+  }
+}
 function parseBotBody(body, botId) {
   const text = body.replace(/\r\n/g, "\n").replace(/<!--[\s\S]*?-->/g, "").trim();
-  const scoreMatch = /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
+  const scoreMatch = botId === "qodo" ? null : (botId === "entelligence" ? /merge confidence\W+(?:[\u25cf\u25cb\s]*)\**(\d+(?:\.\d+)?)\s*\/\s*5\b/i.exec(text) : null) ?? /(\d+(?:\.\d+)?)\s*\/\s*5\b/.exec(text);
   const score = scoreMatch?.[1] !== void 0 ? Number.parseFloat(scoreMatch[1]) : null;
-  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text);
+  const countMatch = botId === "greptile" ? /(?:found|reported)\s+(\d+)\s+(?:issue|finding|comment)/i.exec(text) : /\bactionable comments posted:\s*(\d+)/i.exec(text) ?? /(\d+)\s+(?:(?:potential|possible|new|actionable|likely|minor|major|critical|significant|remaining|open|existing)\s+){0,2}(?:issue|finding|bug|problem)s?\b/i.exec(text);
   let count = countMatch?.[1] !== void 0 ? Number.parseInt(countMatch[1], 10) : null;
+  const shaped = countShapedBy(botId, text);
+  if (shaped !== null) count = shaped;
   if (botId === "greptile" && count === null && /\bconfidence score\b/i.test(text)) {
     const plain = text.replace(/<[^>]+>/g, "");
     const section = /^\s*(?:#{1,6}\s*)?Findings\s*$\n([\s\S]*?)(?=^\s*(?:#{1,6}\s*)?(?:Summary|Reviews \(\d+\))\b|(?![\s\S]))/im.exec(plain);
@@ -19324,11 +19512,14 @@ function parseBotBody(body, botId) {
       if (items > 0) count = items;
     }
   }
-  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\bverdict:\s*approved?\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
-  const clean = /\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking))* (?:issues|bugs|findings|problems)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found)\b/i.test(text) || approved || count === 0 && (score === null || botId === "greptile");
+  const approved = (count === null || count === 0) && (/\b(?:didn.t|did not|couldn.t|could not) find any(?: \w+)? (?:issues|bugs|problems|findings)\b/i.test(text) || /\b(?:verdict|assessment)\W{0,6}(?:would\s+)?approved?\b/i.test(text) || /\breview complete\s*[\u2014\u2013-]+\s*approved\b/i.test(text) || /^\s*(?:[#>*_\s]*)approved[*_]*\s*(?:[.!:;\u2014\u2013-]|$)/i.test(text));
+  const needsHuman = /\bneeds? (?:a )?human (?:review(?:er)?|approval)\b/i.test(text.replace(/\b(?:not|no|never|without|doesn.t|does not|don.t|do not|didn.t|did not)\b(?!\s+(?:only|just|merely)\b)(?:\s+\w+){0,2}\s+needs? (?:a )?human (?:review(?:er)?|approval)\b/gi, ""));
+  const readyToMerge = /\bready to merge\b/i.test(text) && !/\b(?:not|isn.t|aren.t|never|before|until|far from|nowhere near)\b(?:\s+\w+){0,3}\s+ready to merge\b/i.test(text) && // ...nor with a condition after it ("ready to merge after the failing check is fixed", "once …", "if …").
+  !/\bready to merge\s+(?:after|once|when|if|provided|pending|following|as soon as|but|except|unless)\b/i.test(text);
+  const clean = !needsHuman && (count === null || count === 0) && (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) || readyToMerge || approved || count === 0 && (score === null || botId === "greptile" || shaped !== null));
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity };
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...needsHuman ? { verdict: "needs-human" } : {} };
 }
 function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
@@ -19344,17 +19535,24 @@ function refusalReason(body) {
   const text = blocks.filter((block) => block !== "").map((block) => /[.!?;,]$/.test(block) ? block : `${block.replace(/:$/, "")}.`).join(" ").trim();
   if (text === "") return null;
   const heading = untagged.split("\n").map((line) => line.replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim()).find((line) => line !== "");
+  if (heading !== void 0 && /^[A-Z][\w.-]*(?:\[bot\])?\s+(?:skipped reviewing\b|encountered an error\b)/.test(heading)) {
+    const lower = heading.toLowerCase();
+    if (REVIEW_BOTS.some((bot) => lower.startsWith(bot.title.toLowerCase()) || bot.logins.some((login) => lower.startsWith(login.replace(/\[bot\]$/, "").toLowerCase())))) {
+      const first2 = heading.replace(/\s*[\u2014\u2013-]{2,}.*$/, "").split(/(?<=[.!?])\s+/)[0] ?? heading;
+      return first2.replace(/[.!?]\s*$/, "");
+    }
+  }
   if (heading !== void 0 && heading.length <= 120 && /\b(?:couldn.t run|could not run|cannot run|can.t run|needs? [^.]{0,60}\benabled|usage limits? (?:(?:has|have|was|were) been )?reached|quota (?:limit )?reached|out of credits)\b/i.test(heading)) {
     const lower = heading.toLowerCase();
-    const named = REVIEW_BOTS.some((bot) => lower.includes(bot.title.toLowerCase()) || bot.logins.some((login) => lower.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+    const named = botNamedIn(lower);
     const runFailure = /\b(?:couldn.t run|could not run|cannot run|can.t run)\b/i.test(heading);
     const aboutBot = named || !runFailure && /\b(?:usage|credits?|quota|billing|limits?)\b/i.test(heading);
     if (aboutBot) return heading.replace(/[.!?]\s*$/, "");
   }
-  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|⚙)|$)/i.exec(text);
+  const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?(?:automatic\s+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|trigger a|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== void 0 && skipNotice[1].trim() !== "") return skipNotice[1].trim();
   if (text.length > 400) return null;
-  const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|pull request|pr|run|analysis|scan)\b)/i.test(text);
+  const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|reviewing|pull request|pr|run|analysis|scan)\b)/i.test(text) || /^[A-Z][\w.-]*(?:\[bot\])?\s+skipped\s+reviewing\b/i.test(text) || /^[A-Z][\w.-]*(?:\[bot\])?\s+encountered an error\b/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
   const bare = sentences[0] !== void 0 && isBareRefusal(sentences[0]) && (sentences.length === 1 || isBareAdvice(body, text)) ? sentences[0] : void 0;
   const first = skipped ? sentences[0] : bare ?? sentences.find(isRefusalSentence);
@@ -19549,7 +19747,9 @@ var BARE_REFUSAL_WORDS = /* @__PURE__ */ new Set([
 var REFUSAL_PHRASE = new RegExp(
   [
     /\b(?:is|are|was|has been|have been)\s+(?:currently\s+)?(?:disabled|not enabled|not installed|not configured|not set up|not authori[sz]ed|unavailable|turned off|paused)\b/,
-    /\b(?:no|out of|insufficient|exceeded|reached)\s+(?:your\s+)?(?:\w+\s+)?(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:no|out of|insufficient|exceeded|reached|used(?: up)?|exhausted)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:credits?|quota|budget|limit|allowance)\b/,
+    /\b(?:larger|bigger|longer)\s+than\s+(?:the|our|your)\s+(?:\w+\s+)?limit\b/,
+    /\b(?:don.t|do not|won.t|will not)\s+review\s+(?:pull requests|prs|changes)\b/,
     /\b(?:usage|rate|quota|spend(?:ing)?)\s+limits?\s+(?:(?:(?:has|have)\s+been|was|were)\s+)?(?:reached|exceeded|hit)\b/,
     /\b(?:has|have|had)\s+(?:reached|exceeded|hit)\s+(?:its|their|the|a|your)\s+(?:\w+\s+)?(?:usage|rate|quota|spend(?:ing)?)\s+limits?\b/,
     /\b(?:subscription|plan|trial|billing)\b[^.!?]*\b(?:expired|required|needed|inactive|ended|lapsed|upgrade)\b/,
@@ -19562,14 +19762,19 @@ var REFUSAL_SUBJECT = new RegExp(
   [
     /\b(?:bot|reviewer|reviewing|code reviews?|analysis|scan)\b/,
     /\b(?:this|the|its|my|your|an?|automated|ai|pr|pull request)\s+reviews?\b/,
-    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t)\s+review\b/,
+    /\b(?:to|cannot|can.t|could not|couldn.t|unable to|failed to|will not|won.t|don.t|do not)\s+review\b/,
     /\b(?:this|the|your)\s+(?:repo(?:sitory)?|org(?:anization)?|account|project|workspace|team|installation|app|plan|subscription|trial)\b/,
     /\byou(?:r)?\b/,
     /\[bot\]/,
-    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [bot.title, ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
+    // A bot's title or login stem — except a title that is a plain lowercase word ("cubic"): "the cubic interpolation
+    // worker cannot run" is about the code; the login stem (`cubic-dev-ai`) still names the bot.
+    new RegExp(`\\b(?:${REVIEW_BOTS.flatMap((bot) => [.../^[a-z]+$/.test(bot.title) ? [] : [bot.title], ...bot.logins.map((login) => login.replace(/\[bot\]$/i, ""))]).map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`)
   ].map((part) => part.source).join("|"),
   "i"
 );
+function botNamedIn(text) {
+  return REVIEW_BOTS.some((bot) => !/^[a-z]+$/.test(bot.title) && text.includes(bot.title.toLowerCase()) || bot.logins.some((login) => text.includes(login.replace(/\[bot\]$/, "").toLowerCase())));
+}
 var REFUSAL_MONEY = /\b(?:credits?|quota|billing|seats?)\b/i;
 function withOptionalCount(base, parsed) {
   return {
@@ -19585,11 +19790,16 @@ function reviewBotIdFor(login, extraLogins) {
   return extraLogins.some((entry2) => entry2.toLowerCase() === login.toLowerCase()) ? `custom:${login.toLowerCase()}` : null;
 }
 function isStatusLineComment(body) {
-  const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ");
+  const firstLine = untagged.split("\n").find((line) => line.trim() !== "") ?? "";
+  if (/^\s*reviewing (?:pr|pull request) #?\d+\s*$/i.test(firstLine.replace(/[`*_>~#]/g, " ").replace(/\s+/g, " "))) return true;
+  const text = untagged.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
   if (text === "") return false;
   const sentences = text.split(/(?<=[.!…])\s+/).filter((part) => part !== "");
+  if (/^(?:[\w.-]+\s+)?is busy working\b/i.test(text)) return true;
   if (text.length > 240 || sentences.length > 2) return /^(?:\[!note\]\s*|note\s+)?currently processing (?:new )?changes in this (?:pr|pull request)[.!…]?$/i.test(sentences[0] ?? "");
   const underWay = /^(?:[\w.-]+(?:\[bot\])?\s+)?(?:is\s+)?(?:now\s+)?(?:starting|started|beginning|kicking off|running|reviewing|analy[sz]ing|looking (?:at|into|over)|working on|scanning|checking)\b[^.!…]*\b(?:review|analysis|scan|changes|pull request|pr|code|diff|your|this)\b/i;
+  if (/\b\d+\s+(?:\w+\s+)?(?:issues?|bugs?|findings?|problems?)\b|\b(?:found|revealed|flagged)\b/i.test(text)) return false;
   const stated = /^(?:review|analysis|scan)\s+(?:in progress|started|queued|has started)\b/i;
   const promise2 = /\b(?:will|I'?ll)\s+(?:post|comment|report|reply|start|begin|review)\b.*\b(?:when|once|shortly|soon)\b/i;
   return underWay.test(text) || stated.test(text) || promise2.test(text);
@@ -19690,7 +19900,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       continue;
     }
     const parsed = parseBotBody(comment.body, id.startsWith("custom:") ? "" : id);
-    if (botById(id)?.conversational === true && parsed.count === null && parsed.score === null && !parsed.clean) continue;
+    if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
     threadRuns.delete(id);
     statusOnly.delete(id);
@@ -19796,8 +20006,11 @@ function reactedBy(comment, id) {
   const logins = new Set((bot?.logins ?? []).flatMap((login) => [login.toLowerCase(), login.toLowerCase().replace(/\[bot\]$/, "")]));
   return (comment.reactedBy ?? []).some((login) => logins.has(login.toLowerCase()) || logins.has(login.toLowerCase().replace(/\[bot\]$/, "")));
 }
+function plainTrigger(text) {
+  return text.replace(/[`*>~]/g, "").replace(/(^|\s)_+(?=\S)/g, "$1").replace(/(?<=\S)_+(?=\s|$)/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
 function botsTriggeredBy(body, extraLogins = []) {
-  const text = ` ${body.replace(/[`*_>~]/g, "").replace(/\s+/g, " ").trim().toLowerCase()} `;
+  const text = ` ${plainTrigger(body)} `;
   const out = [];
   for (const bot of REVIEW_BOTS) {
     if (bot.triggers.some((trigger) => text.includes(` ${trigger.toLowerCase()} `) || text.includes(` ${trigger.toLowerCase()}.`) || text.includes(` ${trigger.toLowerCase()}!`))) {
@@ -19823,7 +20036,7 @@ function knownTriggers(extraLogins) {
   return [...new Set(list)].sort((a, b) => b.length - a.length);
 }
 function isTriggerSequence(body, extraLogins) {
-  let text = body.replace(/[`*_~]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  let text = plainTrigger(body);
   if (text === "" || text.length > 240) return false;
   const triggers = knownTriggers(extraLogins);
   let count = 0;
@@ -19837,7 +20050,7 @@ function isTriggerSequence(body, extraLogins) {
   return count > 1;
 }
 function isSingleTrigger(body, extraLogins) {
-  const text = body.replace(/[`*_~]/g, "").replace(/\s+/g, " ").trim().replace(/[.!]+$/, "").toLowerCase();
+  const text = plainTrigger(body).replace(/[.!]+$/, "");
   if (text === "" || text.length > 60) return false;
   for (const bot of REVIEW_BOTS) {
     if (bot.triggers.some((trigger) => trigger.toLowerCase() === text)) return true;
