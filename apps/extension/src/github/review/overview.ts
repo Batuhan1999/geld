@@ -98,13 +98,15 @@ interface VisitState {
    */
   openSubMissingSince: number | null;
   /**
-   * The comment anchors of the open item (thread row), as of the last pass
-   * that found it. An item's id hashes every anchor in its conversation, so
-   * a reply the reader posts into it gives the item a new id; the open row
-   * follows the conversation by these anchors (`reseatOpenItem`) instead of
-   * closing because its key matched nothing.
+   * The comment anchors of the open item (thread row), with the key they
+   * were read under, as of the last pass that found it. An item's id hashes
+   * every anchor in its conversation, so a reply the reader posts into it
+   * gives the item a new id; the open row follows the conversation by these
+   * anchors (`reseatOpenItem`) instead of closing because its key matched
+   * nothing. Tied to their key so that another thread the reader has just
+   * selected is never reseated onto this one's conversation.
    */
-  openItemAnchors: ReadonlySet<string> | null;
+  openItemAnchors: { readonly key: string; readonly anchors: ReadonlySet<string> } | null;
   /** "At least N approving reviews" as last stated by the merge box; it stops saying so once met. */
   knownRequired: number | null;
   /** The last reading, kept while React re-renders the merge box (a blank pass must not drop the row). */
@@ -379,8 +381,11 @@ function reseatOpenLine(batches: readonly Batch[]): void {
  * crawl reads one more anchor — gives the item a new id, and the key the
  * reader opened matched nothing: the row they were writing in closed under
  * them once the missing-line grace ran out (notra#1148). The anchors are
- * remembered while the item is found, and when it is not, the item that
- * shares one of them is the same conversation and takes the open key.
+ * remembered while the item is found (and seeded when the reader selects a
+ * row, from the model that drew it), under the key they were read for, and
+ * when that key is not found, the item that shares one of them is the same
+ * conversation and takes the open key. Anchors read under another key are
+ * not used: they belong to the thread open before the one just selected.
  */
 function reseatOpenItem(meta: GeldPrMeta): void {
   const field = visit.openSubKey?.startsWith('item:') === true ? 'openSubKey' : visit.openKey?.startsWith('item:') === true ? 'openKey' : null;
@@ -389,17 +394,21 @@ function reseatOpenItem(meta: GeldPrMeta): void {
     return;
   }
   const key = visit[field];
+  if (key === null) return;
   const found = meta.items.find((item) => itemKey(item.id) === key);
   if (found !== undefined) {
-    visit.openItemAnchors = new Set(found.sources.map((source) => source.anchor));
+    visit.openItemAnchors = { key, anchors: new Set(found.sources.map((source) => source.anchor)) };
     return;
   }
-  const anchors = visit.openItemAnchors;
-  if (anchors === null) return;
-  const successor = meta.items.find((item) => item.sources.some((source) => anchors.has(source.anchor)));
+  // Only the anchors read under this very key: the reader may have selected another thread since (its row
+  // rendered under an id a reply had already changed), and that thread's missing key must not fall back to
+  // the conversation that was open before it.
+  const remembered = visit.openItemAnchors;
+  if (remembered === null || remembered.key !== key) return;
+  const successor = meta.items.find((item) => item.sources.some((source) => remembered.anchors.has(source.anchor)));
   if (successor === undefined) return;
   visit[field] = itemKey(successor.id);
-  visit.openItemAnchors = new Set(successor.sources.map((source) => source.anchor));
+  visit.openItemAnchors = { key: visit[field], anchors: new Set(successor.sources.map((source) => source.anchor)) };
   // A settle armed for the old key (the reply mutated the loaned node) is about this same conversation.
   if (visit.settling !== null && visit.settling.itemKey === key) visit.settling = { ...visit.settling, itemKey: visit[field] };
 }
@@ -2901,10 +2910,16 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   };
   // Asynchronous answers (the AI run's progress and end) re-apply through the mounted check, never past a teardown.
   const reapply = (): void => reapplyNow();
+  /** The reader selected the item row `key`: its conversation's anchors, as the model that drew the row knew them. */
+  const seedOpenItem = (key: string): void => {
+    const item = key.startsWith('item:') ? meta.items.find((entry) => itemKey(entry.id) === key) : undefined;
+    visit.openItemAnchors = item === undefined ? null : { key, anchors: new Set(item.sources.map((source) => source.anchor)) };
+  };
   const panelHandlers: PanelHandlers = {
     onToggle: (key) => {
       keepInPlace(`main:${key}`, () => {
         visit.openKey = visit.openKey === key ? null : key;
+        if (visit.openKey === key) seedOpenItem(key);
         // The line open inside the row that just closed belongs to that row. Left standing, the next pass
         // re-seated the open key into the round that holds it, and the round the reader clicked closed under
         // them while the other opened.
@@ -3038,6 +3053,9 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     onToggleSub: (anchor) => {
       keepInPlace(`main:sub:${anchor}`, () => {
         visit.openSubKey = visit.openSubKey === anchor ? null : anchor;
+        // Seeded from the model the row was drawn from: should a reply have changed the item's id between that
+        // draw and the next pass, the row the reader just opened follows its conversation rather than closing.
+        if (visit.openSubKey === anchor) seedOpenItem(anchor);
         reapply();
       });
     },
