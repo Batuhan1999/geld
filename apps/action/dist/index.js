@@ -19844,6 +19844,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const runsBeforeAsk = /* @__PURE__ */ new Map();
   const lastEditBy = /* @__PURE__ */ new Map();
   const editedAtOf = /* @__PURE__ */ new Map();
+  const countedSummaries = /* @__PURE__ */ new Set();
   const lastWordBy = /* @__PURE__ */ new Map();
   const reported = (id, comment) => {
     for (const at of [comment.createdAt, comment.editedAt]) {
@@ -19908,6 +19909,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const parsed = parseBotBody(comment.body, id.startsWith("custom:") ? "" : id);
     if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
+    if (parsed.count !== null) countedSummaries.add(comment.anchor);
     threadRuns.delete(id);
     statusOnly.delete(id);
     runsBeforeAsk.delete(id);
@@ -19962,7 +19964,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       continue;
     }
     const edited = existing?.sourceId === void 0 ? void 0 : editedAtOf.get(existing.sourceId);
-    const rewriteSpeaks = existing?.verdict === "clean" || existing?.verdict === "findings" && existing.count !== void 0;
+    const rewriteSpeaks = existing?.verdict === "clean" || existing?.verdict === "findings" && existing.sourceId !== void 0 && countedSummaries.has(existing.sourceId);
     if (existing?.sourceId !== void 0 && rewriteSpeaks && edited !== void 0 && run2.lastAt !== null && edited > run2.lastAt + RERUN_EDIT_GAP_MS) continue;
     const fromCheck = checkName === void 0 ? null : checkVerdict.get(id) ?? null;
     if (fromCheck !== null && fromCheck !== "clean" && fromCheck !== "findings") {

@@ -424,6 +424,21 @@ describe('bots + prompts', () => {
       now,
     );
     expect(counted[0]).toMatchObject({ id: 'greptile', verdict: 'findings', count: 2, sourceId: 'issuecomment-1' });
+    // A counted summary, then a newer one with no count of its own: the number on the record is the older summary's,
+    // so the newer rewrite does not stand over the resolved threads either.
+    const inherited = verdictsFrom(
+      [],
+      [
+        { author: 'copilot-pull-request-reviewer[bot]', body: '### 🟡 Changes recommended\n\n**2 open findings**', anchor: 'pullrequestreview-1', createdAt: t(240) },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Off by one.', anchor: 'discussion_r1', createdAt: t(239), resolved: true },
+        { author: 'copilot-pull-request-reviewer[bot]', body: '### 🟡 Changes recommended\n\nStill worth a look.\n\n**Findings below.**', anchor: 'pullrequestreview-2', createdAt: t(120), editedAt: t(10) },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Unused import.', anchor: 'discussion_r2', createdAt: t(119), resolved: true },
+      ],
+      'aaa',
+      [],
+      now,
+    );
+    expect(inherited[0]).toMatchObject({ id: 'copilot', verdict: 'findings', count: 0, sourceId: 'discussion_r2' });
   });
 
   

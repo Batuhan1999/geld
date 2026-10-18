@@ -1068,6 +1068,8 @@ export function verdictsFrom(
   const lastEditBy = new Map<string, number>();
   /** When each comment was last rewritten, by anchor: the summary a verdict was read from has an edit of its own. */
   const editedAtOf = new Map<string, number>();
+  /** The summaries whose own words gave a count, by anchor: a later uncounted summary inherits the number, not the reading. */
+  const countedSummaries = new Set<string>();
   /**
    * When each bot last reported: a comment that votes below (a thread, a refusal, a review-shaped summary) posted
    * or rewritten. Its "Starting" lines and a coding agent's conversational replies are not reports.
@@ -1151,6 +1153,7 @@ export function verdictsFrom(
     // A coding agent's reply to a person or to another bot is not its review; only a review-shaped comment votes.
     if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
+    if (parsed.count !== null) countedSummaries.add(comment.anchor);
     threadRuns.delete(id);
     statusOnly.delete(id);
     // The bot reported: whatever a request set aside is an older run now, not what a later refusal brings back.
@@ -1240,10 +1243,11 @@ export function verdictsFrom(
     // — its verdict, read above from the words as they are now, and its anchor, where the reader should go. The
     // rewrite has to be that summary's own: a bot with two summaries editing the older one says nothing new in the
     // one the verdict was read from.
-    // A rewrite whose words gave no count (findings the parser could not count) says less than the threads do: every
-    // one of them is resolved, and that is what the chip shows. A rewrite that counts its findings still stands.
+    // A rewrite whose own words gave no count (findings the parser could not count) says less than the threads do:
+    // every one of them is resolved, and that is what the chip shows. A rewrite that counts its findings still stands
+    // — counted by that summary, not a number an earlier summary left on the record.
     const edited = existing?.sourceId === undefined ? undefined : editedAtOf.get(existing.sourceId);
-    const rewriteSpeaks = existing?.verdict === 'clean' || (existing?.verdict === 'findings' && existing.count !== undefined);
+    const rewriteSpeaks = existing?.verdict === 'clean' || (existing?.verdict === 'findings' && existing.sourceId !== undefined && countedSummaries.has(existing.sourceId));
     if (existing?.sourceId !== undefined && rewriteSpeaks && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
     // A check that failed or is still running says so; one that passed does not turn resolved findings into a run
     // that found nothing — the bot has not looked again — so they read "resolved" (findings, none open), which
