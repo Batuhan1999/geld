@@ -119,10 +119,19 @@ export const REPORTERS: readonly Reporter[] = [
         return { state: 'failed', headline: count > 0 ? `${plural(count, 'alert')} in dependencies` : 'Alerts in dependencies', ...(count > 0 ? { count } : {}), short: parts };
       }
       if (/\ball alerts resolved\b/i.test(body)) return { state: 'passed', headline: 'All alerts resolved', short: [] };
+      if (/\breview the following changes in (?:direct )?dependencies\b/i.test(body)) {
+        // Socket's dependency diff (Oct 2026): "Review the following changes in direct dependencies" over a table
+        // with one row per changed package — a Diff glyph (Added / Updated, an image), "npm/name@old ⏵ new", then
+        // its scores. The package reference is what counts the rows; the page writes it with zero-width spaces
+        // between its parts ("npm/\u200b@\u200bmintlify/\u200bmodels@\u200b0.0.373"), and the raw Markdown links it.
+        const refs = body.replace(/\u200b/g, '').match(/(?:^|[\s|[])(?:npm|pypi|golang|go|github|maven|cargo|gem|rubygems|nuget|huggingface|chrome|vscode|actions)\/@?[^\s@\]|]+@/gm) ?? [];
+        const count = refs.length;
+        return { state: 'info', headline: 'Changes in direct dependencies', ...(count > 0 ? { count } : {}), short: count > 0 ? [{ text: plural(count, 'package') }] : [] };
+      }
       if (/\bnew and removed dependencies detected\b/i.test(body) || /\bnew dependencies detected\b/i.test(body)) {
         // One table row per new package, "npm/name@version" first in the row (linked in the raw Markdown, bare in the
         // page's text); the removed ones are listed after "Removed packages:" on one line and are not rows.
-        const added = (body.match(/^(?:\|\s*\[)?(?:npm|pypi|golang|go|github|maven|cargo|gem|rubygems|nuget|huggingface|chrome|vscode|actions)\/[^\s@\]|]+@/gim) ?? []).length;
+        const added = (body.match(/^(?:\|\s*\[)?(?:npm|pypi|golang|go|github|maven|cargo|gem|rubygems|nuget|huggingface|chrome|vscode|actions)\/@?[^\s@\]|]+@/gim) ?? []).length;
         return { state: 'info', headline: 'New and removed dependencies detected', ...(added > 0 ? { count: added } : {}), short: added > 0 ? [{ text: plural(added, 'new package') }] : [] };
       }
       return null;

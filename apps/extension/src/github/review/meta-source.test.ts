@@ -103,6 +103,10 @@ describe('withLiveRuns', () => {
       { id: 'codex', login: 'chatgpt-codex-connector[bot]', verdict: 'clean', reviewedSha: sha },
     ];
     expect(withLiveRuns(settled, live).map((bot) => bot.id)).toEqual(['bugbot', 'greptile', 'devin']);
+    // ...or with no word: asked after the Action wrote, never answered, and the pull request closed since. The page's
+    // `unknown` contradicts nothing the Action knew, and without it the bot had no chip at all.
+    const silent: GeldPrMeta['bots'] = [{ id: 'capy', login: 'capy-ai[bot]', verdict: 'unknown', reviewedSha: sha, sourceId: 'issuecomment-7' }];
+    expect(withLiveRuns(settled, silent).map((bot) => `${bot.id}:${bot.verdict}`)).toEqual(['bugbot:clean', 'greptile:findings', 'capy:unknown']);
   });
 
   it('ends a run the Action saw running only when the page judged the run against its start', () => {
@@ -120,5 +124,32 @@ describe('withLiveRuns', () => {
   it('leaves settled verdicts to the Action', () => {
     const live: GeldPrMeta['bots'] = [{ id: 'greptile', login: 'greptile-apps[bot]', verdict: 'clean', reviewedSha: sha }];
     expect(withLiveRuns(settled, live)).toEqual(settled);
+  });
+
+  it('takes the page\u2019s count of what is still open once the whole timeline is read', () => {
+    // mint#12803: the Action wrote Bugbot's "findings" (its thread open then); the thread was resolved on the page
+    // since. With every thread on the page, the page's count stands and the chip turns to "resolved".
+    const greptile: GeldPrMeta['bots'][number] = { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, count: 2, score: 4 };
+    const bugbot: GeldPrMeta['bots'][number] = { id: 'bugbot', login: 'cursor[bot]', verdict: 'findings', reviewedSha: sha, count: 1 };
+    const payload: GeldPrMeta['bots'] = [bugbot, greptile];
+    const live: GeldPrMeta['bots'] = [
+      { id: 'bugbot', login: 'cursor[bot]', verdict: 'findings', reviewedSha: sha, count: 0 },
+      { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, count: 1, score: 4 },
+    ];
+    expect(withLiveRuns(payload, live, true)).toEqual([{ ...bugbot, count: 0 }, { ...greptile, count: 1 }]);
+    // A payload with no count (the Action read the summary alone) takes the page's count too; the score stays.
+    const unscored: GeldPrMeta['bots'][number] = { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, score: 4 };
+    expect(withLiveRuns([unscored], live, true)).toEqual([{ ...unscored, count: 1 }]);
+    // The page's count must be the same run's: hanging on a thread (as above), or on the summary the Action read.
+    const summarised: GeldPrMeta['bots'][number] = { ...greptile, sourceId: 'issuecomment-1' };
+    expect(withLiveRuns([summarised], [{ ...summarised, count: 1 }], true)).toEqual([{ ...summarised, count: 1 }]);
+    // A page verdict on a different summary is a newer report on the same head (the bot ran again): taken whole,
+    // not as a new count under the earlier run's score and severity.
+    const rerun: GeldPrMeta['bots'][number] = { id: 'greptile', login: 'greptile-apps[bot]', verdict: 'findings', reviewedSha: sha, count: 1, score: 5, sourceId: 'issuecomment-9' };
+    expect(withLiveRuns([{ ...summarised, severity: 'high' }], [rerun], true)).toEqual([rerun]);
+    // Not while the timeline is still being read (a thread not loaded yet would count as resolved), and never
+    // upward: a count the page has more of than the Action is a run the Action has not written yet.
+    expect(withLiveRuns(payload, live)).toEqual(payload);
+    expect(withLiveRuns(payload, [{ id: 'bugbot', login: 'cursor[bot]', verdict: 'findings', reviewedSha: sha, count: 3 }], true)).toEqual(payload);
   });
 });

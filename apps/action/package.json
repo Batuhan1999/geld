@@ -4,7 +4,7 @@
   "description": "GitHub Action that maintains one Geld review-summary comment on a pull request.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

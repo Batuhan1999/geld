@@ -112,6 +112,62 @@ function hostGone(host: HTMLElement): boolean {
   return !host.isConnected || host.getClientRects().length === 0;
 }
 
+/** Where the pointer was when the tooltip was asked for (viewport y), for an anchor that wraps across lines. */
+let pointerY: number | null = null;
+
+/**
+ * The lines an inline anchor occupies, as one rect per line: a commit
+ * message link that wraps has a client rect per line box (and per inline
+ * child), which `getBoundingClientRect` unions into a box the tooltip would
+ * hang under even when the pointer rests on the first line — under a last
+ * line that may not even reach the pointer's column. Rects sharing a
+ * vertical band are merged into that line.
+ */
+function lineRects(anchor: Element): readonly DOMRect[] {
+  return mergeLineRects([...anchor.getClientRects()]);
+}
+
+/** Client rects folded into one per line: rects whose vertical bands overlap are one line. Exported for its test. */
+export function mergeLineRects(all: readonly DOMRect[]): readonly DOMRect[] {
+  const rects = all.filter((rect) => rect.width > 0 && rect.height > 0).sort((a, b) => a.top - b.top);
+  const lines: DOMRect[] = [];
+  for (const rect of rects) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && rect.top < last.bottom - 1) {
+      const top = Math.min(last.top, rect.top);
+      const bottom = Math.max(last.bottom, rect.bottom);
+      const left = Math.min(last.left, rect.left);
+      const right = Math.max(last.right, rect.right);
+      lines[lines.length - 1] = new DOMRect(left, top, right - left, bottom - top);
+    } else lines.push(rect);
+  }
+  return lines;
+}
+
+/** Which of the anchor's lines the pointer is on: the one under it, else the nearest; the first with no pointer. Exported for its test. */
+export function lineIndex(lines: readonly DOMRect[], y: number | null): number {
+  if (lines.length <= 1 || y === null) return 0;
+  const under = lines.findIndex((line) => y >= line.top && y <= line.bottom);
+  if (under >= 0) return under;
+  let best = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  lines.forEach((line, index) => {
+    const distance = y < line.top ? line.top - y : y - line.bottom;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+  return best;
+}
+
+/** The rect the tooltip hangs under: the anchor's line under the pointer, or its whole box when it is one line. */
+function anchorRectOf(anchor: Element): DOMRect {
+  const lines = lineRects(anchor);
+  if (lines.length <= 1) return anchor.getBoundingClientRect();
+  return lines[lineIndex(lines, pointerY)] ?? anchor.getBoundingClientRect();
+}
+
 function position(host: HTMLElement): void {
   if (hostGone(host)) {
     hideTooltip();
@@ -121,7 +177,7 @@ function position(host: HTMLElement): void {
   const binding = providers.get(host);
   const boundAnchor = binding?.anchor;
   const anchor = boundAnchor?.isConnected === true ? boundAnchor : host;
-  const anchorRect = anchor.getBoundingClientRect();
+  const anchorRect = anchorRectOf(anchor);
   const viewportWidth = document.documentElement.clientWidth;
   const viewportHeight = document.documentElement.clientHeight;
   element.hidden = false;
@@ -311,7 +367,16 @@ function renderLoading(shape: LoadingShape): void {
 
 type TooltipContent = StatsBreakdown | { readonly message: string } | { readonly loading: LoadingShape };
 
-function present(host: HTMLElement, content: TooltipContent): void {
+/** Where the pointer rests, for a host whose anchor wraps across lines: the tooltip hangs under that line. */
+export interface TooltipPoint {
+  readonly y: number;
+}
+
+function present(host: HTMLElement, content: TooltipContent, at?: TooltipPoint): void {
+  // A new point replaces the old; a re-presentation of the same host (the diff arrived) keeps where the pointer
+  // was; another host starts with no point (focus, or a hover that said nothing).
+  if (at !== undefined) pointerY = at.y;
+  else if (activeHost !== host) pointerY = null;
   if (activeHost === null) {
     window.addEventListener('scroll', follow, { capture: true, passive: true });
     window.addEventListener('resize', follow, { passive: true });
@@ -329,10 +394,26 @@ function present(host: HTMLElement, content: TooltipContent): void {
   if (activeHost === host) describe(host, true);
 }
 
-function show(host: HTMLElement): void {
+function show(host: HTMLElement, at?: TooltipPoint): void {
   const breakdown = providers.get(host)?.provider() ?? null;
   if (breakdown === null) return;
-  present(host, breakdown);
+  present(host, breakdown, at);
+}
+
+/**
+ * The pointer moved within the host's anchor: when it is on another line of
+ * a wrapped anchor now, the tooltip moves under that line. Nothing else
+ * follows the pointer.
+ */
+export function moveTooltipPointer(host: HTMLElement, y: number): void {
+  if (activeHost !== host || tooltip === null || tooltip.hidden) return;
+  const binding = providers.get(host);
+  const anchor = binding?.anchor.isConnected === true ? binding.anchor : host;
+  const lines = lineRects(anchor);
+  if (lines.length <= 1) return;
+  const before = lineIndex(lines, pointerY);
+  pointerY = y;
+  if (lineIndex(lines, y) !== before) position(host);
 }
 
 /**
@@ -340,17 +421,17 @@ function show(host: HTMLElement): void {
  * for hosts whose hovering is decided elsewhere (commit links, which wait for
  * hover intent and for the diff to arrive). `hideTooltip` closes it.
  */
-export function showBreakdownTooltip(host: HTMLElement, breakdown: StatsBreakdown): void {
-  present(host, breakdown);
+export function showBreakdownTooltip(host: HTMLElement, breakdown: StatsBreakdown, at?: TooltipPoint): void {
+  present(host, breakdown, at);
 }
 
-export function showTooltipMessage(host: HTMLElement, message: string): void {
-  present(host, { message });
+export function showTooltipMessage(host: HTMLElement, message: string, at?: TooltipPoint): void {
+  present(host, { message }, at);
 }
 
 /** Skeleton rows in the breakdown's shape while a commit's diff is on its way. */
-export function showTooltipLoading(host: HTMLElement, shape: LoadingShape): void {
-  present(host, { loading: shape });
+export function showTooltipLoading(host: HTMLElement, shape: LoadingShape, at?: TooltipPoint): void {
+  present(host, { loading: shape }, at);
 }
 
 /** The element the tooltip is currently shown for, if any. */
@@ -368,6 +449,7 @@ export function hideTooltip(): void {
     describe(activeHost, false);
   }
   activeHost = null;
+  pointerY = null;
   if (tooltip !== null) tooltip.hidden = true;
 }
 
@@ -402,7 +484,7 @@ export function attachBreakdownTooltip(host: HTMLElement, anchor: HTMLElement, p
     host.setAttribute('tabindex', '0');
     host.setAttribute('data-geld-added-tabindex', '');
   }
-  host.addEventListener('mouseenter', () => show(host));
+  host.addEventListener('mouseenter', (event) => show(host, { y: event.clientY }));
   host.addEventListener('mouseleave', hideTooltip);
   host.addEventListener('focus', () => show(host));
   host.addEventListener('blur', hideTooltip);

@@ -7,7 +7,7 @@ import type { AddressedEvidence, GeldPrMeta, ProducerRecord, ReviewItem, ReviewS
 import { parsePreviews, previewDocFromMarkdown } from './previews';
 import { META_VERSION, PAYLOAD_BUDGET, STATUS_RANK, truncateMeta } from './model';
 import { isTriggerComment, looksLikeBotLogin, resolveBotId, verdictsFrom } from './bots';
-import type { RawCheckRun } from './bots';
+import type { BotComment, RawCheckRun } from './bots';
 import type { RawComment } from './cluster';
 import { clusterComments, isBotOnly } from './cluster';
 import { applyAddressedAll } from './addressed';
@@ -239,10 +239,35 @@ export function buildMeta(pr: RawPullRequest, options: BuildOptions): GeldPrMeta
     items = [...items].sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]).slice(0, maxItems);
   }
 
-  const botComments = [
-    ...pr.comments.map((comment) => ({ author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...(comment.editedAt === undefined ? {} : { editedAt: comment.editedAt }) })),
-    ...pr.reviews.map((review) => ({ author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...(review.submittedAt === null ? {} : { createdAt: review.submittedAt }) })),
+  // Every word a verdict is read from, in timeline order: the comments, the review bodies and the review threads
+  // (a bot's thread is a finding until someone resolves it, see `verdictsFrom`). A thread's comments are created
+  // while the review is pending and the body is dated by the submit, so the thread is placed at its review's
+  // moment — the author's first review submitted at or after the comment — and after the body, as it stands on
+  // the page; a thread no review accounts for keeps its own time.
+  const submits = pr.reviews
+    .filter((review) => review.submittedAt !== null)
+    .map((review) => ({ author: review.author.toLowerCase(), at: Date.parse(review.submittedAt ?? '') }))
+    .filter((review) => !Number.isNaN(review.at))
+    .sort((a, b) => a.at - b.at);
+  const momentOf = (author: string, createdAt: string): number => {
+    const created = Date.parse(createdAt);
+    const review = submits.find((entry) => entry.author === author.toLowerCase() && entry.at >= created);
+    return review === undefined ? created : review.at;
+  };
+  const ordered: { readonly comment: BotComment; readonly at: number; readonly rank: number }[] = [
+    ...pr.comments.map((comment) => ({ comment: { author: comment.author, body: comment.body, anchor: `issuecomment-${comment.databaseId}`, createdAt: comment.createdAt, ...(comment.editedAt === undefined ? {} : { editedAt: comment.editedAt }) }, at: Date.parse(comment.createdAt), rank: 0 })),
+    ...pr.reviews.map((review) => ({ comment: { author: review.author, body: review.body, anchor: `pullrequestreview-${review.databaseId}`, ...(review.submittedAt === null ? {} : { createdAt: review.submittedAt }) }, at: Date.parse(review.submittedAt ?? ''), rank: 0 })),
+    ...pr.threads.flatMap((thread) => {
+      const first = thread.comments[0];
+      return first === undefined ? [] : [{ comment: { author: first.author, body: first.body, anchor: `discussion_r${first.databaseId}`, createdAt: first.createdAt, resolved: thread.isResolved }, at: momentOf(first.author, first.createdAt), rank: 1 }];
+    }),
   ];
+  const botComments: BotComment[] = ordered
+    .sort((a, b) => {
+      if (!Number.isNaN(a.at) && !Number.isNaN(b.at) && a.at !== b.at) return a.at - b.at;
+      return a.rank - b.rank;
+    })
+    .map((entry) => entry.comment);
   const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now());
   const previews = pr.comments.flatMap((comment) => parsePreviews(previewDocFromMarkdown(comment.author, `issuecomment-${comment.databaseId}`, comment.body, comment.createdAt)));
   const meta: GeldPrMeta = {

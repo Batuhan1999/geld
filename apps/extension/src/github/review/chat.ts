@@ -25,15 +25,11 @@ import { inlineText } from './inline-text';
 import { armViaHovercard } from './via';
 import type { ViaBot } from './via';
 import type { RevisionView } from './edit-times';
-import { absoluteTimeText, relativeFineText, relativeTimeElement } from './time';
+import { absoluteTimeText, relativeTimeElement } from './time';
 import { stickyHeaderBottomAt } from './sticky';
 
 /** On a message: `meta` (author line), `bubble` (the body), `edit` (GitHub's edit form), `reactions`. */
 export const ATTR_PART = 'data-geld-part';
-/** On the edited clock: the ISO moment of the edit; with `ATTR_POSTED_AT`, what its words are built from (`rewordEditedMarks`). */
-const ATTR_EDITED_AT = 'data-geld-edited-at';
-/** On the edited clock: the ISO moment the comment was first posted, when known. */
-const ATTR_POSTED_AT = 'data-geld-posted-at';
 const ATTR_MESSAGE = 'data-geld-message';
 const ATTR_MINE = 'data-geld-mine';
 /** Where a message stands in a run of one author's messages: `only`, `first`, `mid`, `last`. */
@@ -134,6 +130,36 @@ export function chatNeedsRedress(chat: HTMLElement): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Dress what GitHub has just added to a chat on loan, where it stands. A
+ * reply the reader posts (or one that arrives over the socket) is appended
+ * to the loaned thread as GitHub's raw card; the pass that would have read
+ * it (`chatNeedsRedress` → a full re-render of the slot, every loan going
+ * home and coming back) runs after a debounce, so the card showed raw for a
+ * moment and then the whole chat redrew around it (notra#1148). Called from
+ * the loan watcher's MutationObserver callback — a microtask, before the
+ * browser paints — this marks the newcomers and re-reads each message's
+ * place in its author's run (the one before a new reply is no longer the
+ * last of its run), so the reply is a bubble from its first frame and the
+ * pass that follows finds nothing to redress. True when something was dressed.
+ */
+export function dressArrivals(root: ParentNode = document): boolean {
+  let dressed = false;
+  const viewer = viewerLogin();
+  for (const body of root.querySelectorAll<HTMLElement>('.geld-review__chat[data-geld-chat="thread"] .geld-review__chat-body')) {
+    for (const thread of body.children) {
+      if (!(thread instanceof HTMLElement) || !isTeleported(thread)) continue;
+      const messages = messagesIn(thread, true);
+      const fresh = messages.filter((message) => !message.hasAttribute(ATTR_MESSAGE));
+      if (fresh.length === 0) continue;
+      annotateMessages(messages, viewer, false);
+      for (const message of fresh) placeControls(message);
+      dressed = true;
+    }
+  }
+  return dressed;
 }
 
 /** The thread's first comment anchor (its identity across rebuilds). */
@@ -241,13 +267,64 @@ export interface ChatRerun {
  */
 const AGENT_RERUN_CONTROLS = ['a[href*="app.greptile.com/api/retrigger"]'];
 const ATTR_AGENT_RERUN = 'data-geld-agent-rerun';
+/**
+ * A bot's own "view this run on our site" badge inside its comment (Greptile's
+ * "View in Greptile", Devin's "Devin Review", CodeRabbit's "Review in Change
+ * Stack" — each a linked image, present only when the bot chose to show it).
+ * A review posted by a Cursor cloud agent (an automation, by `cursor[bot]`)
+ * ends in "Open in Web", the agent's run on cursor.com. Found Oct 2026 on
+ * public pull requests; Bugbot's "Fix All in Cursor" is an action, not a
+ * view, and the other bots post none.
+ */
+const AGENT_VIEW_LINKS = ['a[href^="https://app.greptile.com/"][href*="/pull/"]:not([href*="/api/retrigger"])', 'a[href^="https://app.devin.ai/review/"]', 'a[href^="https://app.coderabbit.ai/change-stack/"]', 'a[href^="https://cursor.com/agents/"]'];
+const ATTR_AGENT_VIEW = 'data-geld-agent-view';
 
-function hideAgentRerunControls(body: HTMLElement): void {
-  for (const link of body.querySelectorAll<HTMLElement>(AGENT_RERUN_CONTROLS.join(', '))) {
-    const holder = link.closest<HTMLElement>('h1, h2, h3, h4, p, div');
-    const target = holder !== null && (holder.textContent ?? '').trim() === '' && holder.querySelectorAll('a, img').length <= 2 ? holder : link;
-    target.setAttribute(ATTR_AGENT_RERUN, '');
-  }
+export function hideAgentRerunControls(body: HTMLElement): void {
+  for (const link of body.querySelectorAll<HTMLElement>(AGENT_RERUN_CONTROLS.join(', '))) hideAgentBadge(link, ATTR_AGENT_RERUN);
+}
+
+/**
+ * Hide a bot's badge where it stands, and the block holding it once it holds
+ * nothing else that shows (Greptile's badges share one paragraph with a
+ * `<br clear="all">`: with both badges gone the paragraph is a blank line).
+ */
+function hideAgentBadge(link: HTMLElement, attribute: string): void {
+  link.setAttribute(attribute, '');
+  const holder = link.closest<HTMLElement>('h1, h2, h3, h4, p, div');
+  if (holder === null || (holder.textContent ?? '').trim() !== '') return;
+  const showing = [...holder.querySelectorAll('a, img')].some((node) => node.closest(`[${ATTR_AGENT_RERUN}], [${ATTR_AGENT_VIEW}]`) === null);
+  if (!showing) holder.setAttribute(ATTR_AGENT_RERUN, '');
+}
+
+/** What a bot's view badge links to, for the byline's View control. */
+interface AgentViewLink {
+  readonly href: string;
+  /** The badge's words: "View in Greptile", "Devin Review". */
+  readonly label: string;
+}
+
+/** The bot's view badge in its comment, hidden there and handed back so the byline can wear it as View. Exported for its test. */
+export function takeAgentViewLink(body: HTMLElement): AgentViewLink | null {
+  // The badge is a linked image on the run's own path; a text link to the same site earlier in the comment (a
+  // settings or support link) is neither, and stays where it is.
+  const link = [...body.querySelectorAll<HTMLAnchorElement>(AGENT_VIEW_LINKS.join(', '))].find((candidate) => candidate.querySelector('img') !== null) ?? null;
+  if (link === null) return null;
+  hideAgentBadge(link, ATTR_AGENT_VIEW);
+  const words = (link.querySelector('img')?.getAttribute('alt') ?? link.textContent ?? '').replace(/\s*(?:\u2192|->)\s*$/, '').replace(/\s+/g, ' ').trim();
+  return { href: link.href, label: words };
+}
+
+/**
+ * "View" with the external-link glyph, in Rerun's box and before it: the
+ * bot's own badge, moved out of the bubble to where the chat's controls are.
+ * The tooltip keeps the badge's words ("View in Greptile"); a badge that only
+ * names the product ("Devin Review") reads "Open Devin Review".
+ */
+function viewControl(view: AgentViewLink): HTMLElement {
+  const title = view.label === '' ? 'View' : /^(?:view|open|review|see|show)\b/i.test(view.label) ? view.label : `Open ${view.label}`;
+  const link = createElement('a', { class: 'geld-review__rerun', 'data-kind': 'view', href: view.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': title, title }, [icon(ICON_LINK_EXTERNAL), createElement('span', {}, ['View'])]);
+  link.addEventListener('click', (event) => event.stopPropagation());
+  return createElement('span', { class: 'geld-review__rerun-wrap' }, [link]);
 }
 
 let rerunIds = 0;
@@ -311,8 +388,10 @@ let editedIds = 0;
  * A comment edited after it was posted: a clock beside the byline's time.
  * The byline says the edit's time, since the bubble is the comment as it
  * reads now; the clock's words say when it was first posted ("Originally
- * posted 2 hours ago · Oct 8, 2026, 5:08 PM"), or, when the page has not
- * said that, when it was edited. The words come up in GitHub's own tooltip
+ * posted Oct 8, 2026, 5:08 PM"), or, when the page has not said that, when
+ * it was edited. The moment is absolute only: a relative age would need
+ * re-wording while the chat stays open, and with the date beside it the
+ * tooltip ran to two lines. The words come up in GitHub's own tooltip
  * (`tool-tip`, instant and styled like the page's; where the page does not
  * define it they are the title) and are read aloud as the mark's label.
  */
@@ -320,8 +399,7 @@ function editedMark(editedAt: string, postedAt: string | null): HTMLElement {
   editedIds += 1;
   const id = `geld-edited-${editedIds}`;
   const words = editedWords(editedAt, postedAt);
-  // Both moments stay on the element so the time refresh can re-word "N minutes ago" while the chat is left open.
-  const mark = createElement('span', { id, class: 'geld-review__edited', role: 'img', 'aria-label': words, [ATTR_EDITED_AT]: editedAt, ...(postedAt === null ? {} : { [ATTR_POSTED_AT]: postedAt }) }, [icon(ICON_HISTORY)]);
+  const mark = createElement('span', { id, class: 'geld-review__edited', role: 'img', 'aria-label': words }, [icon(ICON_HISTORY)]);
   // The content script's world has no `customElements` to ask (Chrome leaves it null there); a page that defines
   // `tool-tip` has rendered some of its own by now (the header's), so their presence stands for the definition.
   if (document.querySelector('tool-tip') === null) {
@@ -334,28 +412,10 @@ function editedMark(editedAt: string, postedAt: string | null): HTMLElement {
   return createElement('span', { class: 'geld-review__edited-wrap' }, [mark, tip]);
 }
 
+/** "Originally posted Oct 8, 2026, 5:08 PM"; "Edited Oct 8, 2026, 5:08 PM" when the posting time is not known. */
 function editedWords(editedAt: string, postedAt: string | null): string {
-  const at = postedAt ?? editedAt;
-  const absolute = absoluteTimeText(at);
-  return `${postedAt === null ? 'Edited' : 'Originally posted'} ${relativeFineText(at)}${absolute === '' ? '' : ` · ${absolute}`}`;
-}
-
-/**
- * Re-word every edited clock's "N minutes ago" (its tooltip and label) for
- * the time refresh: a one-off label no live element upgrades, so a chat
- * left open would otherwise keep saying the old age.
- */
-export function rewordEditedMarks(): void {
-  for (const mark of document.querySelectorAll<HTMLElement>(`[${ATTR_EDITED_AT}]`)) {
-    const editedAt = mark.getAttribute(ATTR_EDITED_AT);
-    if (editedAt === null || editedAt === '') continue;
-    const words = editedWords(editedAt, mark.getAttribute(ATTR_POSTED_AT));
-    if (mark.getAttribute('aria-label') === words) continue;
-    mark.setAttribute('aria-label', words);
-    if (mark.hasAttribute('title')) mark.setAttribute('title', words);
-    const tip = mark.id === '' ? null : mark.parentElement?.querySelector(`tool-tip[for="${CSS.escape(mark.id)}"]`);
-    if (tip !== null && tip !== undefined) tip.textContent = words;
-  }
+  const absolute = absoluteTimeText(postedAt ?? editedAt);
+  return `${postedAt === null ? 'Edited' : 'Originally posted'}${absolute === '' ? '' : ` ${absolute}`}`;
 }
 
 /**
@@ -482,6 +542,17 @@ export function renderCommentChat(slot: HTMLElement, node: HTMLElement, byline: 
   openMinimized(body);
   annotateMessages(messagesIn(node, false), viewerLogin(), true);
   if (byline?.rerun !== undefined || byline?.latest !== undefined) hideAgentRerunControls(body);
+  // The bot's view badge goes to the byline, before Rerun / See latest (the first control wears the gap to the
+  // name; see the stylesheet). Only with a byline to carry it: headless, the badge stays in the bubble.
+  if (byline?.bot === true) {
+    const view = takeAgentViewLink(body);
+    const line = chat.querySelector('.geld-review__chat-byline');
+    if (view !== null && line !== null) {
+      const control = line.querySelector('.geld-review__rerun-wrap');
+      if (control === null) line.append(viewControl(view));
+      else control.before(viewControl(view));
+    }
+  }
 }
 
 /**
@@ -528,8 +599,10 @@ function pinnedContext(thread: HTMLElement, source: ChatSource, handlers: ChatHa
     wrap.append(body);
     if (revision !== null) {
       body.setAttribute('data-geld-revision', '');
-      // The bot's own re-run badge is a control, and a stale one here; the byline's Rerun is the control.
+      // The bot's own re-run badge is a control, and a stale one here; the byline's Rerun is the control. Its view
+      // badge leads to the same run on the bot's site whichever reading this is, so it stands on the strip as View.
       hideAgentRerunControls(revision.body);
+      placeViewControl(takeAgentViewLink(revision.body), control, chevron);
       body.append(createElement('div', { class: 'geld-review__chat-then' }, [revision.body]));
       // "As it read when this thread was opened · edited 3 times since, last 2 days ago": the live comment is the
       // bot's current word, which its own row shows; this is the word these threads answered.
@@ -543,11 +616,20 @@ function pinnedContext(thread: HTMLElement, source: ChatSource, handlers: ChatHa
       const messages = messagesIn(source.node, false);
       annotateMessages(messages, viewer, true);
       for (const message of messages) placeControls(message);
-      // The same comment as in its own row, so the same rule: the bot's badge is hidden wherever the chat shows it.
-      if (source.bot) hideAgentRerunControls(body);
+      // The same comment as in its own row, so the same rule: the bot's badges are hidden wherever the chat shows it,
+      // and its view badge stands on the strip as View, before Rerun / See latest.
+      if (source.bot) {
+        hideAgentRerunControls(body);
+        placeViewControl(takeAgentViewLink(body), control, chevron);
+      }
     }
   }
   return wrap;
+}
+
+/** View on the strip's right: before the strip's control when it has one, else before the chevron. */
+function placeViewControl(view: AgentViewLink | null, control: HTMLElement | null, chevron: HTMLElement): void {
+  if (view !== null) (control ?? chevron).before(viewControl(view));
 }
 
 /** What stands on an open strip's right for a bot's source, if anything (see `pinnedContext`). */
@@ -876,9 +958,9 @@ function loadDeferredReplies(thread: HTMLElement): void {
  * The messages inside a moved node, outermost first: in a thread, each
  * `discussion_r` comment (its comments are siblings, but GitHub repeats ids
  * on wrappers and permalinks); elsewhere the comment cards. A message holds
- * a body and is not part of a form.
+ * a body and is not part of a form. Exported for its test only.
  */
-function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] {
+export function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] {
   const selector = thread ? '[id^="discussion_r"], [data-testid="review-thread-comment"]' : MESSAGE_SELECTOR;
   const candidates = [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll<HTMLElement>(selector)];
   // A minimized comment is wrapped in a `.minimized-comment.js-comment` holding a <details> (the "This comment has
@@ -887,7 +969,11 @@ function messagesIn(root: HTMLElement, thread: boolean): readonly HTMLElement[] 
   // body are only siblings inside `.review-comment-contents`, so that is the message; the stylesheet drops the
   // summary and the card's picture and ⋯ holder left outside it.
   const compact = [...root.querySelectorAll<HTMLElement>(COMPACT_CARD)];
-  const all = [...candidates, ...compact].filter((node) => node.closest('form') === null && node.querySelector(BODY_SELECTOR) !== null && !node.matches(MINIMIZED_WRAPPER) && (node.matches(COMPACT_CARD) || node.querySelector(COMPACT_CARD) === null));
+  // The wrapper of a minimized comment is told by the <details> it holds: a review's own card carries the
+  // `minimized-comment` class too (with `timeline-comment` and `js-comment`, the header a direct child), and read
+  // as a wrapper it had no message at all — the card showed raw in its chat, header and all (server#7851).
+  const minimizedWrapper = (node: HTMLElement): boolean => node.matches(MINIMIZED_WRAPPER) && (node instanceof HTMLDetailsElement || node.querySelector(':scope > details') !== null);
+  const all = [...candidates, ...compact].filter((node) => node.closest('form') === null && node.querySelector(BODY_SELECTOR) !== null && !minimizedWrapper(node) && (node.matches(COMPACT_CARD) || node.querySelector(COMPACT_CARD) === null));
   return all.filter((node) => !all.some((other) => other !== node && other.contains(node)));
 }
 

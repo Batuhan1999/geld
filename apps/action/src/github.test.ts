@@ -160,7 +160,27 @@ describe('loadPullRequest', () => {
       const body = JSON.parse(String(init?.body ?? '{}'));
       if (String(body.query).includes('GeldCheckContexts')) {
         expect(body.variables.cursor).toBe('k1');
-        return new Response(JSON.stringify({ data: { repository: { object: { statusCheckRollup: { contexts: { pageInfo: page, nodes: [run('Cursor Bugbot'), { __typename: 'StatusContext', context: 'codecov/patch', state: 'PENDING' }] } } } } } }));
+        return new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                object: {
+                  statusCheckRollup: {
+                    contexts: {
+                      pageInfo: page,
+                      nodes: [
+                        run('Cursor Bugbot'),
+                        { __typename: 'StatusContext', context: 'codecov/patch', state: 'PENDING', createdAt: '2026-10-18T10:43:31Z' },
+                        { __typename: 'StatusContext', context: 'Devin Review', state: 'SUCCESS', createdAt: '2026-10-18T10:44:32Z' },
+                        { __typename: 'StatusContext', context: 'legacy/status', state: 'FAILURE', createdAt: null },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          }),
+        );
       }
       return new Response(
         JSON.stringify({
@@ -180,7 +200,11 @@ describe('loadPullRequest', () => {
       );
     };
     const pr = await loadPullRequest({ token: 't', fetch: fetchImpl }, 'acme', 'widgets', 7);
-    expect(pr.checks.map((check) => check.name)).toEqual(['build', 'Cursor Bugbot', 'codecov/patch']);
-    expect(pr.checks[2]).toMatchObject({ status: 'in_progress', conclusion: null });
+    expect(pr.checks.map((check) => check.name)).toEqual(['build', 'Cursor Bugbot', 'codecov/patch', 'Devin Review', 'legacy/status']);
+    // A commit status is set in one moment: pending, that moment is the run's start; done, its finish. A status
+    // with no `createdAt` carries neither.
+    expect(pr.checks[2]).toEqual({ name: 'codecov/patch', status: 'in_progress', conclusion: null, sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', startedAt: '2026-10-18T10:43:31Z' });
+    expect(pr.checks[3]).toEqual({ name: 'Devin Review', status: 'completed', conclusion: 'success', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', completedAt: '2026-10-18T10:44:32Z' });
+    expect(pr.checks[4]).toEqual({ name: 'legacy/status', status: 'completed', conclusion: 'failure', sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
   });
 });
