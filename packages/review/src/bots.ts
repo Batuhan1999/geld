@@ -74,6 +74,11 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     neutralConclusion: 'findings',
     triggers: ['bugbot run', 'cursor review', '@cursor review'],
     configFiles: ['.cursor/BUGBOT.md'],
+    // The login is also Cursor's cloud agents' and automations': they reply in threads, answer other bots
+    // ("@greptileai Both P1 findings are addressed… Please re-review", mint#13111) and post "Verdict: …" reviews.
+    // Bugbot's own summaries are always review-shaped ("found no new issues", "found N potential issues"), so only
+    // those, and an automation's stated verdict, vote.
+    conversational: true,
   },
   {
     id: 'greptile',
@@ -360,10 +365,11 @@ export interface ParsedBotBody {
   /**
    * The comment states a verdict in so many words without a count or a
    * score to show for it: "Needs a human reviewer." (Sourcery), "Needs Human
-   * Approval" (Macroscope). Review-shaped (`isReviewShaped`) though nothing
+   * Approval" (Macroscope), "Verdict: request changes" (a Cursor automation
+   * under the Bugbot login). Review-shaped (`isReviewShaped`) though nothing
    * else about it is.
    */
-  readonly verdict?: 'needs-human';
+  readonly verdict?: 'needs-human' | 'changes-requested';
 }
 
 /**
@@ -533,7 +539,9 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
       : /\blow(?: severity| risk)?\b/i.test(affirmed)
         ? 'low'
         : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...(needsHuman ? { verdict: 'needs-human' as const } : {}) };
+  const changesRequested = /\b(?:verdict|assessment)\W{0,6}(?:request(?:s|ed)? changes|changes requested)\b/i.test(text);
+  const verdict = needsHuman ? ({ verdict: 'needs-human' } as const) : changesRequested ? ({ verdict: 'changes-requested' } as const) : {};
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...verdict };
 }
 
 export interface RawCheckRun {

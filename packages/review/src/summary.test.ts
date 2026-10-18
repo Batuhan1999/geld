@@ -367,7 +367,23 @@ describe('bots + prompts', () => {
     // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
-    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null, verdict: 'changes-requested' });
+    // A Cursor cloud agent under the same login talking to another bot is not Bugbot's review: with Bugbot's clean
+    // summary standing, the chip stayed clean, not amber "findings" with no count (mint#13111).
+    const agentTalk = verdictsFrom(
+      [],
+      [
+        { author: 'brandonmcconnell', body: 'bugbot run', anchor: 'issuecomment-1', createdAt: '2026-10-18T08:33:55Z' },
+        { author: 'cursor[bot]', body: '✅ Bugbot reviewed your changes and found no new issues!\n\nReviewed by Cursor Bugbot for commit 430cad1.', anchor: 'pullrequestreview-2', createdAt: '2026-10-18T08:39:32Z' },
+        // (The agent's replies inside Greptile's threads are Greptile's threads to the crawl, which keys a thread on
+        // its first comment, so nothing of Bugbot's is between the review and the remark.)
+        { author: 'cursor[bot]', body: '@greptileai Both P1 findings are addressed in 0131126 and 446b6de (see thread replies). Please re-review.', anchor: 'issuecomment-5', createdAt: '2026-10-18T08:46:42Z' },
+      ],
+      'aaa',
+      [],
+      Date.parse('2026-10-18T10:00:00Z'),
+    );
+    expect(agentTalk[0]).toMatchObject({ id: 'bugbot', verdict: 'clean', sourceId: 'pullrequestreview-2' });
     // A deploy bot's comment is not a review verdict.
     expect(verdictsFrom([], [{ author: 'vercel[bot]', body: 'Deployment ready', anchor: 'issuecomment-5' }], 'aaa')).toEqual([]);
     expect(verdictsFrom([], [{ author: 'acme[bot]', body: 'Found 2 issues', anchor: 'issuecomment-6' }], 'aaa', ['acme[bot]'])[0]?.count).toBe(2);

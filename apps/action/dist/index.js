@@ -19191,7 +19191,12 @@ var REVIEW_BOTS = [
     notCheckNames: ["Cursor Bugbot Autofix", "Bugbot Autofix"],
     neutralConclusion: "findings",
     triggers: ["bugbot run", "cursor review", "@cursor review"],
-    configFiles: [".cursor/BUGBOT.md"]
+    configFiles: [".cursor/BUGBOT.md"],
+    // The login is also Cursor's cloud agents' and automations': they reply in threads, answer other bots
+    // ("@greptileai Both P1 findings are addressed… Please re-review", mint#13111) and post "Verdict: …" reviews.
+    // Bugbot's own summaries are always review-shaped ("found no new issues", "found N potential issues"), so only
+    // those, and an automation's stated verdict, vote.
+    conversational: true
   },
   {
     id: "greptile",
@@ -19521,7 +19526,9 @@ function parseBotBody(body, botId) {
   const clean = !needsHuman && (count === null || count === 0) && (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic|open))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) || /\bno actionable comments\b/i.test(text) || /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) || readyToMerge || approved || count === 0 && (score === null || botId === "greptile" || shaped !== null));
   const affirmed = text.replace(/\b(?:no|not|without|zero|non-)(?:\s+\w+){0,3}[\s-]+(?:high severity|critical|blockers?|blocking|security (?:issues?|vulnerabilit(?:y|ies)|risks?))\b/gi, "");
   const severity = /\b(?:high severity|critical|blocker|security (?:issue|vulnerability|risk))\b/i.test(affirmed) ? "high" : /\bmedium(?: severity| risk)?\b/i.test(affirmed) ? "medium" : /\blow(?: severity| risk)?\b/i.test(affirmed) ? "low" : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...needsHuman ? { verdict: "needs-human" } : {} };
+  const changesRequested = /\b(?:verdict|assessment)\W{0,6}(?:request(?:s|ed)? changes|changes requested)\b/i.test(text);
+  const verdict = needsHuman ? { verdict: "needs-human" } : changesRequested ? { verdict: "changes-requested" } : {};
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...verdict };
 }
 function refusalReason(body) {
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?(?:h[1-6]|p|div|br|li|ul|ol|details|summary|blockquote)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, "");
