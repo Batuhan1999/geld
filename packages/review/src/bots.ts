@@ -74,6 +74,11 @@ export const REVIEW_BOTS: readonly ReviewBot[] = [
     neutralConclusion: 'findings',
     triggers: ['bugbot run', 'cursor review', '@cursor review'],
     configFiles: ['.cursor/BUGBOT.md'],
+    // The login is also Cursor's cloud agents' and automations': they reply in threads, answer other bots
+    // ("@greptileai Both P1 findings are addressed… Please re-review", mint#13111) and post "Verdict: …" reviews.
+    // Bugbot's own summaries are always review-shaped ("found no new issues", "found N potential issues"), so only
+    // those, and an automation's stated verdict, vote.
+    conversational: true,
   },
   {
     id: 'greptile',
@@ -360,10 +365,11 @@ export interface ParsedBotBody {
   /**
    * The comment states a verdict in so many words without a count or a
    * score to show for it: "Needs a human reviewer." (Sourcery), "Needs Human
-   * Approval" (Macroscope). Review-shaped (`isReviewShaped`) though nothing
+   * Approval" (Macroscope), "Verdict: request changes" (a Cursor automation
+   * under the Bugbot login). Review-shaped (`isReviewShaped`) though nothing
    * else about it is.
    */
-  readonly verdict?: 'needs-human';
+  readonly verdict?: 'needs-human' | 'changes-requested';
 }
 
 /**
@@ -484,7 +490,8 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
       if (items > 0) count = items;
     }
   }
-  // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
+  // "found no new issues", "no further problems", "0 potential issues", "No open issues" (Copilot's overview once
+  // every finding is resolved, beside "N open findings" while some are): the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
   // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
   // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
@@ -516,7 +523,7 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const clean =
     !needsHuman &&
     (count === null || count === 0) &&
-    (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
+    (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic|open))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
       /\bno actionable comments\b/i.test(text) ||
       /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) ||
       readyToMerge ||
@@ -532,7 +539,9 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
       : /\blow(?: severity| risk)?\b/i.test(affirmed)
         ? 'low'
         : null;
-  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...(needsHuman ? { verdict: 'needs-human' as const } : {}) };
+  const changesRequested = /\b(?:verdict|assessment)\W{0,6}(?:request(?:s|ed)? changes|changes requested)\b/i.test(text);
+  const verdict = needsHuman ? ({ verdict: 'needs-human' } as const) : changesRequested ? ({ verdict: 'changes-requested' } as const) : {};
+  return { count: Number.isFinite(count) ? count : null, score: Number.isFinite(score) ? score : null, clean, severity, ...verdict };
 }
 
 export interface RawCheckRun {
@@ -1067,6 +1076,8 @@ export function verdictsFrom(
   const lastEditBy = new Map<string, number>();
   /** When each comment was last rewritten, by anchor: the summary a verdict was read from has an edit of its own. */
   const editedAtOf = new Map<string, number>();
+  /** The summaries whose own words gave a count, by anchor: a later uncounted summary inherits the number, not the reading. */
+  const countedSummaries = new Set<string>();
   /**
    * When each bot last reported: a comment that votes below (a thread, a refusal, a review-shaped summary) posted
    * or rewritten. Its "Starting" lines and a coding agent's conversational replies are not reports.
@@ -1150,6 +1161,7 @@ export function verdictsFrom(
     // A coding agent's reply to a person or to another bot is not its review; only a review-shaped comment votes.
     if (botById(id)?.conversational === true && !isReviewShaped(parsed)) continue;
     reported(id, comment);
+    if (parsed.count !== null) countedSummaries.add(comment.anchor);
     threadRuns.delete(id);
     statusOnly.delete(id);
     // The bot reported: whatever a request set aside is an older run now, not what a later refusal brings back.
@@ -1239,8 +1251,12 @@ export function verdictsFrom(
     // — its verdict, read above from the words as they are now, and its anchor, where the reader should go. The
     // rewrite has to be that summary's own: a bot with two summaries editing the older one says nothing new in the
     // one the verdict was read from.
+    // A rewrite whose own words gave no count (findings the parser could not count) says less than the threads do:
+    // every one of them is resolved, and that is what the chip shows. A rewrite that counts its findings still stands
+    // — counted by that summary, not a number an earlier summary left on the record.
     const edited = existing?.sourceId === undefined ? undefined : editedAtOf.get(existing.sourceId);
-    if (existing?.sourceId !== undefined && (existing.verdict === 'clean' || existing.verdict === 'findings') && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
+    const rewriteSpeaks = existing?.verdict === 'clean' || (existing?.verdict === 'findings' && existing.sourceId !== undefined && countedSummaries.has(existing.sourceId));
+    if (existing?.sourceId !== undefined && rewriteSpeaks && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
     // A check that failed or is still running says so; one that passed does not turn resolved findings into a run
     // that found nothing — the bot has not looked again — so they read "resolved" (findings, none open), which
     // the request menu still offers a rerun for.

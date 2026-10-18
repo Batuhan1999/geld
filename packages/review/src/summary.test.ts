@@ -367,7 +367,23 @@ describe('bots + prompts', () => {
     // A Cursor automation's review under the Bugbot login: its verdict is the word, behind its own HTML-comment marker.
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 | RUN_ID: bc-62 -->\nApproved. Cursor Bugbot was skipped, so that reviewer signal was not used. No applicable approval policy required human review on this head.', 'bugbot')).toMatchObject({ clean: true });
     expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: approve <div><a href="https://cursor.com/agents/bc-1"><img alt="Open in Web"></a></div>', 'bugbot')).toMatchObject({ clean: true });
-    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null });
+    expect(parseBotBody('<!-- CURSOR_AUTOMATION_ID: 16f0 -->\nVerdict: request changes **Blocking:** per-worker floors are applied after the free-memory split.', 'bugbot')).toMatchObject({ clean: false, count: null, verdict: 'changes-requested' });
+    // A Cursor cloud agent under the same login talking to another bot is not Bugbot's review: with Bugbot's clean
+    // summary standing, the chip stayed clean, not amber "findings" with no count (mint#13111).
+    const agentTalk = verdictsFrom(
+      [],
+      [
+        { author: 'brandonmcconnell', body: 'bugbot run', anchor: 'issuecomment-1', createdAt: '2026-10-18T08:33:55Z' },
+        { author: 'cursor[bot]', body: '✅ Bugbot reviewed your changes and found no new issues!\n\nReviewed by Cursor Bugbot for commit 430cad1.', anchor: 'pullrequestreview-2', createdAt: '2026-10-18T08:39:32Z' },
+        // (The agent's replies inside Greptile's threads are Greptile's threads to the crawl, which keys a thread on
+        // its first comment, so nothing of Bugbot's is between the review and the remark.)
+        { author: 'cursor[bot]', body: '@greptileai Both P1 findings are addressed in 0131126 and 446b6de (see thread replies). Please re-review.', anchor: 'issuecomment-5', createdAt: '2026-10-18T08:46:42Z' },
+      ],
+      'aaa',
+      [],
+      Date.parse('2026-10-18T10:00:00Z'),
+    );
+    expect(agentTalk[0]).toMatchObject({ id: 'bugbot', verdict: 'clean', sourceId: 'pullrequestreview-2' });
     // A deploy bot's comment is not a review verdict.
     expect(verdictsFrom([], [{ author: 'vercel[bot]', body: 'Deployment ready', anchor: 'issuecomment-5' }], 'aaa')).toEqual([]);
     expect(verdictsFrom([], [{ author: 'acme[bot]', body: 'Found 2 issues', anchor: 'issuecomment-6' }], 'aaa', ['acme[bot]'])[0]?.count).toBe(2);
@@ -387,7 +403,61 @@ describe('bots + prompts', () => {
     expect(parseBotBody('Found 2 issues, see #9377 issues for the earlier ones.', 'bugbot').count).toBe(2);
     expect(parseBotBody('Fixes GH-123 issues: found 1 bug.', 'bugbot').count).toBe(1);
   });
+  it("reads Copilot's overview: open findings counted, none open is clean", () => {
+    // Copilot code review's overview (`ccr-overview-v2`, Oct 2026): a verdict heading, then "**1 open finding**" /
+    // "**0 open findings**" / "**No open issues** 🎉", edited as the findings are resolved.
+    expect(parseBotBody('### 🟢 Approval recommended\n\nThe changes are additive.\n\n<details open><summary><strong>1 open finding</strong></summary>\n- Low severity [Document the language requirements](https://github.com/o/r/pull/1#discussion_r1) · New\n</details>', 'copilot')).toMatchObject({ count: 1, clean: false });
+    expect(parseBotBody('### 🟢 Approval recommended\n\nThe remaining note is non-blocking.\n\n**0 open findings**', 'copilot')).toMatchObject({ count: 0, clean: true });
+    // "Needs a closer look … needs human review" with none open: a stated verdict, not clean, and nothing outstanding.
+    expect(parseBotBody('### 🔵 Needs a closer look\n\nCompatibility remains unverified and needs human review.\n\n**0 open findings**', 'copilot')).toMatchObject({ count: 0, clean: false, verdict: 'needs-human' });
+    expect(parseBotBody('### 🔵 Needs a closer look\n\nCorrectness depends on in-game outcomes.\n\n**No open issues** 🎉\n\n<details><summary><strong>What changed in this PR</strong></summary>…</details>', 'copilot')).toMatchObject({ count: null, clean: true });
+    expect(refusalReason('Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.')).toBe('Copilot was unable to review this pull request because the user who requested the review has reached their quota limit');
+    // A summary rewritten well after the threads whose words give no count does not outrank the threads: every one
+    // resolved reads "resolved", not amber "findings" from a rewrite the parser could not read (mint#13111).
+    const now = Date.UTC(2026, 9, 18, 9, 0);
+    const t = (minutesAgo: number): string => new Date(now - minutesAgo * 60_000).toISOString();
+    const rewritten = verdictsFrom(
+      [],
+      [
+        { author: 'copilot-pull-request-reviewer[bot]', body: '### 🟡 Changes recommended\n\nTwo things to look at.\n\n**Findings below.**', anchor: 'pullrequestreview-1', createdAt: t(120), editedAt: t(10) },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Off by one.', anchor: 'discussion_r1', createdAt: t(119), resolved: true },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Unused import.', anchor: 'discussion_r2', createdAt: t(119), resolved: true },
+      ],
+      'aaa',
+      [],
+      now,
+    );
+    expect(rewritten[0]).toMatchObject({ id: 'copilot', verdict: 'findings', count: 0, sourceId: 'discussion_r2' });
+    // A rewrite that counts still stands as the latest word (Greptile's re-review into the same comment).
+    const counted = verdictsFrom(
+      [],
+      [
+        { author: 'greptile-apps[bot]', body: 'Confidence Score: 3/5\n\n## Findings\n\n1. **Leaked handle** ▶\n2. **Stale cache** ▶\n\n## Summary\nTwo things remain.', anchor: 'issuecomment-1', createdAt: t(120), editedAt: t(10) },
+        { author: 'greptile-apps[bot]', body: 'Leaked handle.', anchor: 'discussion_r1', createdAt: t(119), resolved: true },
+      ],
+      'aaa',
+      [],
+      now,
+    );
+    expect(counted[0]).toMatchObject({ id: 'greptile', verdict: 'findings', count: 2, sourceId: 'issuecomment-1' });
+    // A counted summary, then a newer one with no count of its own: the number on the record is the older summary's,
+    // so the newer rewrite does not stand over the resolved threads either.
+    const inherited = verdictsFrom(
+      [],
+      [
+        { author: 'copilot-pull-request-reviewer[bot]', body: '### 🟡 Changes recommended\n\n**2 open findings**', anchor: 'pullrequestreview-1', createdAt: t(240) },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Off by one.', anchor: 'discussion_r1', createdAt: t(239), resolved: true },
+        { author: 'copilot-pull-request-reviewer[bot]', body: '### 🟡 Changes recommended\n\nStill worth a look.\n\n**Findings below.**', anchor: 'pullrequestreview-2', createdAt: t(120), editedAt: t(10) },
+        { author: 'copilot-pull-request-reviewer[bot]', body: 'Unused import.', anchor: 'discussion_r2', createdAt: t(119), resolved: true },
+      ],
+      'aaa',
+      [],
+      now,
+    );
+    expect(inherited[0]).toMatchObject({ id: 'copilot', verdict: 'findings', count: 0, sourceId: 'discussion_r2' });
+  });
 
+  
   it("reads a check's conclusion in the bot's own words", () => {
     // Bugbot's docs: `neutral` is its default for a run that found something; `failure` only when configured to
     // fail on unresolved findings. CodeRabbit's check is neutral on completion and says nothing about the code.
