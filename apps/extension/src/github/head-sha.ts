@@ -5,6 +5,17 @@ const SHA = /^[0-9a-f]{40}$/i;
  * network request. Both GitHub UIs leak it in a few stable places.
  */
 export function detectHeadSha(): string | null {
+  // The conversation tab: the last commit row in the timeline is the head, and GitHub appends a pushed commit's
+  // row live (its socket), while the stale-comparison poller below keeps the head the page loaded with — a tab
+  // left open across a push read the old head's checks and never saw the new run (geld#71).
+  const conversation = /^\/[^/]+\/[^/]+\/pull\/(\d+)\/?$/.exec(window.location.pathname);
+  if (conversation !== null) {
+    const rows = document.querySelectorAll<HTMLAnchorElement>(`a[href*="/pull/${conversation[1]}/commits/"]`);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const match = /\/commits\/([0-9a-f]{40})(?:[/?#]|$)/i.exec(rows[index]?.getAttribute('href') ?? '');
+      if (match?.[1] !== undefined) return match[1].toLowerCase();
+    }
+  }
   // Legacy files view: progressive diff loaders carry `sha2=<head>`.
   for (const element of document.querySelectorAll('[data-fragment-url*="sha2="]')) {
     const url = element.getAttribute('data-fragment-url') ?? '';
