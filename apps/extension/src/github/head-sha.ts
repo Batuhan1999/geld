@@ -1,21 +1,47 @@
+import { compareHome } from './review/teleport';
+
 const SHA = /^[0-9a-f]{40}$/i;
+
+/** A commit's timeline row, in either UI. Mirrors `COMMIT_ROW` in review/crawler.ts. */
+const COMMIT_ROW = '.js-commits-list-item, .js-commit-group, [data-testid="commit-row"], [data-testid="timeline-commit-row"], .TimelineItem:has(> .TimelineItem-badge .octicon-git-commit), [class*="CommitRow"]';
+const COMMENT_BODY = '.comment-body, .markdown-body, [data-testid="comment-body"]';
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The conversation tab's head: the newest commit row in the timeline, which
+ * GitHub appends live (its socket) when a push lands, while the page's
+ * stale-comparison poller and embedded payload keep the head it loaded with.
+ * A tab left open across a push read the old head's checks and never saw the
+ * new run (geld#71). Only a commit row's own link counts, for this pull
+ * request's commits: a commit URL someone pasted in a comment is not a push,
+ * and a row on loan to the digest is ordered by its home, not where it stands.
+ */
+export function conversationHeadSha(): string | null {
+  const conversation = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/.exec(window.location.pathname);
+  if (conversation === null) return null;
+  const prefix = `/${conversation[1]}/${conversation[2]}/pull/${conversation[3]}/commits/`;
+  const link = new RegExp(`^(?:https?://[^/]+)?${escapeRegExp(prefix)}([0-9a-f]{40})(?:[/?#]|$)`, 'i');
+  let newest: { readonly row: Element; readonly sha: string } | null = null;
+  for (const anchor of document.querySelectorAll<HTMLAnchorElement>(`a[href*="${prefix}"]`)) {
+    const sha = link.exec(anchor.getAttribute('href') ?? '')?.[1];
+    if (sha === undefined || anchor.closest(COMMENT_BODY) !== null) continue;
+    const row = anchor.closest(COMMIT_ROW);
+    if (row === null) continue;
+    if (newest === null || compareHome(newest.row, row) < 0) newest = { row, sha: sha.toLowerCase() };
+  }
+  return newest?.sha ?? null;
+}
 
 /**
  * Find the head commit of the pull request on the current page without any
  * network request. Both GitHub UIs leak it in a few stable places.
  */
 export function detectHeadSha(): string | null {
-  // The conversation tab: the last commit row in the timeline is the head, and GitHub appends a pushed commit's
-  // row live (its socket), while the stale-comparison poller below keeps the head the page loaded with — a tab
-  // left open across a push read the old head's checks and never saw the new run (geld#71).
-  const conversation = /^\/[^/]+\/[^/]+\/pull\/(\d+)\/?$/.exec(window.location.pathname);
-  if (conversation !== null) {
-    const rows = document.querySelectorAll<HTMLAnchorElement>(`a[href*="/pull/${conversation[1]}/commits/"]`);
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      const match = /\/commits\/([0-9a-f]{40})(?:[/?#]|$)/i.exec(rows[index]?.getAttribute('href') ?? '');
-      if (match?.[1] !== undefined) return match[1].toLowerCase();
-    }
-  }
+  const fromRows = conversationHeadSha();
+  if (fromRows !== null) return fromRows;
   // Legacy files view: progressive diff loaders carry `sha2=<head>`.
   for (const element of document.querySelectorAll('[data-fragment-url*="sha2="]')) {
     const url = element.getAttribute('data-fragment-url') ?? '';

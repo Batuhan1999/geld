@@ -21,7 +21,7 @@ import { DiffSource } from './diff-source';
 import type { ResolvedRepoConfig } from './repo-config-source';
 import { RepoConfigSource, validConfigs } from './repo-config-source';
 import { createElement, isOwnElement, OWN_UI_ATTRIBUTE, queryAll, restoreManagedText, svgFromString, writeAttribute } from './dom';
-import { detectHeadSha, fetchHeadSha, shaFromCommitUrl, watchFilesRefresh } from './head-sha';
+import { conversationHeadSha, detectHeadSha, fetchHeadSha, shaFromCommitUrl, watchFilesRefresh } from './head-sha';
 import type { HeaderStatGroup } from './header-stats';
 import { applyHeaderStats, findHeaderStatGroups, holdsHeaderStats, isSrOnlyText, restoreHeaderStats } from './header-stats';
 import type { DiffEntry, DiffView, TreeFileNode } from './model';
@@ -1521,11 +1521,26 @@ export class GeldController {
     return groups;
   }
 
-  /** The page's head SHA, read once per page state (the read scans attributes and the embedded JSON payload). */
+  /**
+   * The page's head SHA, read once per page state (the read scans attributes
+   * and the embedded JSON payload), except on the conversation tab, whose
+   * commit rows are read every time: a push appends one live under the same
+   * page state, and the diff, header counts and paths follow the new head as
+   * they do after the files view's refresh (`onFilesRefresh`).
+   */
   private headShaFor(page: PageInfo, url: URL): string | null {
     if (page.kind === 'commit') return shaFromCommitUrl(url.pathname);
     if (!page.kind.startsWith('pull')) return null;
     const cached = this.headShaCache;
+    const live = page.kind === 'pull-conversation' ? conversationHeadSha() : null;
+    if (live !== null) {
+      if (cached !== null && cached.stateKey === page.stateKey && cached.sha !== null && cached.sha !== live) {
+        this.settledHeader = null;
+        this.headerDirty = true;
+      }
+      this.headShaCache = { stateKey: page.stateKey, sha: live };
+      return live;
+    }
     if (cached !== null && cached.stateKey === page.stateKey && cached.sha !== null) return cached.sha;
     const sha = detectHeadSha();
     this.headShaCache = { stateKey: page.stateKey, sha };
