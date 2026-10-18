@@ -1019,7 +1019,7 @@ export function verdictsFrom(
   const checkVerdict = new Map<string, 'clean' | 'findings' | 'failed' | 'running'>();
   /** When each bot's check began (epoch ms), when the page or the API said: which run a finished check belongs to. */
   const checkStartedAt = new Map<string, number>();
-  /** When each bot's check finished (epoch ms), when known: a finish after a request is that run's, whatever the start. */
+  /** When each bot's check finished (epoch ms), when known: places the run only when its start is unknown (a commit status). */
   const checkFinishedAt = new Map<string, number>();
 
   for (const check of checks) {
