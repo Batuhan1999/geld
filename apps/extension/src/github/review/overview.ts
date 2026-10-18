@@ -1832,6 +1832,11 @@ function buildBotLines(meta: GeldPrMeta): readonly BotLine[] {
           if (container !== null) {
             if (containers.has(container)) continue;
             containers.add(container);
+            // The thread must be the bot's own: a coding agent under the same login replying in another bot's thread
+            // (Cursor's agents in Greptile's, as `cursor[bot]`) is a source of that item, not a thread of this bot's.
+            const opener = container.querySelector<HTMLElement>('[id^="discussion_r"], [data-testid="review-thread-comment"]');
+            const openedBy = opener === null ? null : authorOf(opener)?.login;
+            if (openedBy !== undefined && openedBy !== null && resolveBotId(openedBy) !== bot.id && openedBy.toLowerCase() !== bot.login.toLowerCase()) continue;
           } else if (threads.some((ref) => ref.anchor === source.anchor)) continue;
           const threadEl = document.getElementById(source.anchor);
           const review = threadEl === null ? null : closestAtHome(threadEl, '[id^="pullrequestreview-"]');
