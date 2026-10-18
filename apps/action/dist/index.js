@@ -19812,6 +19812,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const byId = /* @__PURE__ */ new Map();
   const checkVerdict = /* @__PURE__ */ new Map();
   const checkStartedAt = /* @__PURE__ */ new Map();
+  const checkFinishedAt = /* @__PURE__ */ new Map();
   for (const check2 of checks) {
     const bot = botByCheckName(check2.name);
     if (bot === null) continue;
@@ -19825,6 +19826,9 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     const started = check2.startedAt === void 0 ? NaN : Date.parse(check2.startedAt);
     if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
     else checkStartedAt.set(bot.id, started);
+    const finished = check2.completedAt === void 0 ? NaN : Date.parse(check2.completedAt);
+    if (Number.isNaN(finished)) checkFinishedAt.delete(bot.id);
+    else checkFinishedAt.set(bot.id, finished);
     const record3 = {
       id: bot.id,
       login,
@@ -19924,7 +19928,9 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     if (existing !== void 0 && at !== null && edited !== void 0 && edited > at) continue;
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
     const started = checkStartedAt.get(id);
-    const checkIsThisRun = existing?.checkName !== void 0 && !(started !== void 0 && at !== null && started < at);
+    const finished = checkFinishedAt.get(id);
+    const before = started !== void 0 ? started : finished;
+    const checkIsThisRun = existing?.checkName !== void 0 && !(before !== void 0 && at !== null && before < at);
     if (stale && !checkIsThisRun && options.partial !== true) {
       const prior = runsBeforeAsk.get(id);
       if (prior !== void 0 && !threadRuns.has(id)) {
@@ -21687,7 +21693,7 @@ query GeldPr($owner: String!, $name: String!, $number: Int!, $threadCursor: Stri
                 nodes {
                   __typename
                   ... on CheckRun { name status conclusion startedAt completedAt }
-                  ... on StatusContext { context state }
+                  ... on StatusContext { context state createdAt }
                 }
               }
             }
@@ -21738,7 +21744,7 @@ query GeldCheckContexts($owner: String!, $name: String!, $oid: GitObjectID!, $cu
             nodes {
               __typename
               ... on CheckRun { name status conclusion startedAt completedAt }
-              ... on StatusContext { context state }
+              ... on StatusContext { context state createdAt }
             }
           }
         }
@@ -21779,7 +21785,9 @@ function checkRunOf(node2, sha2) {
   if (node2.__typename === "StatusContext" && node2.context !== void 0 && node2.state !== void 0) {
     const state = node2.state.toLowerCase();
     const conclusion = state === "success" ? "success" : state === "pending" ? null : "failure";
-    return { name: node2.context, status: state === "pending" ? "in_progress" : "completed", conclusion, sha: sha2 };
+    const at = typeof node2.createdAt === "string" ? node2.createdAt : void 0;
+    const when = at === void 0 ? {} : state === "pending" ? { startedAt: at } : { completedAt: at };
+    return { name: node2.context, status: state === "pending" ? "in_progress" : "completed", conclusion, sha: sha2, ...when };
   }
   return null;
 }
