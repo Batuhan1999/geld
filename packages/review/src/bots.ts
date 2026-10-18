@@ -484,7 +484,8 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
       if (items > 0) count = items;
     }
   }
-  // "found no new issues", "no further problems", "0 potential issues": the adjectives between "no" and the noun
+  // "found no new issues", "no further problems", "0 potential issues", "No open issues" (Copilot's overview once
+  // every finding is resolved, beside "N open findings" while some are): the adjectives between "no" and the noun
   // vary by bot and by run, so a few are allowed through. CodeRabbit's clean word is "No actionable comments were
   // generated in the recent review". A scored summary that lists no findings (Greptile, above) is clean with its score.
   // "Didn't find any major issues" (Codex); a coding agent's review verdict ("Verdict: approve", "Approved."), as
@@ -516,7 +517,7 @@ export function parseBotBody(body: string, botId: string): ParsedBotBody {
   const clean =
     !needsHuman &&
     (count === null || count === 0) &&
-    (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
+    (/\bno(?: (?:new|further|additional|other|remaining|potential|actionable|significant|blocking|logic|open))* (?:issues|bugs|findings|problems|defects|errors)\b/i.test(text) ||
       /\bno actionable comments\b/i.test(text) ||
       /\b(?:looks good|lgtm|all clean|no bugs found|nothing blocking|they look great|all reported issues were addressed)\b/i.test(text) ||
       readyToMerge ||
@@ -1239,8 +1240,11 @@ export function verdictsFrom(
     // — its verdict, read above from the words as they are now, and its anchor, where the reader should go. The
     // rewrite has to be that summary's own: a bot with two summaries editing the older one says nothing new in the
     // one the verdict was read from.
+    // A rewrite whose words gave no count (findings the parser could not count) says less than the threads do: every
+    // one of them is resolved, and that is what the chip shows. A rewrite that counts its findings still stands.
     const edited = existing?.sourceId === undefined ? undefined : editedAtOf.get(existing.sourceId);
-    if (existing?.sourceId !== undefined && (existing.verdict === 'clean' || existing.verdict === 'findings') && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
+    const rewriteSpeaks = existing?.verdict === 'clean' || (existing?.verdict === 'findings' && existing.count !== undefined);
+    if (existing?.sourceId !== undefined && rewriteSpeaks && edited !== undefined && run.lastAt !== null && edited > run.lastAt + RERUN_EDIT_GAP_MS) continue;
     // A check that failed or is still running says so; one that passed does not turn resolved findings into a run
     // that found nothing — the bot has not looked again — so they read "resolved" (findings, none open), which
     // the request menu still offers a rerun for.
