@@ -387,7 +387,6 @@ describe('bots + prompts', () => {
     expect(parseBotBody('Found 2 issues, see #9377 issues for the earlier ones.', 'bugbot').count).toBe(2);
     expect(parseBotBody('Fixes GH-123 issues: found 1 bug.', 'bugbot').count).toBe(1);
   });
->>>>>>> 6178296 (Keep both test blocks from the merge with main)
   it("reads Copilot's overview: open findings counted, none open is clean", () => {
     // Copilot code review's overview (`ccr-overview-v2`, Oct 2026): a verdict heading, then "**1 open finding**" /
     // "**0 open findings**" / "**No open issues** 🎉", edited as the findings are resolved.
@@ -425,9 +424,9 @@ describe('bots + prompts', () => {
       now,
     );
     expect(counted[0]).toMatchObject({ id: 'greptile', verdict: 'findings', count: 2, sourceId: 'issuecomment-1' });
->>>>>>> 6178296 (Keep both test blocks from the merge with main)
   });
 
+  
   it("reads a check's conclusion in the bot's own words", () => {
     // Bugbot's docs: `neutral` is its default for a run that found something; `failure` only when configured to
     // fail on unresolved findings. CodeRabbit's check is neutral on completion and says nothing about the code.
