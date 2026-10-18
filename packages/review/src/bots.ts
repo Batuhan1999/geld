@@ -1019,6 +1019,8 @@ export function verdictsFrom(
   const checkVerdict = new Map<string, 'clean' | 'findings' | 'failed' | 'running'>();
   /** When each bot's check began (epoch ms), when the page or the API said: which run a finished check belongs to. */
   const checkStartedAt = new Map<string, number>();
+  /** When each bot's check finished (epoch ms), when known: places the run only when its start is unknown (a commit status). */
+  const checkFinishedAt = new Map<string, number>();
 
   for (const check of checks) {
     const bot = botByCheckName(check.name);
@@ -1037,6 +1039,9 @@ export function verdictsFrom(
     const started = check.startedAt === undefined ? NaN : Date.parse(check.startedAt);
     if (Number.isNaN(started)) checkStartedAt.delete(bot.id);
     else checkStartedAt.set(bot.id, started);
+    const finished = check.completedAt === undefined ? NaN : Date.parse(check.completedAt);
+    if (Number.isNaN(finished)) checkFinishedAt.delete(bot.id);
+    else checkFinishedAt.set(bot.id, finished);
     const record: DerivedBotVerdict = {
       id: bot.id,
       login,
@@ -1174,11 +1179,15 @@ export function verdictsFrom(
     // Announced long ago, nothing since, no check to say how it went: the run never reported. What the bot said
     // before that stands (from that earlier run); a bot that never said anything else did not review this.
     const stale = at !== null && now - at > STATUS_LINE_STALE_MS;
-    // The check speaks for this run only when it is this run's: one that began before the request is the earlier
-    // run's, and says nothing about whether the bot answered. With no start to go by, the check is taken as the
-    // run's, as before.
+    // The check speaks for this run only when it is this run's: one that began — or, with no start known, finished
+    // (a commit status is set in one moment) — before the request is the earlier run's, and says nothing about
+    // whether the bot answered. With no times to go by, the check is taken as the run's, as before: Devin's status
+    // on the page carries none, flips to pending as it starts and back to green with no comment when it finds
+    // nothing (mint#12256), so an undated green check after "Starting" is that clean run.
     const started = checkStartedAt.get(id);
-    const checkIsThisRun = existing?.checkName !== undefined && !(started !== undefined && at !== null && started < at);
+    const finished = checkFinishedAt.get(id);
+    const before = started !== undefined ? started : finished;
+    const checkIsThisRun = existing?.checkName !== undefined && !(before !== undefined && at !== null && before < at);
     // A request that aged unanswered, with no check of its own to say how the run went: the earlier run stands
     // whole, its threads included — the request had set them aside — so a run whose findings were all resolved
     // reads "resolved" below, not as its summary's count from before they were, and a bot that only ever posted

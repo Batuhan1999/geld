@@ -567,6 +567,34 @@ describe('bots + prompts', () => {
     expect(verdictsFrom([{ name: 'Devin Review', status: 'in_progress', conclusion: null, sha: 'bbb' }], [{ author: 'devin-ai-integration[bot]', body: 'Found 1 issue.', anchor: 'a' }, { author: 'devin-ai-integration[bot]', body: 'Starting Devin Review.', anchor: 'b' }], 'bbb')[0]?.verdict).toBe('running');
   });
 
+  it('judges a dated commit status against the run it answers, and an undated one as the run\'s', () => {
+    // mint#12256: Devin reviewed on Oct 13 (a green "Devin Review" commit status, two threads, since resolved),
+    // "/devin review" and "Starting Devin Review." again on Oct 18. Devin posts nothing when it finds nothing, so
+    // the status, back to green, is the clean run — and on the page it carries no time, so it is taken as such.
+    const t = (iso: string): string => new Date(iso).toISOString();
+    const green = { name: 'Devin Review', status: 'completed', conclusion: 'success', sha: 'head' };
+    const comments = [
+      { author: 'lucaspunz', body: '/devin review', anchor: 'issuecomment-1', createdAt: t('2026-10-13T21:10:16Z') },
+      { author: 'devin-ai-integration[bot]', body: 'Starting Devin Review.', anchor: 'issuecomment-2', createdAt: t('2026-10-13T21:10:21Z') },
+      { author: 'devin-ai-integration[bot]', body: 'Devin Review found 2 potential issues.', anchor: 'pullrequestreview-1', createdAt: t('2026-10-13T21:12:49Z') },
+      { author: 'devin-ai-integration[bot]', body: 'Thread one.', anchor: 'discussion_r1', isReviewComment: true, resolved: true, createdAt: t('2026-10-13T21:12:50Z') },
+      { author: 'devin-ai-integration[bot]', body: 'Thread two.', anchor: 'discussion_r2', isReviewComment: true, resolved: true, createdAt: t('2026-10-13T21:12:51Z') },
+      { author: 'brandonmcconnell', body: '/devin review', anchor: 'issuecomment-3', createdAt: t('2026-10-18T10:43:26Z') },
+      { author: 'devin-ai-integration[bot]', body: 'Starting Devin Review.', anchor: 'issuecomment-4', createdAt: t('2026-10-18T10:43:30Z') },
+    ];
+    const soon = Date.parse('2026-10-18T10:47:00Z');
+    expect(verdictsFrom([green], comments, 'head', [], soon)[0]).toMatchObject({ id: 'devin', verdict: 'clean', sourceId: 'issuecomment-4' });
+    // The Action reads a status's `createdAt`: set after the request, it is this run's, clean.
+    expect(verdictsFrom([{ ...green, completedAt: t('2026-10-18T10:44:40Z') }], comments, 'head', [], soon)[0]).toMatchObject({ verdict: 'clean', sourceId: 'issuecomment-4' });
+    // Set before it: the earlier run's, so the new run is still running.
+    expect(verdictsFrom([{ ...green, completedAt: t('2026-10-13T21:13:00Z') }], comments, 'head', [], soon)[0]?.verdict).toBe('running');
+    // A status pending since the request is the run under way.
+    expect(verdictsFrom([{ ...green, status: 'in_progress', conclusion: null, startedAt: t('2026-10-18T10:43:31Z') }], comments, 'head', [], soon)[0]?.verdict).toBe('running');
+    // An earlier status, and the line aged with no report: the earlier run stands whole, its two threads resolved.
+    const later = soon + 60 * 60_000;
+    expect(verdictsFrom([{ ...green, completedAt: t('2026-10-13T21:13:00Z') }], comments, 'head', [], later)[0]).toMatchObject({ verdict: 'findings', count: 0 });
+  });
+
   it('reads a run started from CI, with nothing said in the thread, from its check alone', () => {
     const running = [
       { name: 'Cursor Bugbot', status: 'in_progress', conclusion: null, sha: 'bbb' },
@@ -714,10 +742,14 @@ describe('bots + prompts', () => {
     // One that began after the request is its answer.
     const answerCheck = { ...earlierCheck, startedAt: at(60), completedAt: at(50) };
     expect(verdictsFrom([answerCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
-    // Two checks for one bot, the later with no start of its own: its verdict is the one kept, so the start kept
-    // is its (none) — not the earlier check's, which would read the later verdict as the earlier run's.
+    // Two checks for one bot, the later with no times of its own: its verdict is the one kept, so the times kept
+    // are its (none) — not the earlier check's, which would read the later verdict as the earlier run's.
     const { startedAt: _started, completedAt: _completed, ...undatedCheck } = earlierCheck;
     expect(verdictsFrom([earlierCheck, undatedCheck], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
+    // A commit status has one moment, which the Action reads: a finish with no start stands in for it, before the
+    // request the earlier run's, after it the answer.
+    expect(verdictsFrom([{ ...undatedCheck, completedAt: at(1290) }], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')).toMatchObject({ verdict: 'findings', count: 1 });
+    expect(verdictsFrom([{ ...undatedCheck, completedAt: at(50) }], [summary, { ...thread, resolved: false }, request], 'aaa', [], now).find((bot) => bot.id === 'bugbot')?.verdict).toBe('clean');
   });
 
   it('has no word on a request that aged unanswered on a merged pull request', () => {
