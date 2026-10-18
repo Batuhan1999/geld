@@ -42,6 +42,26 @@ describe('detectHeadSha', () => {
     expect(detectHeadSha()).toBe(A);
   });
 
+  it('takes a force-push row\'s target when it is the latest push', () => {
+    window.history.replaceState(null, '', '/acme/widgets/pull/71');
+    // vitest#11625's row: "X force-pushed the branch from a to b", linking compare/a..b and each commit, with no
+    // commit row of its own for the rewrite, which GitHub's socket can append live as this one row.
+    const forcePush = (from: string, to: string): string => `
+      <div class="TimelineItem"><div class="TimelineItem-badge"><svg class="octicon octicon-repo-push"></svg></div>
+        <div class="TimelineItem-body"><a href="/alice">alice</a> <a href="/acme/widgets/compare/${from}..${to}">force-pushed</a> the branch from
+        <a href="/acme/widgets/commit/${from}"><code>${from.slice(0, 7)}</code></a> to <a href="/acme/widgets/commit/${to}"><code>${to.slice(0, 7)}</code></a>
+        <a href="/acme/widgets/compare/${from}..${to}">Compare</a></div></div>`;
+    document.body.innerHTML = `<div class="js-discussion">${row(A)}${forcePush(A, B)}</div>`;
+    expect(detectHeadSha()).toBe(B);
+    // A commit row appended after it is the newer push.
+    document.querySelector('.js-discussion')?.insertAdjacentHTML('beforeend', row(C));
+    expect(detectHeadSha()).toBe(C);
+    // A compare link of another repository, or in a comment, is neither.
+    document.body.innerHTML = `<div class="js-discussion">${row(A)}${forcePush(A, B).replaceAll('acme/widgets/compare', 'acme/gadgets/compare')}
+      <div class="TimelineItem"><div class="comment-body"><a href="/acme/widgets/compare/${A}..${C}">diff</a></div></div></div>`;
+    expect(detectHeadSha()).toBe(A);
+  });
+
   it('orders commit rows by their home, not where a loan has moved them', () => {
     window.history.replaceState(null, '', '/acme/widgets/pull/71');
     document.body.innerHTML = `

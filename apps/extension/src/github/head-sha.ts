@@ -4,6 +4,8 @@ const SHA = /^[0-9a-f]{40}$/i;
 
 /** A commit's timeline row, in either UI. Mirrors `COMMIT_ROW` in review/crawler.ts. */
 const COMMIT_ROW = '.js-commits-list-item, .js-commit-group, [data-testid="commit-row"], [data-testid="timeline-commit-row"], .TimelineItem:has(> .TimelineItem-badge .octicon-git-commit), [class*="CommitRow"]';
+/** "X force-pushed the branch from a to b". Mirrors `FORCE_PUSH_ROW` in review/crawler.ts. */
+const FORCE_PUSH_ROW = '.TimelineItem:has(.octicon-repo-push), [data-testid="force-pushed-event"], [class*="ForcePush"]';
 const COMMENT_BODY = '.comment-body, .markdown-body, [data-testid="comment-body"]';
 
 function escapeRegExp(text: string): string {
@@ -11,27 +13,41 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * The conversation tab's head: the newest commit row in the timeline, which
- * GitHub appends live (its socket) when a push lands, while the page's
- * stale-comparison poller and embedded payload keep the head it loaded with.
- * A tab left open across a push read the old head's checks and never saw the
- * new run (geld#71). Only a commit row's own link counts, for this pull
- * request's commits: a commit URL someone pasted in a comment is not a push,
- * and a row on loan to the digest is ordered by its home, not where it stands.
+ * The conversation tab's head: the newest push in the timeline, which GitHub
+ * appends live (its socket) when one lands, while the page's stale-comparison
+ * poller and embedded payload keep the head it loaded with. A tab left open
+ * across a push read the old head's checks and never saw the new run
+ * (geld#71). A push is a commit row's own link to this pull request's commits,
+ * or a force-push row's "to" commit (its Compare link, `compare/<from>..<to>`,
+ * in this repository), since a rewrite can land as that one row with no commit
+ * row of its own. A commit URL someone pasted in a comment is not a push, and
+ * a row on loan to the digest is ordered by its home, not where it stands.
  */
 export function conversationHeadSha(): string | null {
   const conversation = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/.exec(window.location.pathname);
   if (conversation === null) return null;
-  const prefix = `/${conversation[1]}/${conversation[2]}/pull/${conversation[3]}/commits/`;
-  const link = new RegExp(`^(?:https?://[^/]+)?${escapeRegExp(prefix)}([0-9a-f]{40})(?:[/?#]|$)`, 'i');
-  let newest: { readonly row: Element; readonly sha: string } | null = null;
-  for (const anchor of document.querySelectorAll<HTMLAnchorElement>(`a[href*="${prefix}"]`)) {
-    const sha = link.exec(anchor.getAttribute('href') ?? '')?.[1];
-    if (sha === undefined || anchor.closest(COMMENT_BODY) !== null) continue;
-    const row = anchor.closest(COMMIT_ROW);
-    if (row === null) continue;
-    if (newest === null || compareHome(newest.row, row) < 0) newest = { row, sha: sha.toLowerCase() };
+  const repo = `/${conversation[1]}/${conversation[2]}`;
+  const commits = `${repo}/pull/${conversation[3]}/commits/`;
+  const compare = `${repo}/compare/`;
+  const commitLink = new RegExp(`^(?:https?://[^/]+)?${escapeRegExp(commits)}([0-9a-f]{40})(?:[/?#]|$)`, 'i');
+  const compareLink = new RegExp(`^(?:https?://[^/]+)?${escapeRegExp(compare)}[0-9a-f]{40}\\.\\.([0-9a-f]{40})(?:[/?#]|$)`, 'i');
+  const pushes: { readonly row: Element; readonly sha: string }[] = [];
+  for (const anchor of document.querySelectorAll<HTMLAnchorElement>(`a[href*="${commits}"], a[href*="${compare}"]`)) {
+    const href = anchor.getAttribute('href') ?? '';
+    if (anchor.closest(COMMENT_BODY) !== null) continue;
+    const sha = commitLink.exec(href)?.[1];
+    if (sha !== undefined) {
+      const row = anchor.closest(COMMIT_ROW);
+      if (row !== null) pushes.push({ row, sha: sha.toLowerCase() });
+      continue;
+    }
+    const target = compareLink.exec(href)?.[1];
+    if (target === undefined) continue;
+    const row = anchor.closest(FORCE_PUSH_ROW);
+    if (row !== null && /\bforce-pushed\b/i.test(row.textContent ?? '')) pushes.push({ row, sha: target.toLowerCase() });
   }
+  let newest: { readonly row: Element; readonly sha: string } | null = null;
+  for (const push of pushes) if (newest === null || compareHome(newest.row, push.row) < 0) newest = push;
   return newest?.sha ?? null;
 }
 
