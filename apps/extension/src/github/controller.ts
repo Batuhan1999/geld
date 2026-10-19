@@ -1195,7 +1195,10 @@ export class GeldController {
       }
       const list = byCategory.get(category) ?? [];
       // The virtualised list mounts any file on request (GitHub's tree item takes the page there), so none is pending.
-      list.push({ path: file.path, available: view.virtualized || entryPaths.has(file.path), statusIcon: file.statusIcon, status: this.diffFacts?.get(file.path)?.status ?? null });
+      const name = file.path.split('/').pop() ?? file.path;
+      const described = file.element.getAttribute('aria-label');
+      const annotationLabel = described !== null && described.startsWith(name) && described !== name ? described : null;
+      list.push({ path: file.path, available: view.virtualized || entryPaths.has(file.path), statusIcon: file.statusIcon, trailingVisual: file.trailingVisual, annotationLabel, status: this.diffFacts?.get(file.path)?.status ?? null });
       byCategory.set(category, list);
     }
 
