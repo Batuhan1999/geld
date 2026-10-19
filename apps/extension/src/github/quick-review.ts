@@ -34,6 +34,8 @@ const BUTTON_CLASS = 'geld-quick-review';
 const PANEL_CLASS = 'geld-quick-review__panel';
 /** On `<html>` while the button is mounted; the stylesheet hides GitHub's own review button under it. */
 const ATTR_ACTIVE = 'data-geld-quick-review';
+/** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
+const ATTR_HOST = 'data-geld-quick-review-host';
 const SUBMITTED_MS = 3000;
 
 const EVENTS: readonly { readonly value: ReviewEvent; readonly label: string; readonly note: string; readonly authorNote: string | null }[] = [
@@ -127,6 +129,7 @@ interface Draft {
 
 interface Mounted {
   readonly button: HTMLButtonElement;
+  host: HTMLElement | null;
   readonly label: HTMLElement;
   pullPath: string;
   context: QuickReviewContext;
@@ -162,6 +165,12 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   }
   mounted.context = context;
   if (anchor.previousElementSibling !== mounted.button) anchor.insertAdjacentElement('beforebegin', mounted.button);
+  const host = anchor.parentElement;
+  if (mounted.host !== host) {
+    mounted.host?.removeAttribute(ATTR_HOST);
+    mounted.host = host;
+  }
+  if (host !== null && !host.hasAttribute(ATTR_HOST)) host.setAttribute(ATTR_HOST, '');
   // Written only when it changes: every write is a mutation record, and passes run on mutations.
   if (!document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.setAttribute(ATTR_ACTIVE, '');
 }
@@ -171,6 +180,7 @@ export function removeQuickReview(): void {
   if (mounted === null) return;
   closePanel();
   window.clearTimeout(mounted.submittedTimer);
+  mounted.host?.removeAttribute(ATTR_HOST);
   mounted.button.remove();
   mounted = null;
 }
@@ -182,7 +192,7 @@ function createButton(pullPath: string, context: QuickReviewContext): Mounted {
     { type: 'button', class: `btn btn-sm btn-primary ${BUTTON_CLASS}`, [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
     [label, svgFromString(ICON_TRIANGLE_DOWN)],
   );
-  const state: Mounted = { button, label, pullPath, context, panel: null, submittedTimer: 0 };
+  const state: Mounted = { button, host: null, label, pullPath, context, panel: null, submittedTimer: 0 };
   button.addEventListener('click', () => {
     if (state.panel !== null) closePanel();
     else openPanel();

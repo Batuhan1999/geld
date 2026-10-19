@@ -728,8 +728,20 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  margin-right: 12px;
+  /* A 28px button in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
+  margin: -5px 12px -5px 0;
   white-space: nowrap;
+}
+
+/*
+ * GitHub floats the counts right of the tabs and drops their line with 12px of top padding. Holding the button too,
+ * the box is the tab bar's height instead (TabNav, a 40px row) with both centred on the tabs, as the tabs' own labels are.
+ */
+[class*='rightContentWrapper'][data-geld-quick-review-host] {
+  box-sizing: border-box;
+  height: 40px;
+  padding-top: 0 !important;
+  align-items: center;
 }
 
 .geld-quick-review > svg {
