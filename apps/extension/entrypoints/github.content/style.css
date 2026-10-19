@@ -568,6 +568,14 @@
   white-space: nowrap;
 }
 
+/* GitHub's trailing marks: the comment count and the check-annotation icon, cloned with their own classes. */
+.geld-tree__trailing {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .geld-tree__label--root {
   font-weight: 600;
   color: var(--fgColor-default, #1f2328);
