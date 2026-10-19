@@ -1,10 +1,12 @@
+import { firstSentence } from '@geld/review';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
-import { discardPendingReview, fetchPendingComments, githubMarkup, pendingCountOnPage } from './pending-review';
-import { ICON_CHEVRON_DOWN, ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
+import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
+import { inlineText } from './review/inline-text';
+import { ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
 
 /**
  * "Submit review" in the pull request's tab bar, left of the line counts, on
@@ -410,11 +412,12 @@ function openPanel(): void {
 }
 
 /**
- * "Pending comments N" under the choices, as GitHub's dialog lists them:
- * each comment's file and line (leading to it in the diff), the diff lines
- * up to it, and what was written. Folds, open at first. Nothing when there
- * are none; the count alone while GitHub's own count is ahead of the list
- * (a comment added on Files changed since the list was read).
+ * "Pending comments N" under the choices, one line per comment as the
+ * digest lists threads: the comment's first sentence, then its file and
+ * line, the line leading to the comment on the Files changed tab. Folds,
+ * open at first. Nothing when there are none; the count alone while
+ * GitHub's own count is ahead of the list (a comment added on Files changed
+ * since the list was read).
  */
 function renderPending(section: HTMLElement, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
   section.replaceChildren();
@@ -430,33 +433,15 @@ function renderPending(section: HTMLElement, comments: readonly PendingComment[]
   if (!open || comments === null) return;
   const list = createElement('ul', { class: 'geld-quick-review__pending-list' });
   for (const comment of comments) {
-    const where = createElement('a', { class: 'geld-quick-review__pending-path Link--primary', href: comment.href ?? '#', title: comment.path }, [comment.path]);
-    const head = createElement('div', { class: 'geld-quick-review__pending-head' }, [
-      where,
+    const file = comment.path.split('/').pop() ?? comment.path;
+    const where = comment.line === null ? file : `${file}:${comment.line}`;
+    const link = createElement('a', { class: 'geld-quick-review__pending-row', href: comment.href ?? '#', title: `${comment.path}${comment.line === null ? '' : `, line ${comment.line}`}` }, [
+      createElement('span', { class: 'geld-quick-review__pending-glyph' }, [svgFromString(ICON_COMMENT)]),
+      createElement('span', { class: 'geld-quick-review__pending-text' }, inlineText(firstSentence(comment.body))),
+      createElement('span', { class: 'geld-quick-review__pending-where' }, [where]),
       ...(comment.outdated ? [createElement('span', { class: 'Label Label--secondary' }, ['Outdated'])] : []),
-      ...(comment.line === null ? [] : [createElement('span', { class: 'geld-quick-review__pending-line color-fg-muted' }, [`Line ${comment.line}`])]),
     ]);
-    const lines = createElement(
-      'table',
-      { class: 'geld-quick-review__pending-diff' },
-      [
-        createElement(
-          'tbody',
-          {},
-          comment.diffLines.map((line) => {
-            const code = createElement('td', { class: 'geld-quick-review__pending-code' }, [line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : line.type === 'context' ? ' ' : '', githubMarkup(line.html)]);
-            return createElement('tr', { 'data-type': line.type }, [
-              createElement('td', { class: 'geld-quick-review__pending-num' }, [line.type === 'hunk' || line.left === null ? '' : String(line.left)]),
-              createElement('td', { class: 'geld-quick-review__pending-num' }, [line.type === 'hunk' || line.right === null ? '' : String(line.right)]),
-              code,
-            ]);
-          }),
-        ),
-      ],
-    );
-    const said = createElement('div', { class: 'geld-quick-review__pending-body markdown-body' });
-    said.append(githubMarkup(comment.bodyHtml));
-    list.append(createElement('li', { class: 'geld-quick-review__pending-item' }, [head, ...(comment.diffLines.length > 0 ? [lines] : []), said]));
+    list.append(createElement('li', {}, [link]));
   }
   section.append(list);
 }

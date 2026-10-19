@@ -837,89 +837,60 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__pending-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 320px;
-  margin: 8px 0 0;
+  gap: 0;
+  max-height: 192px;
+  /* The rows' hover surface overhangs by its padding, so their glyphs stand in the radios' column. */
+  margin: 4px -8px 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
 }
 
-.geld-quick-review__pending-item {
-  overflow: hidden;
-  border: 1px solid var(--borderColor-default, #d1d9e0);
-  border-radius: 6px;
-}
-
-.geld-quick-review__pending-head {
+/* One line per pending comment, as the digest lists threads: its words, then where it is, leading to it. */
+.geld-quick-review__pending-row {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--borderColor-default, #d1d9e0);
-  background: var(--bgColor-muted, #f6f8fa);
-  font-size: 12px;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+  text-decoration: none;
 }
 
-.geld-quick-review__pending-path {
-  flex: 1 1 auto;
+.geld-quick-review__pending-row:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  text-decoration: none;
+}
+
+.geld-quick-review__pending-glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.geld-quick-review__pending-text {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  direction: rtl;
-  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.geld-quick-review__pending-line {
-  flex-shrink: 0;
+.geld-quick-review__pending-text code {
+  font-size: 0.875em;
 }
 
-.geld-quick-review__pending-diff {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+.geld-quick-review__pending-where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fgColor-muted, #59636e);
   font-size: 12px;
-  line-height: 20px;
-}
-
-.geld-quick-review__pending-num {
-  width: 1%;
-  min-width: 40px;
-  padding: 0 8px;
-  color: var(--fgColor-muted, #59636e);
-  text-align: right;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.geld-quick-review__pending-code {
-  padding: 0 8px;
-  white-space: pre;
-}
-
-.geld-quick-review__pending-diff tr[data-type='hunk'] {
-  background: var(--diffBlob-hunkLine-bgColor, #ddf4ff);
-  color: var(--fgColor-muted, #59636e);
-}
-
-.geld-quick-review__pending-diff tr[data-type='addition'] {
-  background: var(--diffBlob-additionLine-bgColor, #dafbe1);
-}
-
-.geld-quick-review__pending-diff tr[data-type='deletion'] {
-  background: var(--diffBlob-deletionLine-bgColor, #ffebe9);
-}
-
-.geld-quick-review__pending-body {
-  padding: 8px 12px;
-  border-top: 1px solid var(--borderColor-default, #d1d9e0);
-  font-size: 14px;
-}
-
-.geld-quick-review__pending-body > :last-child {
-  margin-bottom: 0;
 }
 
 .geld-quick-review__actions {
