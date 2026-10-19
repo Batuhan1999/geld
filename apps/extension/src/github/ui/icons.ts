@@ -172,6 +172,11 @@ export const ICON_PAPER_AIRPLANE = octicon(
   'octicon-paper-airplane',
 );
 
+export const ICON_TRIANGLE_DOWN = octicon(
+  '<path d="m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z"></path>',
+  'octicon-triangle-down',
+);
+
 export const ICON_DOT_FILL = octicon('<path d="M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"></path>', 'octicon-dot-fill');
 
 export const ICON_X_CIRCLE_FILL = octicon(

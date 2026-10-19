@@ -714,6 +714,97 @@
 }
 
 /* ------------------------------------------------------------------------ */
+/* Submit review in the tab bar (quick-review.ts)                            */
+/* ------------------------------------------------------------------------ */
+
+/* The one Submit review on the page: GitHub's own (React Files changed toolbar, classic "Review changes") gives way. */
+html[data-geld-quick-review] [class*='ReviewMenuButton'],
+html[data-geld-quick-review] details.js-reviews-container {
+  display: none !important;
+}
+
+.geld-quick-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-right: 12px;
+  white-space: nowrap;
+}
+
+.geld-quick-review > svg {
+  margin-right: -2px;
+}
+
+/* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */
+.Overlay.geld-quick-review__panel {
+  position: absolute;
+  right: auto;
+  bottom: auto;
+  z-index: 100;
+  width: min(640px, calc(100vw - 32px));
+  max-height: none;
+  animation: none;
+}
+
+.Overlay.geld-quick-review__panel .Overlay-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.geld-quick-review__body {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.geld-quick-review__events {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.geld-quick-review__choice {
+  margin: 0 0 8px;
+}
+
+.geld-quick-review__choice:last-child {
+  margin-bottom: 0;
+}
+
+.geld-quick-review__choice label {
+  font-weight: 600;
+}
+
+.geld-quick-review__choice--disabled label,
+.geld-quick-review__choice--disabled .note {
+  color: var(--fgColor-disabled, var(--color-primer-fg-disabled, #818b98));
+}
+
+.geld-quick-review__error {
+  margin: 0;
+}
+
+.geld-quick-review__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.geld-quick-review__pending {
+  margin: 0;
+  font-size: 12px;
+}
+
+.geld-quick-review__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Header line counts + hover breakdown                                      */
 /* ------------------------------------------------------------------------ */
 
