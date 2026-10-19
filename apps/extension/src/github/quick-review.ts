@@ -2,7 +2,9 @@ import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { PageInfo } from './page';
-import { ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
+import type { PendingComment } from './pending-review';
+import { discardPendingReview, fetchPendingComments, githubMarkup, pendingCountOnPage } from './pending-review';
+import { ICON_CHEVRON_DOWN, ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
 
 /**
  * "Submit review" in the pull request's tab bar, left of the line counts, on
@@ -40,11 +42,11 @@ const SUBMITTED_MS = 3000;
 
 const EVENTS: readonly { readonly value: ReviewEvent; readonly label: string; readonly note: string; readonly authorNote: string | null }[] = [
   { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null },
-  { value: 'approve', label: 'Approve', note: 'Give feedback and approve these changes.', authorNote: "Pull request authors can't approve their own pull requests." },
+  { value: 'approve', label: 'Approve', note: 'Submit feedback and approve merging these changes.', authorNote: "Pull request authors can't approve their own pull requests." },
   {
     value: 'request changes',
     label: 'Request changes',
-    note: 'Submit feedback that must be addressed before merging.',
+    note: 'Submit feedback suggesting changes.',
     authorNote: "Pull request authors can't request changes on their own pull requests.",
   },
 ];
@@ -131,10 +133,15 @@ interface Mounted {
   readonly button: HTMLButtonElement;
   host: HTMLElement | null;
   readonly label: HTMLElement;
+  /** "Submit review 1": the reader's pending comments, as GitHub's button counts them. */
+  readonly counter: HTMLElement;
   pullPath: string;
   context: QuickReviewContext;
   panel: HTMLElement | null;
   submittedTimer: number;
+  /** The pending comments last read for {@link pendingFor}; null until read (or when GitHub could not say). */
+  pending: readonly PendingComment[] | null;
+  pendingFor: string | null;
 }
 
 let mounted: Mounted | null = null;
@@ -164,6 +171,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.pullPath = pullPath;
   }
   mounted.context = context;
+  if (mounted.pendingFor !== pullPath) void loadPending(mounted);
+  showCount(mounted);
   if (anchor.previousElementSibling !== mounted.button) anchor.insertAdjacentElement('beforebegin', mounted.button);
   const host = anchor.parentElement;
   if (mounted.host !== host) {
@@ -187,17 +196,43 @@ export function removeQuickReview(): void {
 
 function createButton(pullPath: string, context: QuickReviewContext): Mounted {
   const label = createElement('span', {}, ['Submit review']);
+  const counter = createElement('span', { class: 'Counter geld-quick-review__count', hidden: '' });
   const button = createElement(
     'button',
     { type: 'button', class: `btn btn-sm btn-primary ${BUTTON_CLASS}`, [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
-    [label, svgFromString(ICON_TRIANGLE_DOWN)],
+    [label, counter, svgFromString(ICON_TRIANGLE_DOWN)],
   );
-  const state: Mounted = { button, host: null, label, pullPath, context, panel: null, submittedTimer: 0 };
+  const state: Mounted = { button, host: null, label, counter, pullPath, context, panel: null, submittedTimer: 0, pending: null, pendingFor: null };
   button.addEventListener('click', () => {
     if (state.panel !== null) closePanel();
     else openPanel();
   });
   return state;
+}
+
+/** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
+async function loadPending(state: Mounted): Promise<readonly PendingComment[] | null> {
+  const pullPath = state.pullPath;
+  state.pendingFor = pullPath;
+  const pending = await fetchPendingComments(pullPath);
+  if (state.pullPath !== pullPath) return null;
+  state.pending = pending;
+  showCount(state);
+  return pending;
+}
+
+function pendingCount(state: Mounted): number {
+  return pendingCountOnPage() ?? state.pending?.length ?? 0;
+}
+
+/** GitHub's own count (live on the Files changed tab, where its hidden button tracks new comments), else the last read. */
+function showCount(state: Mounted): void {
+  const count = pendingCount(state);
+  const text = count > 0 ? String(count) : '';
+  if (state.counter.textContent !== text) state.counter.textContent = text;
+  if (state.counter.hidden !== (count === 0)) state.counter.hidden = count === 0;
+  const name = count > 0 ? `Submit review, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : 'Submit review';
+  if (state.button.getAttribute('aria-label') !== name) state.button.setAttribute('aria-label', name);
 }
 
 function closePanel(restoreFocus = false): void {
@@ -234,7 +269,6 @@ function openPanel(): void {
   const draft = draftFor(pullPath);
   const isAuthor = authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
   if (isAuthor && draft.event !== 'comment') draft.event = 'comment';
-  let pendingComments = false;
 
   panelIds += 1;
   const titleId = `geld-quick-review-${panelIds}-title`;
@@ -255,8 +289,9 @@ function openPanel(): void {
       createElement('p', { class: 'note' }, [disabled && authorNote !== null ? authorNote : note]),
     ]);
   });
-  const pendingNote = createElement('p', { class: 'geld-quick-review__pending color-fg-muted', hidden: '' }, ['Your pending comments go with this review.']);
+  const pendingSection = createElement('div', { class: 'geld-quick-review__pending' });
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
+  const discard = createElement('button', { type: 'button', class: 'btn btn-danger', hidden: '' }, ['Discard review']);
   const cancel = createElement('button', { type: 'button', class: 'btn' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-primary' }, ['Submit review']);
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-labelledby': titleId }, [
@@ -266,14 +301,21 @@ function openPanel(): void {
         createElement('div', { class: 'Overlay-actionWrap' }, [close]),
       ]),
     ]),
-    createElement('div', { class: 'Overlay-body' }, [body, createElement('fieldset', { class: 'geld-quick-review__events' }, [createElement('legend', { class: 'sr-only' }, ['Review type']), ...choices]), error]),
-    createElement('div', { class: 'Overlay-footer Overlay-footer--divided geld-quick-review__footer' }, [pendingNote, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
+    createElement('div', { class: 'Overlay-body' }, [body, createElement('fieldset', { class: 'geld-quick-review__events' }, [createElement('legend', { class: 'sr-only' }, ['Review type']), ...choices]), pendingSection, error]),
+    createElement('div', { class: 'Overlay-footer Overlay-footer--divided geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
   ]);
 
   let sending = false;
+  let pendingOpen = true;
   const refresh = (): void => {
-    submit.disabled = sending || !canSubmit(draft.event, body.value, pendingComments);
-    pendingNote.hidden = !pendingComments;
+    const pending = pendingCount(state);
+    submit.disabled = sending || !canSubmit(draft.event, body.value, pending > 0);
+    discard.hidden = pending === 0;
+    discard.disabled = sending;
+    renderPending(pendingSection, state.pending, pending, pendingOpen, () => {
+      pendingOpen = !pendingOpen;
+      refresh();
+    });
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
@@ -297,7 +339,7 @@ function openPanel(): void {
       drafts.delete(pullPath);
       closePanel(true);
       // The Files changed tab shows the pending comments that were just published as still pending until it reloads.
-      if (state.context.page.kind === 'pull-files' || pendingComments) {
+      if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
         window.location.reload();
         return;
       }
@@ -328,6 +370,29 @@ function openPanel(): void {
   close.addEventListener('click', () => closePanel(true));
   cancel.addEventListener('click', () => closePanel(true));
   submit.addEventListener('click', () => void send());
+  discard.addEventListener('click', () => {
+    // GitHub's own words and its own (native) confirmation, as its Discard review asks.
+    if (!window.confirm('Are you sure you want to cancel? You will lose all your pending comments.')) return;
+    sending = true;
+    refresh();
+    void discardPendingReview(pullPath).then((done) => {
+      sending = false;
+      if (!done) {
+        error.textContent = 'GitHub could not discard the review.';
+        error.hidden = false;
+        refresh();
+        return;
+      }
+      closePanel(true);
+      // The Files changed tab still draws the discarded comments until it reloads.
+      if (state.context.page.kind === 'pull-files') {
+        window.location.reload();
+        return;
+      }
+      state.pending = [];
+      showCount(state);
+    });
+  });
 
   state.panel = panel;
   state.button.setAttribute('aria-expanded', 'true');
@@ -338,14 +403,62 @@ function openPanel(): void {
   document.addEventListener('pointerdown', onOutsidePointer, true);
   window.addEventListener('resize', positionPanel);
 
-  // Comments the reader left as "Start a review" are a pending review; it goes out with this one, words or not.
-  void fetch(`${pullPath}/page_data/pending_review`, { credentials: 'same-origin', headers: { Accept: 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' } })
-    .then((response) => {
-      if (!response.ok || state.panel !== panel) return;
-      pendingComments = true;
-      refresh();
-    })
-    .catch(() => undefined);
+  // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
+  void loadPending(state).then(() => {
+    if (state.panel === panel) refresh();
+  });
+}
+
+/**
+ * "Pending comments N" under the choices, as GitHub's dialog lists them:
+ * each comment's file and line (leading to it in the diff), the diff lines
+ * up to it, and what was written. Folds, open at first. Nothing when there
+ * are none; the count alone while GitHub's own count is ahead of the list
+ * (a comment added on Files changed since the list was read).
+ */
+function renderPending(section: HTMLElement, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
+  section.replaceChildren();
+  section.hidden = count === 0;
+  if (count === 0) return;
+  const toggle = createElement('button', { type: 'button', class: 'geld-quick-review__pending-toggle', 'aria-expanded': String(open) }, [
+    svgFromString(ICON_CHEVRON_DOWN),
+    createElement('span', {}, ['Pending comments']),
+    createElement('span', { class: 'Counter' }, [String(count)]),
+  ]);
+  toggle.addEventListener('click', onToggle);
+  section.append(toggle);
+  if (!open || comments === null) return;
+  const list = createElement('ul', { class: 'geld-quick-review__pending-list' });
+  for (const comment of comments) {
+    const where = createElement('a', { class: 'geld-quick-review__pending-path Link--primary', href: comment.href ?? '#', title: comment.path }, [comment.path]);
+    const head = createElement('div', { class: 'geld-quick-review__pending-head' }, [
+      where,
+      ...(comment.outdated ? [createElement('span', { class: 'Label Label--secondary' }, ['Outdated'])] : []),
+      ...(comment.line === null ? [] : [createElement('span', { class: 'geld-quick-review__pending-line color-fg-muted' }, [`Line ${comment.line}`])]),
+    ]);
+    const lines = createElement(
+      'table',
+      { class: 'geld-quick-review__pending-diff' },
+      [
+        createElement(
+          'tbody',
+          {},
+          comment.diffLines.map((line) => {
+            const code = createElement('td', { class: 'geld-quick-review__pending-code' }, [line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : line.type === 'context' ? ' ' : '', githubMarkup(line.html)]);
+            return createElement('tr', { 'data-type': line.type }, [
+              createElement('td', { class: 'geld-quick-review__pending-num' }, [line.type === 'hunk' || line.left === null ? '' : String(line.left)]),
+              createElement('td', { class: 'geld-quick-review__pending-num' }, [line.type === 'hunk' || line.right === null ? '' : String(line.right)]),
+              code,
+            ]);
+          }),
+        ),
+      ],
+    );
+    const said = createElement('div', { class: 'geld-quick-review__pending-body markdown-body' });
+    said.append(githubMarkup(comment.bodyHtml));
+    list.append(createElement('li', { class: 'geld-quick-review__pending-item' }, [head, ...(comment.diffLines.length > 0 ? [lines] : []), said]));
+  }
+  section.append(list);
 }
 
 function showSubmitted(state: Mounted): void {
