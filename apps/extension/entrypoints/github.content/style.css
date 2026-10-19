@@ -902,9 +902,121 @@ html[data-geld-quick-review] details.js-reviews-container {
   gap: 8px;
 }
 
-.geld-quick-review__pending {
-  margin: 0;
+/* "Submit review 1": Primer's own counter, which a primary button colours itself. */
+.geld-quick-review__count {
+  margin-left: 2px;
+}
+
+/* "Pending comments N", as GitHub's dialog lists them under the choices. */
+.geld-quick-review__pending-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.geld-quick-review__pending-toggle > svg {
+  color: var(--fgColor-muted, #59636e);
+  transition: transform 120ms ease-in-out;
+}
+
+.geld-quick-review__pending-toggle[aria-expanded='false'] > svg {
+  transform: rotate(-90deg);
+}
+
+.geld-quick-review__pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.geld-quick-review__pending-item {
+  overflow: hidden;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+}
+
+.geld-quick-review__pending-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-default, #d1d9e0);
+  background: var(--bgColor-muted, #f6f8fa);
   font-size: 12px;
+}
+
+.geld-quick-review__pending-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-quick-review__pending-line {
+  flex-shrink: 0;
+}
+
+.geld-quick-review__pending-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.geld-quick-review__pending-num {
+  width: 1%;
+  min-width: 40px;
+  padding: 0 8px;
+  color: var(--fgColor-muted, #59636e);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.geld-quick-review__pending-code {
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.geld-quick-review__pending-diff tr[data-type='hunk'] {
+  background: var(--diffBlob-hunkLine-bgColor, #ddf4ff);
+  color: var(--fgColor-muted, #59636e);
+}
+
+.geld-quick-review__pending-diff tr[data-type='addition'] {
+  background: var(--diffBlob-additionLine-bgColor, #dafbe1);
+}
+
+.geld-quick-review__pending-diff tr[data-type='deletion'] {
+  background: var(--diffBlob-deletionLine-bgColor, #ffebe9);
+}
+
+.geld-quick-review__pending-body {
+  padding: 8px 12px;
+  border-top: 1px solid var(--borderColor-default, #d1d9e0);
+  font-size: 14px;
+}
+
+.geld-quick-review__pending-body > :last-child {
+  margin-bottom: 0;
 }
 
 .geld-quick-review__actions {

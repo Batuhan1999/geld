@@ -178,6 +178,47 @@ describe('the tab bar button', () => {
     expect(radios.map((radio) => radio.disabled)).toEqual([false, true, true]);
   });
 
+  it('counts the pending comments, lists them and discards the review as GitHub does', async () => {
+    const pending = {
+      id: '1',
+      path: 'src/a.ts',
+      line: 3,
+      isOutdated: false,
+      subject: { diffLines: [{ html: '@@ -1 +1 @@', left: null, right: null, type: 'HUNK' }, { html: 'const a = 1;', left: null, right: 3, type: 'ADDITION' }] },
+      commentsData: { comments: [{ id: 'c1', state: 'pending', viewerDidAuthor: true, bodyHTML: '<p>Rename this</p>', currentDiffResourcePath: '/acme/widgets/pull/7/files#r1' }] },
+    };
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url.endsWith('/thread_previews')) return new Response(JSON.stringify([pending]), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+    const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    const button = document.querySelector<HTMLButtonElement>('.geld-quick-review');
+    expect(button?.querySelector('.geld-quick-review__count')?.textContent).toBe('1');
+    expect(button?.getAttribute('aria-label')).toBe('Submit review, 1 pending comment');
+    button?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const box = document.querySelector('.geld-quick-review__panel');
+    expect(box?.querySelector('.geld-quick-review__pending-toggle')?.textContent).toBe('Pending comments1');
+    expect(box?.querySelector('.geld-quick-review__pending-path')?.getAttribute('href')).toBe('/acme/widgets/pull/7/files#r1');
+    expect(box?.querySelector('.geld-quick-review__pending-body')?.textContent).toBe('Rename this');
+    // Pending comments go with the review, so a comment needs no words of its own.
+    const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Submit review');
+    expect(submit?.disabled).toBe(false);
+    const discard = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Discard review');
+    expect(discard?.hidden).toBe(false);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    discard?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toContain('DELETE /acme/widgets/pull/7/page_data/abandon_review');
+    expect(button?.querySelector<HTMLElement>('.geld-quick-review__count')?.hidden).toBe(true);
+  });
+
   it('reads the pull request path', () => {
     expect(pullPathOf('/acme/widgets/pull/7/changes')).toBe('/acme/widgets/pull/7');
     expect(pullPathOf('/acme/widgets/issues/7')).toBeNull();
