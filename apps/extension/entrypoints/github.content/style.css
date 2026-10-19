@@ -773,7 +773,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /* The verdict menu: one row per verdict, the row sends (or opens the box), its comment button opens the box. */
 .Overlay.geld-quick-review__panel--menu {
-  width: min(360px, calc(100vw - 32px));
+  width: min(240px, calc(100vw - 32px));
+  min-width: 0;
   padding: 8px;
 }
 
@@ -795,10 +796,11 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__item {
   display: flex;
   flex: 1 1 auto;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 6px 8px;
+  min-height: 32px;
+  padding: 0 8px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -811,7 +813,6 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__glyph {
   display: inline-flex;
   flex-shrink: 0;
-  padding-top: 2px;
   color: var(--fgColor-muted, #59636e);
 }
 
@@ -824,22 +825,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-danger, #d1242f);
 }
 
-.geld-quick-review__item-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 .geld-quick-review__item-label {
   font-size: 14px;
   font-weight: 600;
   line-height: 20px;
-}
-
-.geld-quick-review__item-note {
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
-  line-height: 16px;
 }
 
 .geld-quick-review__with-comment {
@@ -867,7 +856,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   outline-offset: -2px;
 }
 
-/* Shown, never hidden: GitHub lists what the author cannot do, greyed, with its reason as the note. */
+/* Shown, never hidden: GitHub lists what the author cannot do, greyed; the reason is the row's tooltip. */
 .geld-quick-review__item:disabled,
 .geld-quick-review__with-comment:disabled {
   cursor: not-allowed;
@@ -875,7 +864,6 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__item:disabled .geld-quick-review__glyph,
 .geld-quick-review__item:disabled .geld-quick-review__item-label,
-.geld-quick-review__item:disabled .geld-quick-review__item-note,
 .geld-quick-review__with-comment:disabled {
   color: var(--fgColor-disabled, #818b98);
 }

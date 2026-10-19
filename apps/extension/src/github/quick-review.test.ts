@@ -110,7 +110,8 @@ describe('the tab bar button', () => {
 
   it('opens a menu of the three verdicts, Approve and Request changes with a comment button each', () => {
     const menu = openMenu();
-    expect([...menu.querySelectorAll('.geld-quick-review__item-label')].map((label) => label.textContent)).toEqual(['Comment', 'Approve', 'Request changes']);
+    expect([...menu.querySelectorAll('.geld-quick-review__item')].map((item) => item.textContent)).toEqual(['Comment', 'Approve', 'Request changes']);
+    expect(menu.querySelector('li[title]')).toBeNull();
     expect([...menu.querySelectorAll('.geld-quick-review__with-comment')].map((button) => button.getAttribute('aria-label'))).toEqual(['Approve with a comment', 'Request changes with a comment']);
     expect([...menu.querySelectorAll('button')].every((button) => !button.disabled)).toBe(true);
     // Comment needs words: its row opens the comment box with Comment chosen.
@@ -167,8 +168,10 @@ describe('the tab bar button', () => {
     expect(row(menu, 'approve').disabled).toBe(true);
     expect(row(menu, 'request changes').disabled).toBe(true);
     expect([...menu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__with-comment')].every((button) => button.disabled)).toBe(true);
-    expect(menu.textContent).toContain("Pull request authors can't approve their own pull requests.");
-    expect(menu.textContent).toContain("Pull request authors can't request changes on their own pull requests.");
+    // No notes in the menu: the reason is the row's tooltip, and read with the button.
+    expect(row(menu, 'approve').closest('li')?.getAttribute('title')).toBe("Pull request authors can't approve their own pull requests.");
+    expect(row(menu, 'request changes').closest('li')?.getAttribute('title')).toBe("Pull request authors can't request changes on their own pull requests.");
+    expect(row(menu, 'approve').querySelector('.sr-only')?.textContent).toContain("can't approve");
     // The comment box keeps them listed and disabled too.
     row(menu, 'comment').click();
     const radios = [...document.querySelectorAll<HTMLInputElement>('.geld-quick-review__panel input[type="radio"]')];

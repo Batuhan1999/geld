@@ -82,19 +82,21 @@ export interface MenuRow {
   readonly direct: boolean;
   readonly withComment: boolean;
   readonly disabled: boolean;
-  readonly note: string;
+  /** GitHub's reason the verdict is closed to the reader, when it is. */
+  readonly reason: string | null;
 }
 
 /**
  * The menu's rows: Comment always needs words, so its row opens the comment
  * box and has no comment button; Approve and Request changes send as they
- * are, or open the box through the comment button beside them. What the
- * author cannot do stays listed, disabled, with GitHub's reason.
+ * are, or open the box through the comment button beside them. Titles
+ * only, no notes: the menu stays small. What the author cannot do stays
+ * listed, disabled, with GitHub's reason as its tooltip.
  */
 export function menuRows(isAuthor: boolean): readonly MenuRow[] {
-  return EVENTS.map(({ value, note, authorNote }) => {
+  return EVENTS.map(({ value, authorNote }) => {
     const disabled = isAuthor && authorNote !== null;
-    return { event: value, direct: value !== 'comment', withComment: value !== 'comment', disabled, note: disabled && authorNote !== null ? authorNote : note };
+    return { event: value, direct: value !== 'comment', withComment: value !== 'comment', disabled, reason: disabled ? authorNote : null };
   });
 }
 
@@ -358,10 +360,9 @@ function openMenu(state: Mounted): void {
       { type: 'button', class: 'geld-quick-review__item', 'data-event': row.event },
       [
         createElement('span', { class: 'geld-quick-review__glyph', 'data-tone': info.tone }, [svgFromString(info.icon)]),
-        createElement('span', { class: 'geld-quick-review__item-text' }, [
-          createElement('span', { class: 'geld-quick-review__item-label' }, [info.label]),
-          createElement('span', { class: 'geld-quick-review__item-note' }, [row.note]),
-        ]),
+        createElement('span', { class: 'geld-quick-review__item-label' }, [info.label]),
+        // Titles only: the author's reason a verdict is closed to them is the row's tooltip, and read with the button.
+        ...(row.reason === null ? [] : [createElement('span', { class: 'sr-only' }, [`. ${row.reason}`])]),
       ],
     );
     main.disabled = row.disabled;
@@ -386,7 +387,7 @@ function openMenu(state: Mounted): void {
       items.push(comment);
       parts.push(comment);
     }
-    return createElement('li', { class: `geld-quick-review__row${row.disabled ? ' geld-quick-review__row--disabled' : ''}` }, parts);
+    return createElement('li', { class: `geld-quick-review__row${row.disabled ? ' geld-quick-review__row--disabled' : ''}`, ...(row.reason === null ? {} : { title: row.reason }) }, parts);
   });
   const menu = createElement('div', { class: `Overlay ${PANEL_CLASS} ${PANEL_CLASS}--menu`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-label': 'Submit review' }, [
     createElement('ul', { class: 'geld-quick-review__rows' }, rows),
