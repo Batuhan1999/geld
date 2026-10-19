@@ -2,16 +2,17 @@ import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { PageInfo } from './page';
-import { ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
+import { ICON_CHECK, ICON_COMMENT, ICON_FILE_DIFF, ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
 
 /**
  * "Submit review" in the pull request's tab bar, left of the line counts, on
  * every tab. GitHub's own button exists only on the Files changed tab and is
- * React's, so this is Geld's: the same 28px primary button, a popover with
- * GitHub's wording, and the request GitHub's dialog sends (`PUT
- * page_data/submit_review`, verified Oct 2026), which needs nothing from
- * that tab. While it is mounted GitHub's button is hidden, so the action
- * shows once.
+ * React's, so this is Geld's: the same 28px primary button opening a menu of
+ * the three verdicts (Comment opens the comment box; Approve and Request
+ * changes send at once, or with words through the comment button beside
+ * them), and the request GitHub's dialog sends (`PUT page_data/submit_review`,
+ * verified Oct 2026), which needs nothing from that tab. While it is mounted
+ * GitHub's button is hidden, so the action shows once.
  */
 
 export type ReviewEvent = 'comment' | 'approve' | 'request changes';
@@ -38,16 +39,64 @@ const ATTR_ACTIVE = 'data-geld-quick-review';
 const ATTR_HOST = 'data-geld-quick-review-host';
 const SUBMITTED_MS = 3000;
 
-const EVENTS: readonly { readonly value: ReviewEvent; readonly label: string; readonly note: string; readonly authorNote: string | null }[] = [
-  { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null },
-  { value: 'approve', label: 'Approve', note: 'Give feedback and approve these changes.', authorNote: "Pull request authors can't approve their own pull requests." },
-  {
+interface EventInfo {
+  readonly value: ReviewEvent;
+  readonly label: string;
+  readonly note: string;
+  /** GitHub's reason the author cannot take this one, when they cannot. */
+  readonly authorNote: string | null;
+  /** The menu row's glyph, in the colour GitHub's timeline gives the verdict. */
+  readonly icon: string;
+  readonly tone: 'muted' | 'success' | 'danger';
+  /** The button's words for a moment after it went through. */
+  readonly done: string;
+}
+
+const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
+  comment: { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null, icon: ICON_COMMENT, tone: 'muted', done: 'Review submitted' },
+  approve: {
+    value: 'approve',
+    label: 'Approve',
+    note: 'Give feedback and approve these changes.',
+    authorNote: "Pull request authors can't approve their own pull requests.",
+    icon: ICON_CHECK,
+    tone: 'success',
+    done: 'Approved',
+  },
+  'request changes': {
     value: 'request changes',
     label: 'Request changes',
     note: 'Submit feedback that must be addressed before merging.',
     authorNote: "Pull request authors can't request changes on their own pull requests.",
+    icon: ICON_FILE_DIFF,
+    tone: 'danger',
+    done: 'Changes requested',
   },
-];
+};
+
+const EVENTS: readonly EventInfo[] = [EVENT_INFO.comment, EVENT_INFO.approve, EVENT_INFO['request changes']];
+
+/** What a menu row does, and what its comment button does (null: the row itself opens the comment box). */
+export interface MenuRow {
+  readonly event: ReviewEvent;
+  readonly direct: boolean;
+  readonly withComment: boolean;
+  readonly disabled: boolean;
+  readonly note: string;
+}
+
+/**
+ * The menu's rows: Comment always needs words, so its row opens the comment
+ * box and has no comment button; Approve and Request changes send as they
+ * are, or open the box through the comment button beside them. What the
+ * author cannot do stays listed, disabled, with GitHub's reason.
+ */
+export function menuRows(isAuthor: boolean): readonly MenuRow[] {
+  return EVENTS.map(({ value, note, authorNote }) => {
+    const disabled = isAuthor && authorNote !== null;
+    return { event: value, direct: value !== 'comment', withComment: value !== 'comment', disabled, note: disabled && authorNote !== null ? authorNote : note };
+  });
+}
 
 /** `/owner/repo/pull/N` for a pull request page, else null. */
 export function pullPathOf(pathname: string): string | null {
@@ -133,7 +182,10 @@ interface Mounted {
   readonly label: HTMLElement;
   pullPath: string;
   context: QuickReviewContext;
+  /** The open overlay: the verdict menu or the comment box, never both. */
   panel: HTMLElement | null;
+  /** A review on its way: the menu and the box wait for it. */
+  sending: boolean;
   submittedTimer: number;
 }
 
@@ -189,13 +241,13 @@ function createButton(pullPath: string, context: QuickReviewContext): Mounted {
   const label = createElement('span', {}, ['Submit review']);
   const button = createElement(
     'button',
-    { type: 'button', class: `btn btn-sm btn-primary ${BUTTON_CLASS}`, [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
+    { type: 'button', class: `btn btn-sm btn-primary ${BUTTON_CLASS}`, [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'true', 'aria-expanded': 'false' },
     [label, svgFromString(ICON_TRIANGLE_DOWN)],
   );
-  const state: Mounted = { button, host: null, label, pullPath, context, panel: null, submittedTimer: 0 };
+  const state: Mounted = { button, host: null, label, pullPath, context, panel: null, sending: false, submittedTimer: 0 };
   button.addEventListener('click', () => {
     if (state.panel !== null) closePanel();
-    else openPanel();
+    else if (!state.sending) openMenu(state);
   });
   return state;
 }
@@ -227,13 +279,141 @@ function positionPanel(): void {
   mounted.panel.style.left = `${Math.round(left + window.scrollX)}px`;
 }
 
-function openPanel(): void {
-  if (mounted === null) return;
-  const state = mounted;
+function showPanel(state: Mounted, panel: HTMLElement): void {
+  closePanel();
+  state.panel = panel;
+  state.button.setAttribute('aria-expanded', 'true');
+  document.body.append(panel);
+  positionPanel();
+  document.addEventListener('pointerdown', onOutsidePointer, true);
+  window.addEventListener('resize', positionPanel);
+}
+
+function isAuthorViewing(): boolean {
+  return authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
+}
+
+/** Whether the reader has comments waiting as a pending review ("Start a review"); they go out with the review. */
+async function hasPendingComments(pullPath: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${pullPath}/page_data/pending_review`, { credentials: 'same-origin', headers: { Accept: 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' } });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send one review. On success the box's draft goes, and the Files changed
+ * tab (or any tab with pending comments) reloads: GitHub's view still shows
+ * the comments just published as pending until it does. Elsewhere the
+ * button says what went through for a moment.
+ */
+async function sendReview(state: Mounted, event: ReviewEvent, body: string, pendingComments: boolean): Promise<string | null> {
+  const headSha = state.context.headSha() ?? detectHeadSha();
+  if (headSha === null) return 'Could not read the pull request’s head commit. Reload the page and try again.';
+  const pullPath = state.pullPath;
+  const { url, init } = submitReviewRequest(pullPath, { body, event, headSha }, fetchNonce());
+  state.sending = true;
+  state.label.textContent = 'Submitting…';
+  try {
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      return reviewErrorText(response.status, payload);
+    }
+    drafts.delete(pullPath);
+    if (state.context.page.kind === 'pull-files' || pendingComments) {
+      window.location.reload();
+      return null;
+    }
+    showDone(state, EVENT_INFO[event].done);
+    return null;
+  } catch {
+    return 'GitHub could not submit the review.';
+  } finally {
+    state.sending = false;
+    if (state.label.textContent === 'Submitting…') state.label.textContent = 'Submit review';
+  }
+}
+
+/**
+ * The verdicts as a menu under the button, one row each: Comment opens the
+ * comment box (a comment needs words); Approve and Request changes send at
+ * once, and the comment button at the end of their row opens the box with
+ * that verdict chosen. What the author cannot do stays, disabled, with
+ * GitHub's reason in place of the note.
+ */
+function openMenu(state: Mounted): void {
+  const isAuthor = isAuthorViewing();
+  let pendingComments = false;
+  void hasPendingComments(state.pullPath).then((pending) => {
+    pendingComments = pending;
+  });
+  const items: HTMLButtonElement[] = [];
+  const rows = menuRows(isAuthor).map((row) => {
+    const info = EVENT_INFO[row.event];
+    const main = createElement(
+      'button',
+      { type: 'button', class: 'geld-quick-review__item', 'data-event': row.event },
+      [
+        createElement('span', { class: 'geld-quick-review__glyph', 'data-tone': info.tone }, [svgFromString(info.icon)]),
+        createElement('span', { class: 'geld-quick-review__item-text' }, [
+          createElement('span', { class: 'geld-quick-review__item-label' }, [info.label]),
+          createElement('span', { class: 'geld-quick-review__item-note' }, [row.note]),
+        ]),
+      ],
+    );
+    main.disabled = row.disabled;
+    items.push(main);
+    main.addEventListener('click', () => {
+      if (!row.direct) {
+        openComposer(state, row.event, null);
+        return;
+      }
+      closePanel(true);
+      void sendReview(state, row.event, '', pendingComments).then((failure) => {
+        // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason.
+        if (failure !== null) openComposer(state, row.event, failure);
+      });
+    });
+    const parts: Node[] = [main];
+    if (row.withComment) {
+      const words = `${info.label} with a comment`;
+      const comment = createElement('button', { type: 'button', class: 'geld-quick-review__with-comment', 'aria-label': words, title: words }, [svgFromString(ICON_COMMENT)]);
+      comment.disabled = row.disabled;
+      comment.addEventListener('click', () => openComposer(state, row.event, null));
+      items.push(comment);
+      parts.push(comment);
+    }
+    return createElement('li', { class: `geld-quick-review__row${row.disabled ? ' geld-quick-review__row--disabled' : ''}` }, parts);
+  });
+  const menu = createElement('div', { class: `Overlay ${PANEL_CLASS} ${PANEL_CLASS}--menu`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-label': 'Submit review' }, [
+    createElement('ul', { class: 'geld-quick-review__rows' }, rows),
+  ]);
+  menu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closePanel(true);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const enabled = items.filter((item) => !item.disabled);
+    const at = enabled.findIndex((item) => item === document.activeElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    enabled[(at + step + enabled.length) % enabled.length]?.focus();
+  });
+  showPanel(state, menu);
+  items.find((item) => !item.disabled)?.focus({ preventScroll: true });
+}
+
+/** The comment box, its verdict chosen (from the menu) and, after a refused send, GitHub's reason above it. */
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
-  const isAuthor = authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
-  if (isAuthor && draft.event !== 'comment') draft.event = 'comment';
+  const isAuthor = isAuthorViewing();
+  draft.event = isAuthor && EVENT_INFO[initial].authorNote !== null ? 'comment' : initial;
   let pendingComments = false;
 
   panelIds += 1;
@@ -257,6 +437,10 @@ function openPanel(): void {
   });
   const pendingNote = createElement('p', { class: 'geld-quick-review__pending color-fg-muted', hidden: '' }, ['Your pending comments go with this review.']);
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
+  if (failure !== null) {
+    error.textContent = failure;
+    error.hidden = false;
+  }
   const cancel = createElement('button', { type: 'button', class: 'btn' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-primary' }, ['Submit review']);
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-labelledby': titleId }, [
@@ -270,46 +454,25 @@ function openPanel(): void {
     createElement('div', { class: 'Overlay-footer Overlay-footer--divided geld-quick-review__footer' }, [pendingNote, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
   ]);
 
-  let sending = false;
   const refresh = (): void => {
-    submit.disabled = sending || !canSubmit(draft.event, body.value, pendingComments);
+    submit.disabled = state.sending || !canSubmit(draft.event, body.value, pendingComments);
     pendingNote.hidden = !pendingComments;
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
-    const headSha = state.context.headSha() ?? detectHeadSha();
-    if (headSha === null) {
-      error.textContent = 'Could not read the pull request’s head commit. Reload the page and try again.';
-      error.hidden = false;
-      return;
-    }
-    sending = true;
     error.hidden = true;
     submit.textContent = 'Submitting…';
+    const pending = sendReview(state, draft.event, body.value, pendingComments);
     refresh();
-    const { url, init } = submitReviewRequest(pullPath, { body: body.value, event: draft.event, headSha }, fetchNonce());
-    try {
-      const response = await fetch(url, init);
-      if (!response.ok) {
-        const payload: unknown = await response.json().catch(() => null);
-        throw new Error(reviewErrorText(response.status, payload));
-      }
-      drafts.delete(pullPath);
-      closePanel(true);
-      // The Files changed tab shows the pending comments that were just published as still pending until it reloads.
-      if (state.context.page.kind === 'pull-files' || pendingComments) {
-        window.location.reload();
-        return;
-      }
-      showSubmitted(state);
-    } catch (failure) {
-      error.textContent = failure instanceof Error && failure.message !== '' ? failure.message : 'GitHub could not submit the review.';
-      error.hidden = false;
-    } finally {
-      sending = false;
-      submit.textContent = 'Submit review';
-      refresh();
+    const failed = await pending;
+    submit.textContent = 'Submit review';
+    if (failed === null) {
+      if (state.panel === panel) closePanel(true);
+      return;
     }
+    error.textContent = failed;
+    error.hidden = false;
+    refresh();
   };
 
   body.addEventListener('input', () => {
@@ -329,28 +492,19 @@ function openPanel(): void {
   cancel.addEventListener('click', () => closePanel(true));
   submit.addEventListener('click', () => void send());
 
-  state.panel = panel;
-  state.button.setAttribute('aria-expanded', 'true');
-  document.body.append(panel);
-  positionPanel();
+  showPanel(state, panel);
   refresh();
   body.focus({ preventScroll: true });
-  document.addEventListener('pointerdown', onOutsidePointer, true);
-  window.addEventListener('resize', positionPanel);
-
-  // Comments the reader left as "Start a review" are a pending review; it goes out with this one, words or not.
-  void fetch(`${pullPath}/page_data/pending_review`, { credentials: 'same-origin', headers: { Accept: 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' } })
-    .then((response) => {
-      if (!response.ok || state.panel !== panel) return;
-      pendingComments = true;
-      refresh();
-    })
-    .catch(() => undefined);
+  void hasPendingComments(pullPath).then((pending) => {
+    if (state.panel !== panel) return;
+    pendingComments = pending;
+    refresh();
+  });
 }
 
-function showSubmitted(state: Mounted): void {
+function showDone(state: Mounted, words: string): void {
   window.clearTimeout(state.submittedTimer);
-  state.label.textContent = 'Review submitted';
+  state.label.textContent = words;
   state.submittedTimer = window.setTimeout(() => {
     state.label.textContent = 'Submit review';
   }, SUBMITTED_MS);

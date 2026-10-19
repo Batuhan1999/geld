@@ -771,6 +771,115 @@ html[data-geld-quick-review] details.js-reviews-container {
   resize: vertical;
 }
 
+/* The verdict menu: one row per verdict, the row sends (or opens the box), its comment button opens the box. */
+.Overlay.geld-quick-review__panel--menu {
+  width: min(360px, calc(100vw - 32px));
+  padding: 8px;
+}
+
+.geld-quick-review__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.geld-quick-review__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.geld-quick-review__item {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-quick-review__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The verdicts' colours in GitHub's timeline: approved green, changes requested red. */
+.geld-quick-review__glyph[data-tone='success'] {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__glyph[data-tone='danger'] {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.geld-quick-review__item-label {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.geld-quick-review__item-note {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.geld-quick-review__with-comment {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-muted, #59636e);
+  cursor: pointer;
+}
+
+.geld-quick-review__item:hover:not(:disabled),
+.geld-quick-review__with-comment:hover:not(:disabled) {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+}
+
+.geld-quick-review__item:focus-visible,
+.geld-quick-review__with-comment:focus-visible {
+  outline: 2px solid var(--focus-outlineColor, #0969da);
+  outline-offset: -2px;
+}
+
+/* Shown, never hidden: GitHub lists what the author cannot do, greyed, with its reason as the note. */
+.geld-quick-review__item:disabled,
+.geld-quick-review__with-comment:disabled {
+  cursor: not-allowed;
+}
+
+.geld-quick-review__item:disabled .geld-quick-review__glyph,
+.geld-quick-review__item:disabled .geld-quick-review__item-label,
+.geld-quick-review__item:disabled .geld-quick-review__item-note,
+.geld-quick-review__with-comment:disabled {
+  color: var(--fgColor-disabled, #818b98);
+}
+
 .geld-quick-review__events {
   margin: 0;
   padding: 0;
