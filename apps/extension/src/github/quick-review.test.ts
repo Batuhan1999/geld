@@ -185,7 +185,7 @@ describe('the tab bar button', () => {
       line: 3,
       isOutdated: false,
       subject: { diffLines: [{ html: '@@ -1 +1 @@', left: null, right: null, type: 'HUNK' }, { html: 'const a = 1;', left: null, right: 3, type: 'ADDITION' }] },
-      commentsData: { comments: [{ id: 'c1', state: 'pending', viewerDidAuthor: true, bodyHTML: '<p>Rename this</p>', currentDiffResourcePath: '/acme/widgets/pull/7/files#r1' }] },
+      commentsData: { comments: [{ id: 'c1', state: 'pending', viewerDidAuthor: true, body: 'Rename `a` to something clearer. It reads as a typo.', currentDiffResourcePath: '/acme/widgets/pull/7/files#r1' }] },
     };
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -206,8 +206,13 @@ describe('the tab bar button', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
     expect(box?.querySelector('.geld-quick-review__pending-toggle')?.textContent).toBe('Pending comments1');
-    expect(box?.querySelector('.geld-quick-review__pending-path')?.getAttribute('href')).toBe('/acme/widgets/pull/7/files#r1');
-    expect(box?.querySelector('.geld-quick-review__pending-body')?.textContent).toBe('Rename this');
+    // One line per comment: its first sentence (inline code kept) and where it is, leading there on Files changed.
+    const row = box?.querySelector('.geld-quick-review__pending-row');
+    expect(row?.getAttribute('href')).toBe('/acme/widgets/pull/7/files#r1');
+    expect(row?.querySelector('.geld-quick-review__pending-text')?.textContent).toBe('Rename a to something clearer.');
+    expect(row?.querySelector('.geld-quick-review__pending-text code')?.textContent).toBe('a');
+    expect(row?.querySelector('.geld-quick-review__pending-where')?.textContent).toBe('a.ts:3');
+    expect(row?.getAttribute('title')).toBe('src/a.ts, line 3');
     // Pending comments go with the review, so a comment needs no words of its own.
     const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Submit review');
     expect(submit?.disabled).toBe(false);
