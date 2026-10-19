@@ -202,6 +202,7 @@ describe('the tab bar button', () => {
     expect(button?.querySelector('.geld-quick-review__count')?.textContent).toBe('1');
     expect(button?.getAttribute('aria-label')).toBe('Submit review, 1 pending comment');
     button?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__item[data-event="comment"]')?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
     expect(box?.querySelector('.geld-quick-review__pending-toggle')?.textContent).toBe('Pending comments1');
