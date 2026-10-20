@@ -755,7 +755,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   padding: 0 6px;
   background: transparent;
   box-shadow: none;
-  transition: background-color 150ms ease-out;
+  transition: none;
 }
 
 .geld-quick-review__glyph {
@@ -767,9 +767,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: block;
   color: var(--fgColor-muted, #59636e);
   opacity: 0.8;
-  transition:
-    color 150ms ease-out,
-    opacity 150ms ease-out;
+  transition: none;
 }
 
 /* The comment octicon's bubble fills y 1 to 12 of 16, its tail below: centred by its box it reads high beside ✓ and ✗. */
@@ -793,22 +791,22 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /*
- * ✓ and ✗ under the pointer, and while their box is open, in the theme's own success and danger: the muted surface and the
- * icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
+ * ✓ and ✗ under the pointer, and only there, in the theme's own success and danger: the muted surface and the icon. Theme
+ * variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
   background: var(--bgColor-success-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
   background: var(--bgColor-danger-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
 }
 
