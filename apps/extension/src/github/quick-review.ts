@@ -51,22 +51,20 @@ interface EventInfo {
   readonly note: string;
   /** GitHub's reason the author cannot take this one, when they cannot. */
   readonly authorNote: string | null;
-  /** The segment's glyph, in the colour GitHub's timeline gives the verdict. */
+  /** The segment's glyph. */
   readonly icon: string;
-  readonly tone: 'muted' | 'success' | 'danger';
   /** What the controls say for a moment after it went through. */
   readonly done: string;
 }
 
 const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
-  comment: { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null, icon: ICON_COMMENT, tone: 'muted', done: 'Review submitted' },
+  comment: { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null, icon: ICON_COMMENT, done: 'Review submitted' },
   approve: {
     value: 'approve',
     label: 'Approve',
     note: 'Submit feedback and approve merging these changes.',
     authorNote: "Pull request authors can't approve their own pull requests.",
     icon: ICON_CHECK,
-    tone: 'success',
     done: 'Approved',
   },
   'request changes': {
@@ -75,7 +73,6 @@ const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
     note: 'Submit feedback suggesting changes.',
     authorNote: "Pull request authors can't request changes on their own pull requests.",
     icon: ICON_X,
-    tone: 'danger',
     done: 'Changes requested',
   },
 };
@@ -287,7 +284,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     return createElement(
       'button',
       { type: 'button', id: `geld-quick-review-${tipIds}`, class: 'btn btn-sm BtnGroup-item geld-quick-review__segment', 'data-event': event, 'aria-label': info.label, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
-      [createElement('span', { class: 'geld-quick-review__glyph', 'data-tone': info.tone }, [svgFromString(info.icon)]), ...(event === 'comment' ? [counter] : [])],
+      [createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]), ...(event === 'comment' ? [counter] : [])],
     );
   };
   const segments = { approve: segment('approve'), 'request changes': segment('request changes'), comment: segment('comment') };

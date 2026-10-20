@@ -728,8 +728,8 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  /* A 28px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
-  margin: -5px 12px -5px 0;
+  /* A 24px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
+  margin: -3px 12px -3px 0;
   white-space: nowrap;
 }
 
@@ -744,40 +744,56 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
 }
 
-/* [✓ | ✗ | 💬]: Primer's button group, icon segments in the verdicts' timeline colours. */
-.geld-quick-review__segment {
+/* [✓ | ✗ | 💬]: Primer's button group kept to its outline and dividers, no fill, three quiet grey icons. */
+.geld-quick-review__segment.btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  height: 28px;
-  padding: 0 10px;
+  height: 24px;
+  min-width: 28px;
+  padding: 0 6px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .geld-quick-review__glyph {
-  display: inline-flex;
+  display: flex;
 }
 
-/* On the svg itself: Primer's `.btn .octicon` colours the icon directly, so an inherited colour never reaches it. */
-.geld-quick-review__glyph[data-tone='success'] > svg {
-  color: var(--fgColor-success, #1a7f37);
+/* A block, and coloured on the svg itself: inline it sat on the text line, and Primer's `.btn .octicon` colours the icon directly. */
+.geld-quick-review__glyph > svg {
+  display: block;
+  color: var(--fgColor-muted, #59636e);
+  opacity: 0.8;
 }
 
-.geld-quick-review__glyph[data-tone='danger'] > svg {
-  color: var(--fgColor-danger, #d1242f);
+.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+}
+
+.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) .geld-quick-review__glyph > svg,
+.geld-quick-review__segment[aria-expanded='true'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-default, #1f2328);
+  opacity: 1;
 }
 
 /* The segment whose comment box is open reads as pressed. */
-.geld-quick-review__segment[aria-expanded='true'] {
-  background-color: var(--button-default-bgColor-active, #e6eaef);
+.geld-quick-review__segment.btn[aria-expanded='true'] {
+  background: var(--control-transparent-bgColor-active, rgba(208, 215, 222, 0.48));
 }
 
-/* Shown, never hidden: what the author cannot do, greyed, GitHub's reason its tooltip. */
-.geld-quick-review__segment[aria-disabled='true'] {
+/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. */
+/* Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
+.geld-quick-review__segment.btn[aria-disabled='true'] {
+  border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
+  background: transparent;
   cursor: not-allowed;
 }
 
 .geld-quick-review__segment[aria-disabled='true'] .geld-quick-review__glyph > svg {
   color: var(--fgColor-disabled, #818b98);
+  opacity: 0.6;
 }
 
 .geld-quick-review[aria-busy='true'] .geld-quick-review__segment {
