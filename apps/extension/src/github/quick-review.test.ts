@@ -266,12 +266,20 @@ describe('the tab bar button', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     const button = document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]');
-    expect(button?.querySelector('.geld-quick-review__count')?.textContent).toBe('1');
+    // A badge on the group's corner, outside the group (Primer rounds its last child); the segment's name says it.
+    const badge = document.querySelector<HTMLElement>('.geld-quick-review__badged > .geld-quick-review__count');
+    expect(badge?.textContent).toBe('1');
+    expect(button?.querySelector('.geld-quick-review__count')).toBeNull();
     expect(button?.getAttribute('aria-label')).toBe('Comment, 1 pending comment');
     button?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
-    expect(box?.querySelector('.geld-quick-review__pending-toggle')?.textContent).toBe('Pending comments1');
+    const toggle = box?.querySelector<HTMLButtonElement>('.geld-quick-review__pending-toggle');
+    expect(toggle?.textContent).toBe('Pending comments1');
+    // Folded at first: the count, no rows until it is opened.
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(box?.querySelector('.geld-quick-review__pending-row')).toBeNull();
+    toggle?.click();
     // One line per comment: its first sentence (inline code kept) and where it is, leading there on Files changed.
     const row = box?.querySelector('.geld-quick-review__pending-row');
     expect(row?.getAttribute('href')).toBe('/acme/widgets/pull/7/files#r1');
@@ -288,7 +296,7 @@ describe('the tab bar button', () => {
     discard?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toContain('DELETE /acme/widgets/pull/7/page_data/abandon_review');
-    expect(button?.querySelector<HTMLElement>('.geld-quick-review__count')?.hidden).toBe(true);
+    expect(badge?.hidden).toBe(true);
   });
 
   it('reads the pull request path', () => {

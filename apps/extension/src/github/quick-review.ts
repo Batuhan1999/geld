@@ -6,7 +6,7 @@ import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
-import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -188,7 +188,7 @@ interface Mounted {
   /** "Approved", "Submitting…": what the controls have just done, read out as it changes. */
   readonly status: HTMLElement;
   host: HTMLElement | null;
-  /** On the comment segment: the reader's pending comments, as GitHub's button counts them. */
+  /** On the group's top-right corner: the reader's pending comments, as GitHub's button counts them. */
   readonly counter: HTMLElement;
   /** The segment the open box came from, for its pressed look and for focus when it closes. */
   opener: ReviewEvent | null;
@@ -285,7 +285,7 @@ function describe(button: HTMLButtonElement, words: string): HTMLElement | null 
 }
 
 function createControls(pullPath: string, context: QuickReviewContext): Mounted {
-  const counter = createElement('span', { class: 'Counter geld-quick-review__count', hidden: '' });
+  const counter = createElement('span', { class: 'geld-quick-review__count', 'aria-hidden': 'true', hidden: '' });
   const status = createElement('span', { class: 'geld-quick-review__status', role: 'status' });
   const segment = (event: ReviewEvent): HTMLButtonElement => {
     const info = EVENT_INFO[event];
@@ -296,7 +296,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       [
         createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
         ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
-        ...(event === 'comment' ? [counter] : []),
       ],
     );
   };
@@ -304,7 +303,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   // Primer rounds the group's outer corners on `:first-child` / `:last-child`: the tooltips stand beside it, not between.
   const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
-  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, group, ...tips]);
+  // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys: followInstantKey(root) };
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
@@ -491,7 +491,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     error.textContent = failure;
     error.hidden = false;
   }
-  const discard = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible geld-quick-review__discard', hidden: '' }, ['Discard review']);
+  const discard = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible geld-quick-review__discard', hidden: '' }, [svgFromString(ICON_TRASH), 'Discard review']);
   const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-sm' });
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
@@ -499,7 +499,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
   ]);
 
-  let pendingOpen = true;
+  let pendingOpen = false;
   const showVerdict = (): void => {
     const info = EVENT_INFO[draft.event];
     submit.className = `btn btn-sm geld-quick-review__submit ${info.submitClass}`.trim();
@@ -596,7 +596,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
  * "Pending comments N" under the words, one line per comment as the
  * digest lists threads: the comment's first sentence, then its file and
  * line, the line leading to the comment on the Files changed tab. Folds,
- * open at first. Nothing when there are none; the count alone while
+ * closed at first. Nothing when there are none; the count alone while
  * GitHub's own count is ahead of the list (a comment added on Files changed
  * since the list was read).
  */

@@ -900,7 +900,18 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* Its trash can stands in the pending rows' glyph column: the rows' hover surface overhangs 8px the same way. */
+  margin-left: -8px;
+  padding-left: 8px;
   color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__discard > svg {
+  margin: 0;
+  color: inherit;
 }
 
 /* "Request changes" in red, as "Approve" is in Primer's green: the danger button's solid look, from the theme. */
@@ -923,9 +934,33 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--button-danger-fgColor-disabled, color-mix(in srgb, var(--fgColor-danger, #d1242f) 50%, transparent));
 }
 
-/* 💬 with its pending count: Primer's own counter. */
+/* The pending count as a badge on the group's top-right corner, ringed in the page colour so it reads over the outline. */
+.geld-quick-review__badged {
+  position: relative;
+  display: inline-flex;
+}
+
 .geld-quick-review__count {
-  margin-left: 2px;
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--bgColor-accent-emphasis, #0969da);
+  box-shadow: 0 0 0 2px var(--bgColor-default, #ffffff);
+  color: var(--fgColor-onEmphasis, #ffffff);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.geld-quick-review__count[hidden] {
+  display: none;
 }
 
 /* "Pending comments N", as GitHub's dialog lists them under the choices. */
