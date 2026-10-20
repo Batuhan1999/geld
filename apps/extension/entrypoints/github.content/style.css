@@ -728,6 +728,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  /*
+   * Primer's group floats its buttons, so its min-content is one button wide: a flex row sized from min-content (the
+   * sticky toolbar's) then shrank below the group and its last buttons ran past the toolbar's edge.
+   */
+  min-width: max-content;
   /* A 26px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
   margin: -4px 12px -4px 0;
   white-space: nowrap;
