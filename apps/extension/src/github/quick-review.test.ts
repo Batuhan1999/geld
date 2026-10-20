@@ -33,11 +33,11 @@ describe('isInstantClick', () => {
 
 describe('segmentHint', () => {
   it('names the verdict and the shortcut, or GitHub’s reason it is closed to the author', () => {
-    expect(segmentHint('approve', false, '⌘')).toBe('Approve · ⌘-click to approve without a comment');
-    expect(segmentHint('request changes', false, 'Ctrl')).toBe('Request changes · Ctrl-click to request changes without a comment');
-    expect(segmentHint('comment', false, '⌘')).toBe('Comment');
-    expect(segmentHint('approve', true, '⌘')).toBe("Pull request authors can't approve their own pull requests.");
-    expect(segmentHint('comment', true, '⌘')).toBe('Comment');
+    expect(segmentHint('approve', false, '⌘')).toEqual(['Approve', '⌘ 1-click review']);
+    expect(segmentHint('request changes', false, 'Ctrl')).toEqual(['Request changes', 'Ctrl 1-click review']);
+    expect(segmentHint('comment', false, '⌘')).toEqual(['Comment']);
+    expect(segmentHint('approve', true, '⌘')).toEqual(["Pull request authors can't approve their own pull requests."]);
+    expect(segmentHint('comment', true, '⌘')).toEqual(['Comment']);
   });
 });
 
@@ -123,7 +123,7 @@ describe('the tab bar button', () => {
     expect([...(group?.children ?? [])].map((child) => child.getAttribute('aria-label'))).toEqual(['Approve', 'Request changes', 'Comment']);
     expect([...(group?.children ?? [])].every((child) => child.classList.contains('BtnGroup-item'))).toBe(true);
     // The page here defines no `tool-tip`, so the words are each segment's title.
-    expect(segment('approve').title).toMatch(/^Approve · (⌘|Ctrl)-click to approve without a comment$/);
+    expect(segment('approve').title).toMatch(/^Approve\n(⌘|Ctrl) 1-click review$/);
     expect(segment('comment').title).toBe('Comment');
     // ✓ and ✗ carry their sending glyph for the instant key; 💬 has none.
     expect(segment('approve').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();

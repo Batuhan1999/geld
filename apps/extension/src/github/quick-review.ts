@@ -95,12 +95,12 @@ export function isInstantClick(event: ReviewEvent, click: Pick<MouseEvent, 'meta
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
 
-/** A segment's tooltip: its verdict and how to send it without a comment, or GitHub's reason it is closed to the reader. */
-export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string): string {
+/** A segment's tooltip, one entry per line: its verdict and the key for a 1-click review, or GitHub's reason it is closed to the reader. */
+export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string): readonly string[] {
   const info = EVENT_INFO[event];
-  if (isAuthor && info.authorNote !== null) return info.authorNote;
-  if (event === 'comment') return 'Comment';
-  return `${info.label} · ${instantKey}-click to ${event === 'approve' ? 'approve' : 'request changes'} without a comment`;
+  if (isAuthor && info.authorNote !== null) return [info.authorNote];
+  if (info.instantIcon === null) return [info.label];
+  return [info.label, `${instantKey} 1-click review`];
 }
 
 /** `/owner/repo/pull/N` for a pull request page, else null. */
@@ -266,22 +266,27 @@ let tipIds = 0;
  * A segment's words in GitHub's own tooltip (the page defines `tool-tip`; one
  * made here is upgraded like its own), read as its description; the
  * segment's name is its `aria-label`. Where the page has no `tool-tip` (an
- * Enterprise version before it) the words are its title.
+ * Enterprise version before it) the words are its title. Lines are broken
+ * with `<br>`, which the tooltip shows and a screen reader reads as a pause.
  */
-function describe(button: HTMLButtonElement, words: string): HTMLElement | null {
+function describe(button: HTMLButtonElement, lines: readonly string[]): HTMLElement | null {
   const tip = button.closest(`.${GROUP_CLASS}`)?.querySelector(`[id="${button.id}-tip"]`) ?? null;
   if (tip instanceof HTMLElement) {
-    if (tip.textContent !== words) tip.textContent = words;
+    if (tip.textContent !== lines.join('')) tip.replaceChildren(...withBreaks(lines));
     return null;
   }
   if (document.querySelector('tool-tip') === null) {
-    button.title = words;
+    button.title = lines.join('\n');
     return null;
   }
   const created = document.createElement('tool-tip');
   for (const [name, value] of Object.entries({ id: `${button.id}-tip`, for: button.id, popover: 'manual', 'data-direction': 's', 'data-type': 'description', class: 'sr-only position-absolute', role: 'tooltip' })) created.setAttribute(name, value);
-  created.textContent = words;
+  created.append(...withBreaks(lines));
   return created;
+}
+
+function withBreaks(lines: readonly string[]): (string | HTMLElement)[] {
+  return lines.flatMap((line, index) => (index === 0 ? [line] : [document.createElement('br'), line]));
 }
 
 function createControls(pullPath: string, context: QuickReviewContext): Mounted {
