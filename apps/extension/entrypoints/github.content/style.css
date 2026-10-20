@@ -743,6 +743,15 @@ html[data-geld-quick-review] details.js-reviews-container {
   margin: 0;
 }
 
+/* At the end of the other tabs' compact header's title row, right of the title, which gives way to it. */
+.geld-quick-review[data-geld-place='header'] {
+  /* Primer's header row orders its parts with `order`; the group comes last. */
+  order: 99;
+  align-self: center;
+  margin-left: auto;
+  padding-left: 16px;
+}
+
 .geld-quick-review[data-geld-place] .geld-quick-review__segment.btn {
   height: 28px;
 }

@@ -43,13 +43,17 @@ const PANEL_CLASS = 'geld-quick-review__panel';
 const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
-/** On the group while it stands in the Files changed tab's stuck toolbar, where GitHub's own button would be. */
+/** On the group while it rides a sticky header: `toolbar` (Files changed, where GitHub's own button would be) or `header` (every other tab). */
 const ATTR_PLACE = 'data-geld-place';
 /** GitHub's own review control, React's Files changed view or the classic one; hidden while the group is mounted. */
 const GITHUB_REVIEW_CONTROL = '[class*="ReviewMenuButton"], details.js-reviews-container';
 /** The toolbar that holds it and sticks to the top of the viewport as the diff scrolls. */
 const STICKY_TOOLBAR = 'section[class*="stickyHeader"], .js-sticky';
 const STICKY_REVIEW_CONTROL = `:is(${STICKY_TOOLBAR}) :is(${GITHUB_REVIEW_CONTROL})`;
+/** The compact pull request header the other tabs show once the page header has scrolled away: `display: none` until it sticks. */
+const STICKY_PR_HEADER = '[class*="prHeader"][class*="stickyHeader"]';
+
+type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
@@ -221,9 +225,12 @@ interface Mounted {
   readonly keys: AbortController;
   /** The tab bar's line counts the group stands before, from the last pass. */
   anchor: HTMLElement | null;
-  /** The sticky toolbar being watched for when it sticks, and the watch. */
+  /** The sticky headers being watched for when they stick (the Files changed toolbar, the compact header), and the watch. */
   toolbar: Element | null;
-  readonly toolbarWatch: MutationObserver;
+  header: Element | null;
+  readonly stickyWatch: MutationObserver;
+  /** Whether the Files changed toolbar is stuck, read from its box on scroll (never on a pass, which must not measure). */
+  toolbarStuck: boolean;
 }
 
 let mounted: Mounted | null = null;
@@ -256,7 +263,7 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   showCount(mounted);
   showAuthor(mounted);
   mounted.anchor = anchor;
-  watchToolbar(mounted);
+  watchSticky(mounted);
   place(mounted);
   const host = anchor.parentElement;
   if (mounted.host !== host) {
@@ -268,36 +275,86 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (!document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.setAttribute(ATTR_ACTIVE, '');
 }
 
-/**
- * GitHub's own (hidden) review button while the Files changed tab's toolbar
- * holding it is stuck to the top of the viewport; null on other tabs, and
- * while the toolbar sits in place under the tab bar, the group in view there.
- */
-function stuckReviewControl(): HTMLElement | null {
-  const control = document.querySelector<HTMLElement>(STICKY_REVIEW_CONTROL);
-  const toolbar = control?.closest(STICKY_TOOLBAR) ?? null;
+function isStuck(element: Element): boolean {
   // React's class is `is-stuck__<hash>`, the classic toolbar's `is-stuck`.
-  if (control === null || toolbar === null || ![...toolbar.classList].some((name) => name === 'is-stuck' || name.startsWith('is-stuck__'))) return null;
-  return control;
+  return [...element.classList].some((name) => name === 'is-stuck' || name.startsWith('is-stuck__'));
 }
 
-/** Follow the sticky toolbar's class, which GitHub flips as it sticks and lets go, so the group moves with it between passes. */
-function watchToolbar(state: Mounted): void {
+/**
+ * Whether the Files changed toolbar is stuck, from its box: a sticky element
+ * stands at its `top` once stuck and below it in its place. GitHub's own
+ * `is-stuck` class comes a frame after the toolbar has visibly stuck (its
+ * observer reports after paint), the first time noticeably, so the class
+ * alone left the toolbar showing without the group for a moment.
+ */
+function measureToolbarStuck(toolbar: Element): boolean {
+  const top = Number.parseFloat(getComputedStyle(toolbar).top);
+  return toolbar.getBoundingClientRect().top <= (Number.isFinite(top) ? top : 0) + 0.5;
+}
+
+/**
+ * Where the group rides while a sticky header shows: the Files changed
+ * toolbar just before GitHub's hidden review button, or the end of the
+ * compact pull request header's title row the other tabs show; null while neither is
+ * stuck, the group in view in the tab bar.
+ */
+function stickyPlace(state: Mounted): { readonly place: Place; readonly put: (root: HTMLElement) => void; readonly placed: (root: HTMLElement) => boolean } | null {
+  const control = document.querySelector<HTMLElement>(STICKY_REVIEW_CONTROL);
+  if (control !== null) {
+    if (!state.toolbarStuck) return null;
+    return { place: 'toolbar', put: (root) => control.insertAdjacentElement('beforebegin', root), placed: (root) => control.previousElementSibling === root };
+  }
+  const header = document.querySelector<HTMLElement>(STICKY_PR_HEADER);
+  if (header === null || !isStuck(header)) return null;
+  // Inside the title row, after the title (which gives way), so the row's centred width and padding hold it as the page's content edge.
+  const row = header.querySelector<HTMLElement>('[class*="TitleArea"]') ?? header;
+  return { place: 'header', put: (root) => row.append(root), placed: (root) => row.lastElementChild === root };
+}
+
+/**
+ * Follow the sticky headers' class, which GitHub flips as they stick and let
+ * go, so the group moves in the same task rather than at the next pass; the
+ * compact header shows on that very flip, so the move is never seen.
+ */
+function watchSticky(state: Mounted): void {
   const toolbar = document.querySelector(STICKY_REVIEW_CONTROL)?.closest(STICKY_TOOLBAR) ?? null;
-  if (state.toolbar === toolbar) return;
-  state.toolbarWatch.disconnect();
+  const header = document.querySelector(STICKY_PR_HEADER);
+  if (toolbar === state.toolbar && header === state.header) return;
+  const newToolbar = toolbar !== state.toolbar;
+  state.stickyWatch.disconnect();
   state.toolbar = toolbar;
-  if (toolbar !== null) state.toolbarWatch.observe(toolbar, { attributes: true, attributeFilter: ['class'] });
+  state.header = header;
+  for (const element of [toolbar, header]) if (element !== null) state.stickyWatch.observe(element, { attributes: true, attributeFilter: ['class'] });
+  // A page opened (or restored) scrolled down: read the new toolbar's box once, off the pass, which must not measure.
+  if (newToolbar) {
+    requestAnimationFrame(() => {
+      if (mounted === state) followToolbar(state);
+    });
+  }
 }
 
-/** In the stuck toolbar beside GitHub's hidden button, so it is always to hand while reviewing; otherwise before the tab bar's counts. */
+/** Re-read the toolbar's box (scroll, or its class flipping) and move the group when that changes where it belongs. */
+function followToolbar(state: Mounted): void {
+  const toolbar = state.toolbar?.isConnected === true ? state.toolbar : null;
+  const stuck = toolbar !== null && measureToolbarStuck(toolbar);
+  if (stuck !== state.toolbarStuck) {
+    state.toolbarStuck = stuck;
+    place(state);
+  }
+}
+
+/** In a stuck header, so it is always to hand while reviewing; otherwise before the tab bar's counts. */
 function place(state: Mounted): void {
-  const stuck = stuckReviewControl();
-  const before = stuck ?? state.anchor;
-  if (before === null) return;
-  if (before.previousElementSibling !== state.root) before.insertAdjacentElement('beforebegin', state.root);
-  if (state.root.hasAttribute(ATTR_PLACE) !== (stuck !== null)) {
-    state.root.toggleAttribute(ATTR_PLACE, stuck !== null);
+  const sticky = stickyPlace(state);
+  if (sticky !== null) {
+    if (!sticky.placed(state.root)) sticky.put(state.root);
+  } else if (state.anchor !== null && state.anchor.previousElementSibling !== state.root) {
+    state.anchor.insertAdjacentElement('beforebegin', state.root);
+  }
+  const place = sticky?.place ?? null;
+  if (state.root.getAttribute(ATTR_PLACE) !== place) {
+    if (place === null) state.root.removeAttribute(ATTR_PLACE);
+    else state.root.setAttribute(ATTR_PLACE, place);
     positionPanel();
   }
 }
@@ -309,7 +366,7 @@ export function removeQuickReview(): void {
   window.clearTimeout(mounted.submittedTimer);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
-  mounted.toolbarWatch.disconnect();
+  mounted.stickyWatch.disconnect();
   mounted.root.remove();
   mounted = null;
 }
@@ -365,8 +422,10 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
-  const toolbarWatch = new MutationObserver(() => {
-    if (mounted === state) place(state);
+  const stickyWatch = new MutationObserver(() => {
+    if (mounted !== state) return;
+    followToolbar(state);
+    place(state);
   });
   const state: Mounted = {
     root,
@@ -387,8 +446,18 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     keys,
     anchor: null,
     toolbar: null,
-    toolbarWatch,
+    header: null,
+    stickyWatch,
+    toolbarStuck: false,
   };
+  // Scroll events come before the frame is painted, so a toolbar that sticks on this scroll has the group in that frame.
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (mounted === state) followToolbar(state);
+    },
+    { passive: true, signal: keys.signal },
+  );
   followInstantKey(root, keys.signal, () => describeSegments(state));
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {

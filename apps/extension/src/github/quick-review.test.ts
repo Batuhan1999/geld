@@ -88,26 +88,47 @@ describe('the tab bar button', () => {
     return element;
   };
 
-  it('rides in the Files changed toolbar while it is stuck, where GitHub’s own button would be', async () => {
-    document.body.insertAdjacentHTML('beforeend', '<section class="stickyHeader__x toolbar__y"><div class="row"><button class="ReviewMenuButton__z">Submit review</button></div></section>');
+  it('rides in the Files changed toolbar the moment it sticks, where GitHub’s own button would be', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section class="stickyHeader__x toolbar__y" style="top: 0px"><div class="row"><button class="ReviewMenuButton__z">Submit review</button></div></section>');
+    const toolbar = document.querySelector('section');
+    if (toolbar === null) throw new Error('fixture');
+    let top = 262;
+    toolbar.getBoundingClientRect = () => new DOMRect(0, top, 1000, 48);
     const page = { kind: 'pull-files' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
     const group = document.querySelector('.geld-quick-review');
-    const toolbar = document.querySelector('section');
     const own = document.querySelector('.ReviewMenuButton__z');
     expect(counts().previousElementSibling).toBe(group);
-    // GitHub flips the toolbar's class as it sticks; the group follows without waiting for a pass.
-    toolbar?.classList.add('is-stuck__w');
-    await Promise.resolve();
+    // The scroll that sticks it moves the group in the same task, before GitHub's class (a frame later) says so.
+    top = 0;
+    window.dispatchEvent(new Event('scroll'));
     expect(own?.previousElementSibling).toBe(group);
-    expect(group?.hasAttribute('data-geld-place')).toBe(true);
-    // A pass while stuck keeps it there.
+    expect(group?.getAttribute('data-geld-place')).toBe('toolbar');
+    // A pass while stuck keeps it there, without measuring.
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     expect(own?.previousElementSibling).toBe(group);
-    toolbar?.classList.remove('is-stuck__w');
-    await Promise.resolve();
+    top = 262;
+    window.dispatchEvent(new Event('scroll'));
     expect(counts().previousElementSibling).toBe(group);
     expect(group?.hasAttribute('data-geld-place')).toBe(false);
+  });
+
+  it('rides at the end of the compact header the other tabs show once it sticks', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<div class="PageHeader stickyHeader__x prHeader__y"><div class="PageHeader-TitleArea"><h2>Title</h2></div></div>');
+    const header = document.querySelector('.prHeader__y');
+    const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    const group = document.querySelector('.geld-quick-review');
+    expect(counts().previousElementSibling).toBe(group);
+    // GitHub shows the header on the same class flip that the group follows, so it is there as the header appears.
+    header?.classList.add('is-stuck__w');
+    await Promise.resolve();
+    expect(header?.querySelector('.PageHeader-TitleArea')?.lastElementChild).toBe(group);
+    expect(group?.getAttribute('data-geld-place')).toBe('header');
+    header?.classList.remove('is-stuck__w');
+    await Promise.resolve();
+    expect(counts().previousElementSibling).toBe(group);
   });
 
   it('sits left of the line counts on every pull request tab, once', () => {
