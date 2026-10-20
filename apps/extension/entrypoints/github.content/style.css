@@ -789,11 +789,15 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /*
  * ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and say so in the theme's own success and danger colours, background
- * (half the muted surface) and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes
+ * (half the muted surface, all of it under the pointer) and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes
  * redefine these.
  */
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) {
   background: color-mix(in srgb, var(--bgColor-success-muted) 50%, transparent);
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
+  background: var(--bgColor-success-muted);
 }
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
@@ -803,6 +807,10 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) {
   background: color-mix(in srgb, var(--bgColor-danger-muted) 50%, transparent);
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
+  background: var(--bgColor-danger-muted);
 }
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
