@@ -728,8 +728,8 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  /* A 24px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
-  margin: -3px 12px -3px 0;
+  /* A 26px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
+  margin: -4px 12px -4px 0;
   white-space: nowrap;
 }
 
@@ -750,7 +750,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 24px;
+  height: 26px;
   min-width: 28px;
   padding: 0 6px;
   background: transparent;
@@ -770,6 +770,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   transition:
     color 150ms ease-out,
     opacity 150ms ease-out;
+}
+
+/* The comment octicon's bubble fills y 1 to 12 of 16, its tail below: centred by its box it reads high beside ✓ and ✗. */
+.geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph {
+  transform: translateY(1px);
 }
 
 .geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
