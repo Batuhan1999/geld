@@ -6,7 +6,7 @@ import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
-import { ICON_CHECK, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_X } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -44,42 +44,45 @@ const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
 const SUBMITTED_MS = 3000;
-/** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet tints them so. */
+/** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
 
 interface EventInfo {
   readonly value: ReviewEvent;
   readonly label: string;
-  readonly note: string;
   /** GitHub's reason the author cannot take this one, when they cannot. */
   readonly authorNote: string | null;
   /** The segment's glyph. */
   readonly icon: string;
+  /** Its glyph while the instant key is held, for the verdicts a ⌘-click sends at once. */
+  readonly instantIcon: string | null;
+  /** The submit button's look in the comment box, as GitHub colours these verdicts. */
+  readonly submitClass: string;
   /** What the controls say for a moment after it went through. */
   readonly done: string;
 }
 
 const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
-  comment: { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null, icon: ICON_COMMENT, done: 'Review submitted' },
+  comment: { value: 'comment', label: 'Comment', authorNote: null, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
   approve: {
     value: 'approve',
     label: 'Approve',
-    note: 'Submit feedback and approve merging these changes.',
     authorNote: "Pull request authors can't approve their own pull requests.",
     icon: ICON_CHECK,
+    instantIcon: ICON_CHECK_SEND,
+    submitClass: 'btn-primary',
     done: 'Approved',
   },
   'request changes': {
     value: 'request changes',
     label: 'Request changes',
-    note: 'Submit feedback suggesting changes.',
     authorNote: "Pull request authors can't request changes on their own pull requests.",
     icon: ICON_X,
+    instantIcon: ICON_X_SEND,
+    submitClass: 'geld-quick-review__submit--danger',
     done: 'Changes requested',
   },
 };
-
-const EVENTS: readonly EventInfo[] = [EVENT_INFO.comment, EVENT_INFO.approve, EVENT_INFO['request changes']];
 
 /** The segments, left to right: the verdicts first, the comment last (it carries the pending count). */
 const SEGMENT_ORDER: readonly ReviewEvent[] = ['approve', 'request changes', 'comment'];
@@ -194,6 +197,8 @@ interface Mounted {
   context: QuickReviewContext;
   /** The open comment box. */
   panel: HTMLElement | null;
+  /** Gives the open box another verdict, keeping its words. */
+  retarget: ((event: ReviewEvent) => void) | null;
   /** A review on its way: the controls and the box wait for it. */
   sending: boolean;
   submittedTimer: number;
@@ -206,7 +211,6 @@ interface Mounted {
 
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
-let panelIds = 0;
 
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
@@ -289,7 +293,11 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     return createElement(
       'button',
       { type: 'button', id: `geld-quick-review-${tipIds}`, class: 'btn btn-sm BtnGroup-item geld-quick-review__segment', 'data-event': event, 'aria-label': info.label, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
-      [createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]), ...(event === 'comment' ? [counter] : [])],
+      [
+        createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
+        ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
+        ...(event === 'comment' ? [counter] : []),
+      ],
     );
   };
   const segments = { approve: segment('approve'), 'request changes': segment('request changes'), comment: segment('comment') };
@@ -297,7 +305,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, group, ...tips]);
-  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys: followInstantKey(root) };
+  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys: followInstantKey(root) };
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
@@ -306,7 +314,9 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
         return;
       }
       if (!isInstantClick(event, click, MAC)) {
-        openComposer(state, event, null);
+        // Another verdict while the box is open: the box stays, words and all, and takes the new verdict.
+        if (state.panel !== null && state.retarget !== null) state.retarget(event);
+        else openComposer(state, event, null);
         return;
       }
       closePanel();
@@ -321,7 +331,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
 
 /**
  * Mark the group while the instant key (⌘ on a Mac, Ctrl elsewhere) is held,
- * so ✓ and ✗ show before the click that they will send at once. Read from
+ * so ✓ and ✗ show before the click that they will send at once (their
+ * glyphs gain an arrow). Read from
  * every key event and from the pointer over the group (the key may have gone
  * down while another window had focus); let go when the window loses focus.
  */
@@ -356,6 +367,7 @@ function closePanel(restoreFocus = false): void {
   if (mounted === null || mounted.panel === null) return;
   mounted.panel.remove();
   mounted.panel = null;
+  mounted.retarget = null;
   const opener = mounted.opener === null ? null : mounted.segments[mounted.opener];
   mounted.opener = null;
   for (const event of SEGMENT_ORDER) mounted.segments[event].setAttribute('aria-expanded', 'false');
@@ -458,53 +470,42 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
   }
 }
 
-/** The comment box, its verdict chosen (from the menu) and, after a refused send, GitHub's reason above it. */
+/**
+ * The comment box: the words, the pending comments and Cancel beside a
+ * submit button that names the verdict in its colour ("Approve" green,
+ * "Request changes" red, "Comment" grey). No title and no choices: the
+ * segment that opened it chose the verdict, and another segment changes it
+ * in place. After a refused send, GitHub's reason above the buttons.
+ */
 function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
-  const isAuthor = isAuthorViewing();
-  draft.event = isAuthor && EVENT_INFO[initial].authorNote !== null ? 'comment' : initial;
+  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && EVENT_INFO[event].authorNote !== null ? 'comment' : event);
+  draft.event = allowed(initial);
 
-  panelIds += 1;
-  const titleId = `geld-quick-review-${panelIds}-title`;
-  const close = createElement('button', { type: 'button', class: 'close-button Overlay-closeButton', 'aria-label': 'Close' }, [svgFromString(ICON_X)]);
-  const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '6' });
+  const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
   body.value = draft.body;
-  const choices = EVENTS.map(({ value, label, note, authorNote }) => {
-    const disabled = isAuthor && authorNote !== null;
-    const input = createElement('input', { type: 'radio', name: `geld-review-event-${panelIds}`, value });
-    input.checked = draft.event === value;
-    input.disabled = disabled;
-    input.addEventListener('change', () => {
-      if (input.checked) draft.event = value;
-      refresh();
-    });
-    return createElement('div', { class: `form-checkbox geld-quick-review__choice${disabled ? ' geld-quick-review__choice--disabled' : ''}` }, [
-      createElement('label', {}, [input, ` ${label}`]),
-      createElement('p', { class: 'note' }, [disabled && authorNote !== null ? authorNote : note]),
-    ]);
-  });
   const pendingSection = createElement('div', { class: 'geld-quick-review__pending' });
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
   if (failure !== null) {
     error.textContent = failure;
     error.hidden = false;
   }
-  const discard = createElement('button', { type: 'button', class: 'btn btn-danger', hidden: '' }, ['Discard review']);
-  const cancel = createElement('button', { type: 'button', class: 'btn' }, ['Cancel']);
-  const submit = createElement('button', { type: 'button', class: 'btn btn-primary' }, ['Submit review']);
-  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-labelledby': titleId }, [
-    createElement('div', { class: 'Overlay-header' }, [
-      createElement('div', { class: 'Overlay-headerContentWrap' }, [
-        createElement('div', { class: 'Overlay-titleWrap' }, [createElement('h1', { class: 'Overlay-title', id: titleId }, ['Finish your review'])]),
-        createElement('div', { class: 'Overlay-actionWrap' }, [close]),
-      ]),
-    ]),
-    createElement('div', { class: 'Overlay-body' }, [body, createElement('fieldset', { class: 'geld-quick-review__events' }, [createElement('legend', { class: 'sr-only' }, ['Review type']), ...choices]), pendingSection, error]),
-    createElement('div', { class: 'Overlay-footer Overlay-footer--divided geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
+  const discard = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible geld-quick-review__discard', hidden: '' }, ['Discard review']);
+  const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
+  const submit = createElement('button', { type: 'button', class: 'btn btn-sm' });
+  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
+    createElement('div', { class: 'Overlay-body' }, [body, pendingSection, error]),
+    createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
   ]);
 
   let pendingOpen = true;
+  const showVerdict = (): void => {
+    const info = EVENT_INFO[draft.event];
+    submit.className = `btn btn-sm geld-quick-review__submit ${info.submitClass}`.trim();
+    if (!state.sending) submit.textContent = info.label;
+    panel.setAttribute('aria-label', info.label);
+  };
   const refresh = (): void => {
     const pending = pendingCount(state);
     submit.disabled = state.sending || !canSubmit(draft.event, body.value, pending > 0);
@@ -522,7 +523,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     const pending = sendReview(state, draft.event, body.value);
     refresh();
     const failed = await pending;
-    submit.textContent = 'Submit review';
+    showVerdict();
     if (failed === null) {
       if (state.panel === panel) closePanel(true);
       return;
@@ -545,7 +546,6 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
       void send();
     }
   });
-  close.addEventListener('click', () => closePanel(true));
   cancel.addEventListener('click', () => closePanel(true));
   submit.addEventListener('click', () => void send());
   discard.addEventListener('click', () => {
@@ -573,6 +573,17 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   });
 
   showPanel(state, panel, initial);
+  state.retarget = (event) => {
+    draft.event = allowed(event);
+    if (state.opener !== null) state.segments[state.opener].setAttribute('aria-expanded', 'false');
+    state.opener = event;
+    state.segments[event].setAttribute('aria-expanded', 'true');
+    error.hidden = true;
+    showVerdict();
+    refresh();
+    body.focus({ preventScroll: true });
+  };
+  showVerdict();
   refresh();
   body.focus({ preventScroll: true });
   // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
@@ -582,7 +593,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
 }
 
 /**
- * "Pending comments N" under the choices, one line per comment as the
+ * "Pending comments N" under the words, one line per comment as the
  * digest lists threads: the comment's first sentence, then its file and
  * line, the line leading to the comment on the Files changed tab. Folds,
  * open at first. Nothing when there are none; the count alone while

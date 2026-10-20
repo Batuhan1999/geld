@@ -112,7 +112,9 @@ describe('the tab bar button', () => {
   };
   const instant = { metaKey: true, ctrlKey: true, bubbles: true };
   const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-  const chosen = (): string | undefined => document.querySelector<HTMLInputElement>('.geld-quick-review__panel input[type="radio"]:checked')?.value;
+  const submitButton = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .geld-quick-review__submit');
+  /** The verdict the box will send: its submit button says it. */
+  const chosen = (): string | undefined => submitButton()?.textContent ?? undefined;
 
   it('is one group of three segments, ✓ ✗ 💬, named and explained', () => {
     mount();
@@ -123,21 +125,41 @@ describe('the tab bar button', () => {
     // The page here defines no `tool-tip`, so the words are each segment's title.
     expect(segment('approve').title).toMatch(/^Approve · (⌘|Ctrl)-click to approve without a comment$/);
     expect(segment('comment').title).toBe('Comment');
+    // ✓ and ✗ carry their sending glyph for the instant key; 💬 has none.
+    expect(segment('approve').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();
+    expect(segment('request changes').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();
+    expect(segment('comment').querySelector('.geld-quick-review__glyph--instant')).toBeNull();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
   });
 
   it('opens the comment box with the verdict chosen on a click, as the confirmation', () => {
     mount();
     segment('approve').click();
-    expect(document.querySelector('.geld-quick-review__panel .Overlay-title')?.textContent).toBe('Finish your review');
-    expect(chosen()).toBe('approve');
+    const box = document.querySelector('.geld-quick-review__panel');
+    // No title and no choices: the submit button names the verdict, in GitHub's colour for it.
+    expect(box?.querySelector('.Overlay-title, input[type="radio"]')).toBeNull();
+    expect(chosen()).toBe('Approve');
+    expect(submitButton()?.classList.contains('btn-primary')).toBe(true);
     expect(segment('approve').getAttribute('aria-expanded')).toBe('true');
-    // Approving needs no words, so the box's Submit is the confirmation.
-    const submit = [...document.querySelectorAll<HTMLButtonElement>('.geld-quick-review__panel button')].find((button) => button.textContent === 'Submit review');
-    expect(submit?.disabled).toBe(false);
+    // Approving needs no words, so the box's Approve is the confirmation.
+    expect(submitButton()?.disabled).toBe(false);
+    // Another segment gives the same box the other verdict, words kept.
+    const words = box?.querySelector('textarea');
+    if (words instanceof HTMLTextAreaElement) {
+      words.value = 'Needs a test.';
+      words.dispatchEvent(new Event('input'));
+    }
     segment('request changes').click();
-    expect(chosen()).toBe('request changes');
+    expect(document.querySelector('.geld-quick-review__panel')).toBe(box);
+    expect(box?.querySelector('textarea')?.value).toBe('Needs a test.');
+    expect(chosen()).toBe('Request changes');
+    expect(submitButton()?.classList.contains('geld-quick-review__submit--danger')).toBe(true);
     expect(segment('approve').getAttribute('aria-expanded')).toBe('false');
+    expect(segment('request changes').getAttribute('aria-expanded')).toBe('true');
+    segment('comment').click();
+    expect(chosen()).toBe('Comment');
+    expect(submitButton()?.classList.contains('btn-primary')).toBe(false);
+    segment('request changes').click();
     // The same segment again closes it.
     segment('request changes').click();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
@@ -165,7 +187,7 @@ describe('the tab bar button', () => {
   it('opens the box from 💬 even with the instant key held', () => {
     mount();
     segment('comment').dispatchEvent(new MouseEvent('click', instant));
-    expect(chosen()).toBe('comment');
+    expect(chosen()).toBe('Comment');
   });
 
   it('approves at once on the instant click, without the box', async () => {
@@ -195,7 +217,7 @@ describe('the tab bar button', () => {
     segment('request changes').dispatchEvent(new MouseEvent('click', instant));
     await settle();
     await settle();
-    expect(chosen()).toBe('request changes');
+    expect(chosen()).toBe('Request changes');
     expect(document.querySelector('.geld-quick-review__error')?.textContent).toBe('GitHub could not submit the review: Review body is required');
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('');
   });
@@ -218,10 +240,9 @@ describe('the tab bar button', () => {
     await settle();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
     expect(sent.some((url) => url.endsWith('/submit_review'))).toBe(false);
-    // The comment box keeps them listed and disabled too.
+    // The comment box opens for a comment only.
     segment('comment').click();
-    const radios = [...document.querySelectorAll<HTMLInputElement>('.geld-quick-review__panel input[type="radio"]')];
-    expect(radios.map((radio) => radio.disabled)).toEqual([false, true, true]);
+    expect(chosen()).toBe('Comment');
   });
 
   it('counts the pending comments, lists them and discards the review as GitHub does', async () => {
@@ -259,7 +280,7 @@ describe('the tab bar button', () => {
     expect(row?.querySelector('.geld-quick-review__pending-where')?.textContent).toBe('a.ts:3');
     expect(row?.getAttribute('title')).toBe('src/a.ts, line 3');
     // Pending comments go with the review, so a comment needs no words of its own.
-    const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Submit review');
+    const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Comment');
     expect(submit?.disabled).toBe(false);
     const discard = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Discard review');
     expect(discard?.hidden).toBe(false);

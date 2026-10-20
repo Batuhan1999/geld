@@ -793,34 +793,33 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /*
- * ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and say so in the theme's own success and danger colours, background
- * (half the muted surface, all of it under the pointer) and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes
- * redefine these.
+ * ✓ and ✗ under the pointer, and while their box is open, in the theme's own success and danger: the muted surface and the
+ * icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) {
-  background: color-mix(in srgb, var(--bgColor-success-muted) 50%, transparent);
-}
-
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) {
   background: var(--bgColor-success-muted);
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
-  opacity: 1;
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) {
-  background: color-mix(in srgb, var(--bgColor-danger-muted) 50%, transparent);
-}
-
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) {
   background: var(--bgColor-danger-muted);
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):is(:hover, [aria-expanded='true']) .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
-  opacity: 1;
+}
+
+/* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
+.geld-quick-review__glyph--instant,
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
+  display: none;
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph--instant {
+  display: flex;
 }
 
 /* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
@@ -856,58 +855,77 @@ html[data-geld-quick-review] details.js-reviews-container {
   right: auto;
   bottom: auto;
   z-index: 100;
-  width: min(640px, calc(100vw - 32px));
+  width: min(424px, calc(100vw - 32px));
   max-height: none;
   animation: none;
 }
 
+/* A small box: the words, any pending comments, then the buttons with no rule between. */
 .Overlay.geld-quick-review__panel .Overlay-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  gap: 8px;
+  padding: 12px 12px 0;
 }
 
 .geld-quick-review__body {
-  min-height: 120px;
+  min-height: 90px;
   resize: vertical;
-}
-
-.geld-quick-review__events {
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.geld-quick-review__choice {
-  margin: 0 0 8px;
-}
-
-.geld-quick-review__choice:last-child {
-  margin-bottom: 0;
-}
-
-.geld-quick-review__choice label {
-  font-weight: 600;
-}
-
-.geld-quick-review__choice--disabled label,
-.geld-quick-review__choice--disabled .note {
-  color: var(--fgColor-disabled, var(--color-primer-fg-disabled, #818b98));
 }
 
 .geld-quick-review__error {
   margin: 0;
+  font-size: 12px;
 }
 
-.geld-quick-review__footer {
+.Overlay-footer.geld-quick-review__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 0;
+  box-shadow: none;
 }
 
-/* "Submit review 1": Primer's own counter, which a primary button colours itself. */
+/* Slimmer than Primer's small button: 24px, tighter padding, 12px words. */
+.geld-quick-review__footer .btn-sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+/* Cancel and Discard are words with a grey surface on hover, in the text's colour rather than Primer's link blue. */
+.geld-quick-review__footer .btn.btn-invisible {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+/* "Request changes" in red, as "Approve" is in Primer's green: the danger button's solid look, from the theme. */
+.geld-quick-review__submit--danger.btn {
+  border-color: var(--button-danger-borderColor-hover, var(--borderColor-danger-emphasis, #cf222e));
+  background: var(--button-danger-bgColor-hover, var(--bgColor-danger-emphasis, #cf222e));
+  color: var(--button-danger-fgColor-hover, var(--fgColor-onEmphasis, #ffffff));
+  box-shadow: var(--button-danger-shadow-selected, none);
+}
+
+.geld-quick-review__submit--danger.btn:hover:not(:disabled) {
+  border-color: var(--button-danger-borderColor-active, var(--borderColor-danger-emphasis, #cf222e));
+  background: var(--button-danger-bgColor-active, #a40e26);
+  color: var(--button-danger-fgColor-active, var(--fgColor-onEmphasis, #ffffff));
+}
+
+.geld-quick-review__submit--danger.btn:disabled {
+  border-color: var(--button-danger-borderColor-rest, var(--borderColor-default, #d1d9e0));
+  background: var(--button-danger-bgColor-disabled, var(--bgColor-disabled, #eff2f5));
+  color: var(--button-danger-fgColor-disabled, color-mix(in srgb, var(--fgColor-danger, #d1242f) 50%, transparent));
+}
+
+/* 💬 with its pending count: Primer's own counter. */
 .geld-quick-review__count {
   margin-left: 2px;
 }
@@ -922,7 +940,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   background: transparent;
   color: var(--fgColor-default, #1f2328);
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -941,7 +959,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   flex-direction: column;
   gap: 0;
   max-height: 192px;
-  /* The rows' hover surface overhangs by its padding, so their glyphs stand in the radios' column. */
+  /* The rows' hover surface overhangs by its padding, so their glyphs stand in the words' column. */
   margin: 4px -8px 0;
   padding: 0;
   overflow-y: auto;
@@ -954,11 +972,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 28px;
   padding: 0 8px;
   border-radius: 6px;
   color: var(--fgColor-default, #1f2328);
-  font-size: 14px;
+  font-size: 13px;
   text-decoration: none;
 }
 
@@ -985,8 +1003,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   font-size: 0.875em;
 }
 
+/* The file keeps its name whole where it can: the words give way first, the file only past 40% of the line. */
 .geld-quick-review__pending-where {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-width: 40%;
   min-width: 0;
   overflow: hidden;
   color: var(--fgColor-muted, #59636e);
