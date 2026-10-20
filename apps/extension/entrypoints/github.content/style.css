@@ -914,12 +914,15 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: inherit;
 }
 
-/* "Request changes" in red, as "Approve" is in Primer's green: the danger button's solid look, from the theme. */
+/*
+ * "Request changes" in red, as "Approve" is in Primer's green: the danger button's solid look, from the theme. No shadow:
+ * the danger tokens' only one is an inset line, which read as a second border inside the first.
+ */
 .geld-quick-review__submit--danger.btn {
   border-color: var(--button-danger-borderColor-hover, var(--borderColor-danger-emphasis, #cf222e));
   background: var(--button-danger-bgColor-hover, var(--bgColor-danger-emphasis, #cf222e));
   color: var(--button-danger-fgColor-hover, var(--fgColor-onEmphasis, #ffffff));
-  box-shadow: var(--button-danger-shadow-selected, none);
+  box-shadow: none;
 }
 
 .geld-quick-review__submit--danger.btn:hover:not(:disabled) {
@@ -928,10 +931,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--button-danger-fgColor-active, var(--fgColor-onEmphasis, #ffffff));
 }
 
+/* Disabled as Primer's green is: the same red washed halfway into the page, its words a faded white (no danger token is). */
 .geld-quick-review__submit--danger.btn:disabled {
-  border-color: var(--button-danger-borderColor-rest, var(--borderColor-default, #d1d9e0));
-  background: var(--button-danger-bgColor-disabled, var(--bgColor-disabled, #eff2f5));
-  color: var(--button-danger-fgColor-disabled, color-mix(in srgb, var(--fgColor-danger, #d1242f) 50%, transparent));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--bgColor-danger-emphasis, #cf222e) 50%, var(--bgColor-default, #ffffff));
+  color: var(--button-primary-fgColor-disabled, color-mix(in srgb, var(--fgColor-onEmphasis, #ffffff) 80%, transparent));
 }
 
 /* The pending count as a badge on the group's top-right corner, ringed in the page colour so it reads over the outline. */
