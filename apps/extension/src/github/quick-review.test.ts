@@ -38,6 +38,11 @@ describe('segmentHint', () => {
     expect(segmentHint('comment', false, '⌘')).toEqual(['Comment']);
     expect(segmentHint('approve', true, '⌘')).toEqual(["Pull request authors can't approve their own pull requests."]);
     expect(segmentHint('comment', true, '⌘')).toEqual(['Comment']);
+    // While the key is held a click sends at once, and the tooltip says that alone.
+    expect(segmentHint('approve', false, '⌘', true)).toEqual(['Approve without comments']);
+    expect(segmentHint('request changes', false, 'Ctrl', true)).toEqual(['Request changes without comments']);
+    expect(segmentHint('comment', false, '⌘', true)).toEqual(['Comment']);
+    expect(segmentHint('approve', true, '⌘', true)).toEqual(["Pull request authors can't approve their own pull requests."]);
   });
 });
 
@@ -171,8 +176,11 @@ describe('the tab bar button', () => {
     // ⌘ on a Mac, Ctrl elsewhere: both set here, so the test holds on either platform.
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
     expect(root?.hasAttribute('data-instant')).toBe(true);
+    expect(segment('approve').title).toBe('Approve without comments');
+    expect(segment('request changes').title).toBe('Request changes without comments');
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false }));
     expect(root?.hasAttribute('data-instant')).toBe(false);
+    expect(segment('approve').title).toMatch(/^Approve\n(⌘|Ctrl) 1-click review$/);
     // The key may have gone down in another window: the pointer over the group reads it too.
     root?.dispatchEvent(new MouseEvent('pointermove', { metaKey: true, ctrlKey: true }));
     expect(root?.hasAttribute('data-instant')).toBe(true);

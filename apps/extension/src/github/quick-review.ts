@@ -95,11 +95,16 @@ export function isInstantClick(event: ReviewEvent, click: Pick<MouseEvent, 'meta
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
 
-/** A segment's tooltip, one entry per line: its verdict and the key for a 1-click review, or GitHub's reason it is closed to the reader. */
-export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string): readonly string[] {
+/**
+ * A segment's tooltip, one entry per line: its verdict and the key for a
+ * 1-click review, what a click does while that key is held, or GitHub's
+ * reason it is closed to the reader.
+ */
+export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string, held = false): readonly string[] {
   const info = EVENT_INFO[event];
   if (isAuthor && info.authorNote !== null) return [info.authorNote];
   if (info.instantIcon === null) return [info.label];
+  if (held) return [`${info.label} without comments`];
   return [info.label, `${instantKey} 1-click review`];
 }
 
@@ -310,7 +315,9 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
-  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys: followInstantKey(root) };
+  const keys = new AbortController();
+  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys };
+  followInstantKey(root, keys.signal, () => describeSegments(state));
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
@@ -337,21 +344,26 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
 /**
  * Mark the group while the instant key (⌘ on a Mac, Ctrl elsewhere) is held,
  * so ✓ and ✗ show before the click that they will send at once (their
- * glyphs gain an arrow). Read from
- * every key event and from the pointer over the group (the key may have gone
- * down while another window had focus); let go when the window loses focus.
+ * glyphs gain an arrow, their tooltips say so). Read from every key event
+ * and from the pointer over the group (the key may have gone down while
+ * another window had focus); let go when the window loses focus.
  */
-function followInstantKey(root: HTMLElement): AbortController {
-  const keys = new AbortController();
+function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () => void): void {
   const held = (on: boolean): void => {
-    if (root.hasAttribute(ATTR_INSTANT) !== on) root.toggleAttribute(ATTR_INSTANT, on);
+    if (root.hasAttribute(ATTR_INSTANT) === on) return;
+    root.toggleAttribute(ATTR_INSTANT, on);
+    onChange();
   };
   const read = (event: KeyboardEvent | MouseEvent): void => held(MAC ? event.metaKey : event.ctrlKey);
-  window.addEventListener('keydown', read, { capture: true, signal: keys.signal });
-  window.addEventListener('keyup', read, { capture: true, signal: keys.signal });
-  root.addEventListener('pointermove', read, { signal: keys.signal });
-  window.addEventListener('blur', () => held(false), { signal: keys.signal });
-  return keys;
+  window.addEventListener('keydown', read, { capture: true, signal });
+  window.addEventListener('keyup', read, { capture: true, signal });
+  root.addEventListener('pointermove', read, { signal });
+  window.addEventListener('blur', () => held(false), { signal });
+}
+
+function describeSegments(state: Mounted): void {
+  const held = state.root.hasAttribute(ATTR_INSTANT);
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, state.isAuthor === true, INSTANT_KEY, held));
 }
 
 /** What the author cannot do stays in the group, disabled, its tooltip GitHub's reason (re-read: the header may come late). */
@@ -364,8 +376,8 @@ function showAuthor(state: Mounted): void {
     const closed = isAuthor && EVENT_INFO[event].authorNote !== null;
     if (closed) button.setAttribute('aria-disabled', 'true');
     else button.removeAttribute('aria-disabled');
-    describe(button, segmentHint(event, isAuthor, INSTANT_KEY));
   }
+  describeSegments(state);
 }
 
 function closePanel(restoreFocus = false): void {
