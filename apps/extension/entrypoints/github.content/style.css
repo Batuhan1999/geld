@@ -784,6 +784,28 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. */
+/*
+ * ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and say so in the theme's own success and danger colours, background
+ * and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
+ */
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) {
+  background: var(--bgColor-success-muted);
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success);
+  opacity: 1;
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) {
+  background: var(--bgColor-danger-muted);
+}
+
+.geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger);
+  opacity: 1;
+}
+
 /* Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
 .geld-quick-review__segment.btn[aria-disabled='true'] {
   border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));

@@ -143,6 +143,25 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
   });
 
+  it('marks the group while the instant key is held, and lets go on release or blur', () => {
+    mount();
+    const root = document.querySelector('.geld-quick-review');
+    // ⌘ on a Mac, Ctrl elsewhere: both set here, so the test holds on either platform.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(root?.hasAttribute('data-instant')).toBe(true);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false }));
+    expect(root?.hasAttribute('data-instant')).toBe(false);
+    // The key may have gone down in another window: the pointer over the group reads it too.
+    root?.dispatchEvent(new MouseEvent('pointermove', { metaKey: true, ctrlKey: true }));
+    expect(root?.hasAttribute('data-instant')).toBe(true);
+    window.dispatchEvent(new Event('blur'));
+    expect(root?.hasAttribute('data-instant')).toBe(false);
+    // Gone with the group: nothing listens after it is removed.
+    removeQuickReview();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(root?.hasAttribute('data-instant')).toBe(false);
+  });
+
   it('opens the box from 💬 even with the instant key held', () => {
     mount();
     segment('comment').dispatchEvent(new MouseEvent('click', instant));

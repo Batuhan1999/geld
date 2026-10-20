@@ -44,6 +44,8 @@ const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
 const SUBMITTED_MS = 3000;
+/** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet tints them so. */
+const ATTR_INSTANT = 'data-instant';
 
 interface EventInfo {
   readonly value: ReviewEvent;
@@ -198,6 +200,8 @@ interface Mounted {
   /** The pending comments last read for {@link pendingFor}; null until read (or when GitHub could not say). */
   pending: readonly PendingComment[] | null;
   pendingFor: string | null;
+  /** Stops following the instant key. */
+  readonly keys: AbortController;
 }
 
 let mounted: Mounted | null = null;
@@ -247,6 +251,7 @@ export function removeQuickReview(): void {
   closePanel();
   window.clearTimeout(mounted.submittedTimer);
   mounted.host?.removeAttribute(ATTR_HOST);
+  mounted.keys.abort();
   mounted.root.remove();
   mounted = null;
 }
@@ -292,7 +297,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, group, ...tips]);
-  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null };
+  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys: followInstantKey(root) };
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
@@ -312,6 +317,25 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     });
   }
   return state;
+}
+
+/**
+ * Mark the group while the instant key (⌘ on a Mac, Ctrl elsewhere) is held,
+ * so ✓ and ✗ show before the click that they will send at once. Read from
+ * every key event and from the pointer over the group (the key may have gone
+ * down while another window had focus); let go when the window loses focus.
+ */
+function followInstantKey(root: HTMLElement): AbortController {
+  const keys = new AbortController();
+  const held = (on: boolean): void => {
+    if (root.hasAttribute(ATTR_INSTANT) !== on) root.toggleAttribute(ATTR_INSTANT, on);
+  };
+  const read = (event: KeyboardEvent | MouseEvent): void => held(MAC ? event.metaKey : event.ctrlKey);
+  window.addEventListener('keydown', read, { capture: true, signal: keys.signal });
+  window.addEventListener('keyup', read, { capture: true, signal: keys.signal });
+  root.addEventListener('pointermove', read, { signal: keys.signal });
+  window.addEventListener('blur', () => held(false), { signal: keys.signal });
+  return keys;
 }
 
 /** What the author cannot do stays in the group, disabled, its tooltip GitHub's reason (re-read: the header may come late). */
