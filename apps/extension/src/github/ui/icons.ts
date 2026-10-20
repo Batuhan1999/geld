@@ -189,20 +189,18 @@ export const ICON_TRASH = octicon(
   'octicon-trash',
 );
 
-/** Octicons has no "send at once" mark: an arrow in the glyph's free bottom-right corner, drawn at the octicons' 1.5 stroke. */
-const SEND_ARROW = '<path d="M11.97 9.97a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06l.97-.97H9.75a.75.75 0 0 1 0-1.5h3.19l-.97-.97a.75.75 0 0 1 0-1.06Z"></path>';
+/**
+ * Octicons has no "send at once" mark: the glyph exactly where the plain one stands (so the swap moves nothing), and an
+ * arrow at the octicons' 1.5 stroke tucked into its free bottom-right corner, overhanging the 16px box where it must.
+ */
+const sendArrow = (dx: number, dy: number): string =>
+  `<path transform="translate(${dx} ${dy})" d="M11.97 9.97a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06l.97-.97H9.75a.75.75 0 0 1 0-1.5h3.19l-.97-.97a.75.75 0 0 1 0-1.06Z"></path>`;
 
-/** ✓ that sends at once: the check, moved up and left out of the arrow's corner. */
-export const ICON_CHECK_SEND = octicon(
-  `<path transform="translate(-1 -2.5)" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path>${SEND_ARROW}`,
-  'octicon-check',
-);
+/** ✓ that sends at once. */
+export const ICON_CHECK_SEND = octicon(`<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path>${sendArrow(0.75, 0.75)}`, 'octicon-check');
 
-/** ✗ that sends at once: the cross, moved up and left out of the arrow's corner. */
-export const ICON_X_SEND = octicon(
-  `<path transform="translate(-1.5 -1.5) scale(0.875)" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path>${SEND_ARROW}`,
-  'octicon-x',
-);
+/** ✗ that sends at once: the cross's lower arm reaches the corner, so the arrow sits further out. */
+export const ICON_X_SEND = octicon(`<path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path>${sendArrow(1.5, 2)}`, 'octicon-x');
 
 export const ICON_X = octicon(
   '<path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path>',
