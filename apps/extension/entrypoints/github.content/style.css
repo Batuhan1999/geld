@@ -733,6 +733,15 @@ html[data-geld-quick-review] details.js-reviews-container {
   white-space: nowrap;
 }
 
+/* In the Files changed tab's stuck toolbar, where GitHub's own button would be: the toolbar's row spaces it, at its 28px. */
+.geld-quick-review[data-geld-place] {
+  margin: 0;
+}
+
+.geld-quick-review[data-geld-place] .geld-quick-review__segment.btn {
+  height: 28px;
+}
+
 /*
  * GitHub floats the counts right of the tabs and drops their line with 12px of top padding. Holding the button too,
  * the box is the tab bar's height instead (TabNav, a 40px row) with both centred on the tabs, as the tabs' own labels are.
@@ -744,7 +753,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
 }
 
-/* [✓ | ✗ | 💬]: Primer's button group kept to its outline and dividers, no fill, three quiet grey icons. */
+/*
+ * [✓ | ✗ | 💬]: a Primer button group dressed as the Files changed toolbar's own default buttons (Merge status, the
+ * settings gear): their surface, border, resting shadow and muted icons, from the same tokens.
+ */
 .geld-quick-review__segment.btn {
   display: inline-flex;
   align-items: center;
@@ -753,8 +765,9 @@ html[data-geld-quick-review] details.js-reviews-container {
   height: 26px;
   min-width: 28px;
   padding: 0 6px;
-  background: transparent;
-  box-shadow: none;
+  border-color: var(--button-default-borderColor-rest, #d1d9e0);
+  background: var(--button-default-bgColor-rest, #f6f8fa);
+  box-shadow: var(--button-default-shadow-resting, 0 1px 0 0 rgba(31, 35, 40, 0.04));
   transition: none;
 }
 
@@ -766,7 +779,6 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__glyph > svg {
   display: block;
   color: var(--fgColor-muted, #59636e);
-  opacity: 0.8;
   transition: none;
 }
 
@@ -776,26 +788,27 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
-  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  border-color: var(--button-default-borderColor-hover, #d1d9e0);
+  background: var(--button-default-bgColor-hover, #eff2f5);
 }
 
 .geld-quick-review__segment.btn:hover:not([aria-disabled='true']) .geld-quick-review__glyph > svg,
 .geld-quick-review__segment[aria-expanded='true'] .geld-quick-review__glyph > svg {
   color: var(--fgColor-default, #1f2328);
-  opacity: 1;
 }
 
 /* The segment whose comment box is open reads as pressed. */
 .geld-quick-review__segment.btn[aria-expanded='true'] {
-  background: var(--control-transparent-bgColor-active, rgba(208, 215, 222, 0.48));
+  background: var(--button-default-bgColor-active, #e6eaef);
 }
 
 /*
- * ✓ and ✗ under the pointer, and only there, in the theme's own success and danger: the muted surface and the icon. Theme
- * variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
+ * ✓ and ✗ under the pointer, and only there, tint that surface with the theme's own success and danger (the muted
+ * surface laid over it at 70%, so the grey still shows through) and colour the icon. Theme variables only, no fixed green
+ * or red: colour-blind and high-contrast themes redefine these.
  */
 .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
-  background: var(--bgColor-success-muted);
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
 .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
@@ -803,7 +816,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
-  background: var(--bgColor-danger-muted);
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
 .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
@@ -820,10 +833,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: flex;
 }
 
-/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
+/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer greys a disabled button's surface: here the fainter icon says it, the group's surface stays one. */
 .geld-quick-review__segment.btn[aria-disabled='true'] {
   border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
-  background: transparent;
+  background: var(--button-default-bgColor-rest, #f6f8fa);
   cursor: not-allowed;
 }
 

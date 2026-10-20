@@ -88,6 +88,28 @@ describe('the tab bar button', () => {
     return element;
   };
 
+  it('rides in the Files changed toolbar while it is stuck, where GitHub’s own button would be', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section class="stickyHeader__x toolbar__y"><div class="row"><button class="ReviewMenuButton__z">Submit review</button></div></section>');
+    const page = { kind: 'pull-files' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    const group = document.querySelector('.geld-quick-review');
+    const toolbar = document.querySelector('section');
+    const own = document.querySelector('.ReviewMenuButton__z');
+    expect(counts().previousElementSibling).toBe(group);
+    // GitHub flips the toolbar's class as it sticks; the group follows without waiting for a pass.
+    toolbar?.classList.add('is-stuck__w');
+    await Promise.resolve();
+    expect(own?.previousElementSibling).toBe(group);
+    expect(group?.hasAttribute('data-geld-place')).toBe(true);
+    // A pass while stuck keeps it there.
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(own?.previousElementSibling).toBe(group);
+    toolbar?.classList.remove('is-stuck__w');
+    await Promise.resolve();
+    expect(counts().previousElementSibling).toBe(group);
+    expect(group?.hasAttribute('data-geld-place')).toBe(false);
+  });
+
   it('sits left of the line counts on every pull request tab, once', () => {
     const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });

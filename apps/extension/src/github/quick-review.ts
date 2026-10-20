@@ -43,6 +43,13 @@ const PANEL_CLASS = 'geld-quick-review__panel';
 const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
+/** On the group while it stands in the Files changed tab's stuck toolbar, where GitHub's own button would be. */
+const ATTR_PLACE = 'data-geld-place';
+/** GitHub's own review control, React's Files changed view or the classic one; hidden while the group is mounted. */
+const GITHUB_REVIEW_CONTROL = '[class*="ReviewMenuButton"], details.js-reviews-container';
+/** The toolbar that holds it and sticks to the top of the viewport as the diff scrolls. */
+const STICKY_TOOLBAR = 'section[class*="stickyHeader"], .js-sticky';
+const STICKY_REVIEW_CONTROL = `:is(${STICKY_TOOLBAR}) :is(${GITHUB_REVIEW_CONTROL})`;
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
@@ -212,6 +219,11 @@ interface Mounted {
   pendingFor: string | null;
   /** Stops following the instant key. */
   readonly keys: AbortController;
+  /** The tab bar's line counts the group stands before, from the last pass. */
+  anchor: HTMLElement | null;
+  /** The sticky toolbar being watched for when it sticks, and the watch. */
+  toolbar: Element | null;
+  readonly toolbarWatch: MutationObserver;
 }
 
 let mounted: Mounted | null = null;
@@ -243,7 +255,9 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   showCount(mounted);
   showAuthor(mounted);
-  if (anchor.previousElementSibling !== mounted.root) anchor.insertAdjacentElement('beforebegin', mounted.root);
+  mounted.anchor = anchor;
+  watchToolbar(mounted);
+  place(mounted);
   const host = anchor.parentElement;
   if (mounted.host !== host) {
     mounted.host?.removeAttribute(ATTR_HOST);
@@ -254,6 +268,40 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (!document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.setAttribute(ATTR_ACTIVE, '');
 }
 
+/**
+ * GitHub's own (hidden) review button while the Files changed tab's toolbar
+ * holding it is stuck to the top of the viewport; null on other tabs, and
+ * while the toolbar sits in place under the tab bar, the group in view there.
+ */
+function stuckReviewControl(): HTMLElement | null {
+  const control = document.querySelector<HTMLElement>(STICKY_REVIEW_CONTROL);
+  const toolbar = control?.closest(STICKY_TOOLBAR) ?? null;
+  // React's class is `is-stuck__<hash>`, the classic toolbar's `is-stuck`.
+  if (control === null || toolbar === null || ![...toolbar.classList].some((name) => name === 'is-stuck' || name.startsWith('is-stuck__'))) return null;
+  return control;
+}
+
+/** Follow the sticky toolbar's class, which GitHub flips as it sticks and lets go, so the group moves with it between passes. */
+function watchToolbar(state: Mounted): void {
+  const toolbar = document.querySelector(STICKY_REVIEW_CONTROL)?.closest(STICKY_TOOLBAR) ?? null;
+  if (state.toolbar === toolbar) return;
+  state.toolbarWatch.disconnect();
+  state.toolbar = toolbar;
+  if (toolbar !== null) state.toolbarWatch.observe(toolbar, { attributes: true, attributeFilter: ['class'] });
+}
+
+/** In the stuck toolbar beside GitHub's hidden button, so it is always to hand while reviewing; otherwise before the tab bar's counts. */
+function place(state: Mounted): void {
+  const stuck = stuckReviewControl();
+  const before = stuck ?? state.anchor;
+  if (before === null) return;
+  if (before.previousElementSibling !== state.root) before.insertAdjacentElement('beforebegin', state.root);
+  if (state.root.hasAttribute(ATTR_PLACE) !== (stuck !== null)) {
+    state.root.toggleAttribute(ATTR_PLACE, stuck !== null);
+    positionPanel();
+  }
+}
+
 export function removeQuickReview(): void {
   if (document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.removeAttribute(ATTR_ACTIVE);
   if (mounted === null) return;
@@ -261,6 +309,7 @@ export function removeQuickReview(): void {
   window.clearTimeout(mounted.submittedTimer);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
+  mounted.toolbarWatch.disconnect();
   mounted.root.remove();
   mounted = null;
 }
@@ -316,7 +365,30 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
-  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys };
+  const toolbarWatch = new MutationObserver(() => {
+    if (mounted === state) place(state);
+  });
+  const state: Mounted = {
+    root,
+    segments,
+    status,
+    host: null,
+    counter,
+    opener: null,
+    isAuthor: null,
+    pullPath,
+    context,
+    panel: null,
+    retarget: null,
+    sending: false,
+    submittedTimer: 0,
+    pending: null,
+    pendingFor: null,
+    keys,
+    anchor: null,
+    toolbar: null,
+    toolbarWatch,
+  };
   followInstantKey(root, keys.signal, () => describeSegments(state));
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
@@ -400,14 +472,20 @@ function onOutsidePointer(event: PointerEvent): void {
   closePanel();
 }
 
-/** Under the group, its right edge on the group's, inside the viewport; in page coordinates, so it scrolls with the bar. */
+/**
+ * Under the group, its right edge on the group's, inside the viewport: in
+ * page coordinates under the tab bar, so it scrolls with the bar, and fixed
+ * under the stuck toolbar, which stays put as the page scrolls.
+ */
 function positionPanel(): void {
   if (mounted === null || mounted.panel === null || !mounted.root.isConnected) return;
+  const fixed = mounted.root.hasAttribute(ATTR_PLACE);
   const rect = mounted.root.getBoundingClientRect();
   const width = mounted.panel.offsetWidth;
   const left = Math.max(16, Math.min(rect.right - width, document.documentElement.clientWidth - width - 16));
-  mounted.panel.style.top = `${Math.round(rect.bottom + window.scrollY + 4)}px`;
-  mounted.panel.style.left = `${Math.round(left + window.scrollX)}px`;
+  mounted.panel.style.position = fixed ? 'fixed' : '';
+  mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
+  mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: ReviewEvent): void {
