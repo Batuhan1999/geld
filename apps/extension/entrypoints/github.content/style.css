@@ -726,9 +726,9 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   flex-shrink: 0;
-  /* A 28px button in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
+  /* A 28px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
   margin: -5px 12px -5px 0;
   white-space: nowrap;
 }
@@ -744,8 +744,55 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
 }
 
-.geld-quick-review > svg {
-  margin-right: -2px;
+/* [✓ | ✗ | 💬]: Primer's button group, icon segments in the verdicts' timeline colours. */
+.geld-quick-review__segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.geld-quick-review__glyph {
+  display: inline-flex;
+}
+
+/* On the svg itself: Primer's `.btn .octicon` colours the icon directly, so an inherited colour never reaches it. */
+.geld-quick-review__glyph[data-tone='success'] > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__glyph[data-tone='danger'] > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+/* The segment whose comment box is open reads as pressed. */
+.geld-quick-review__segment[aria-expanded='true'] {
+  background-color: var(--button-default-bgColor-active, #e6eaef);
+}
+
+/* Shown, never hidden: what the author cannot do, greyed, GitHub's reason its tooltip. */
+.geld-quick-review__segment[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.geld-quick-review__segment[aria-disabled='true'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-disabled, #818b98);
+}
+
+.geld-quick-review[aria-busy='true'] .geld-quick-review__segment {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* "Approved", "Submitting…": a moment's word beside the group, nothing when idle. */
+.geld-quick-review__status {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.geld-quick-review__status:empty {
+  display: none;
 }
 
 /* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */
@@ -769,103 +816,6 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__body {
   min-height: 120px;
   resize: vertical;
-}
-
-/* The verdict menu: one row per verdict, the row sends (or opens the box), its comment button opens the box. */
-.Overlay.geld-quick-review__panel--menu {
-  width: min(240px, calc(100vw - 32px));
-  min-width: 0;
-  padding: 8px;
-}
-
-.geld-quick-review__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.geld-quick-review__row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.geld-quick-review__item {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fgColor-default, #1f2328);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.geld-quick-review__glyph {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--fgColor-muted, #59636e);
-}
-
-/* The verdicts' colours in GitHub's timeline: approved green, changes requested red. */
-.geld-quick-review__glyph[data-tone='success'] {
-  color: var(--fgColor-success, #1a7f37);
-}
-
-.geld-quick-review__glyph[data-tone='danger'] {
-  color: var(--fgColor-danger, #d1242f);
-}
-
-.geld-quick-review__item-label {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.geld-quick-review__with-comment {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fgColor-muted, #59636e);
-  cursor: pointer;
-}
-
-.geld-quick-review__item:hover:not(:disabled),
-.geld-quick-review__with-comment:hover:not(:disabled) {
-  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
-}
-
-.geld-quick-review__item:focus-visible,
-.geld-quick-review__with-comment:focus-visible {
-  outline: 2px solid var(--focus-outlineColor, #0969da);
-  outline-offset: -2px;
-}
-
-/* Shown, never hidden: GitHub lists what the author cannot do, greyed; the reason is the row's tooltip. */
-.geld-quick-review__item:disabled,
-.geld-quick-review__with-comment:disabled {
-  cursor: not-allowed;
-}
-
-.geld-quick-review__item:disabled .geld-quick-review__glyph,
-.geld-quick-review__item:disabled .geld-quick-review__item-label,
-.geld-quick-review__with-comment:disabled {
-  color: var(--fgColor-disabled, #818b98);
 }
 
 .geld-quick-review__events {

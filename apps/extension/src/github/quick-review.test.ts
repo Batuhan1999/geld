@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { HeaderStatGroup } from './header-stats';
-import { applyQuickReview, canSubmit, menuRows, pullPathOf, removeQuickReview, reviewErrorText, submitReviewRequest } from './quick-review';
+import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest } from './quick-review';
 
 const SHA = 'a'.repeat(40);
 
@@ -20,14 +20,24 @@ describe('submitReviewRequest', () => {
   });
 });
 
-describe('menuRows', () => {
-  it('gives Approve and Request changes a direct send and a comment button, Comment only the box', () => {
-    expect(menuRows(false).map(({ event, direct, withComment, disabled }) => [event, direct, withComment, disabled])).toEqual([
-      ['comment', false, false, false],
-      ['approve', true, true, false],
-      ['request changes', true, true, false],
-    ]);
-    expect(menuRows(true).map((row) => row.disabled)).toEqual([false, true, true]);
+describe('isInstantClick', () => {
+  it('sends Approve or Request changes at once on ⌘-click on a Mac and Ctrl-click elsewhere, never Comment', () => {
+    expect(isInstantClick('approve', { metaKey: true, ctrlKey: false }, true)).toBe(true);
+    expect(isInstantClick('request changes', { metaKey: true, ctrlKey: false }, true)).toBe(true);
+    expect(isInstantClick('approve', { metaKey: false, ctrlKey: true }, true)).toBe(false);
+    expect(isInstantClick('approve', { metaKey: false, ctrlKey: true }, false)).toBe(true);
+    expect(isInstantClick('approve', { metaKey: false, ctrlKey: false }, true)).toBe(false);
+    expect(isInstantClick('comment', { metaKey: true, ctrlKey: true }, true)).toBe(false);
+  });
+});
+
+describe('segmentHint', () => {
+  it('names the verdict and the shortcut, or GitHub’s reason it is closed to the author', () => {
+    expect(segmentHint('approve', false, '⌘')).toBe('Approve · ⌘-click to approve without a comment');
+    expect(segmentHint('request changes', false, 'Ctrl')).toBe('Request changes · Ctrl-click to request changes without a comment');
+    expect(segmentHint('comment', false, '⌘')).toBe('Comment');
+    expect(segmentHint('approve', true, '⌘')).toBe("Pull request authors can't approve their own pull requests.");
+    expect(segmentHint('comment', true, '⌘')).toBe('Comment');
   });
 });
 
@@ -94,43 +104,52 @@ describe('the tab bar button', () => {
   });
 
   const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
-  const openMenu = (): HTMLElement => {
-    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
-    document.querySelector<HTMLButtonElement>('.geld-quick-review')?.click();
-    const menu = document.querySelector('.geld-quick-review__panel--menu');
-    if (!(menu instanceof HTMLElement)) throw new Error('no menu');
-    return menu;
+  const mount = (): void => applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+  const segment = (event: string): HTMLButtonElement => {
+    const button = document.querySelector(`.geld-quick-review__segment[data-event="${event}"]`);
+    if (!(button instanceof HTMLButtonElement)) throw new Error(`no ${event} segment`);
+    return button;
   };
-  const row = (menu: HTMLElement, event: string): HTMLButtonElement => {
-    const item = menu.querySelector(`.geld-quick-review__item[data-event="${event}"]`);
-    if (!(item instanceof HTMLButtonElement)) throw new Error(`no ${event} row`);
-    return item;
-  };
+  const instant = { metaKey: true, ctrlKey: true, bubbles: true };
   const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const chosen = (): string | undefined => document.querySelector<HTMLInputElement>('.geld-quick-review__panel input[type="radio"]:checked')?.value;
 
-  it('opens a menu of the three verdicts, Approve and Request changes with a comment button each', () => {
-    const menu = openMenu();
-    expect([...menu.querySelectorAll('.geld-quick-review__item')].map((item) => item.textContent)).toEqual(['Comment', 'Approve', 'Request changes']);
-    expect(menu.querySelector('li[title]')).toBeNull();
-    expect([...menu.querySelectorAll('.geld-quick-review__with-comment')].map((button) => button.getAttribute('aria-label'))).toEqual(['Approve with a comment', 'Request changes with a comment']);
-    expect([...menu.querySelectorAll('button')].every((button) => !button.disabled)).toBe(true);
-    // Comment needs words: its row opens the comment box with Comment chosen.
-    row(menu, 'comment').click();
-    const box = document.querySelector('.geld-quick-review__panel:not(.geld-quick-review__panel--menu)');
-    expect(box?.querySelector('.Overlay-title')?.textContent).toBe('Finish your review');
-    expect(box?.querySelector<HTMLInputElement>('input[value="comment"]')?.checked).toBe(true);
-    expect(document.querySelector('.geld-quick-review__panel--menu')).toBeNull();
-    const submit = [...(box?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Submit review');
-    expect(submit?.disabled).toBe(true);
+  it('is one group of three segments, ✓ ✗ 💬, named and explained', () => {
+    mount();
+    const group = document.querySelector('.geld-quick-review__group');
+    expect(group?.getAttribute('role')).toBe('group');
+    expect([...(group?.children ?? [])].map((child) => child.getAttribute('aria-label'))).toEqual(['Approve', 'Request changes', 'Comment']);
+    expect([...(group?.children ?? [])].every((child) => child.classList.contains('BtnGroup-item'))).toBe(true);
+    // The page here defines no `tool-tip`, so the words are each segment's title.
+    expect(segment('approve').title).toMatch(/^Approve · (⌘|Ctrl)-click to approve without a comment$/);
+    expect(segment('comment').title).toBe('Comment');
+    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
   });
 
-  it('opens the comment box with the verdict chosen from its comment button', () => {
-    const menu = openMenu();
-    menu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__with-comment')[1]?.click();
-    expect(document.querySelector<HTMLInputElement>('.geld-quick-review__panel input[value="request changes"]')?.checked).toBe(true);
+  it('opens the comment box with the verdict chosen on a click, as the confirmation', () => {
+    mount();
+    segment('approve').click();
+    expect(document.querySelector('.geld-quick-review__panel .Overlay-title')?.textContent).toBe('Finish your review');
+    expect(chosen()).toBe('approve');
+    expect(segment('approve').getAttribute('aria-expanded')).toBe('true');
+    // Approving needs no words, so the box's Submit is the confirmation.
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('.geld-quick-review__panel button')].find((button) => button.textContent === 'Submit review');
+    expect(submit?.disabled).toBe(false);
+    segment('request changes').click();
+    expect(chosen()).toBe('request changes');
+    expect(segment('approve').getAttribute('aria-expanded')).toBe('false');
+    // The same segment again closes it.
+    segment('request changes').click();
+    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
   });
 
-  it('approves at once from the Approve row', async () => {
+  it('opens the box from 💬 even with the instant key held', () => {
+    mount();
+    segment('comment').dispatchEvent(new MouseEvent('click', instant));
+    expect(chosen()).toBe('comment');
+  });
+
+  it('approves at once on the instant click, without the box', async () => {
     const sent: { url: string; body: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -140,40 +159,48 @@ describe('the tab bar button', () => {
       }
       return new Response('{"error":"Not Found"}', { status: 404 });
     }));
-    row(openMenu(), 'approve').click();
+    mount();
+    segment('approve').dispatchEvent(new MouseEvent('click', instant));
     await settle();
     await settle();
     expect(sent).toEqual([{ url: '/acme/widgets/pull/7/page_data/submit_review', body: JSON.stringify({ body: '', event: 'approve', headSha: SHA }) }]);
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
-    expect(document.querySelector('.geld-quick-review')?.textContent).toBe('Approved');
+    expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('Approved');
   });
 
-  it('asks for words with GitHub’s reason when it refuses a verdict without them', async () => {
+  it('asks for words with GitHub’s reason when it refuses an instant verdict', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
       String(input).endsWith('/submit_review') ? new Response('{"error":"Review body is required"}', { status: 422 }) : new Response('{}', { status: 404 }),
     ));
-    row(openMenu(), 'request changes').click();
+    mount();
+    segment('request changes').dispatchEvent(new MouseEvent('click', instant));
     await settle();
     await settle();
-    const box = document.querySelector('.geld-quick-review__panel');
-    expect(box?.querySelector<HTMLInputElement>('input[value="request changes"]')?.checked).toBe(true);
-    expect(box?.querySelector('.geld-quick-review__error')?.textContent).toBe('GitHub could not submit the review: Review body is required');
-    expect(document.querySelector('.geld-quick-review')?.textContent).toBe('Submit review');
+    expect(chosen()).toBe('request changes');
+    expect(document.querySelector('.geld-quick-review__error')?.textContent).toBe('GitHub could not submit the review: Review body is required');
+    expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('');
   });
 
-  it('shows the author what they cannot do, disabled, with GitHub’s reason', () => {
+  it('shows the author ✓ and ✗ disabled, with GitHub’s reason, and does nothing on them', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      sent.push(String(input));
+      return new Response('{}', { status: 404 });
+    }));
     document.head.innerHTML = '<meta name="user-login" content="bob">';
-    const menu = openMenu();
-    expect(row(menu, 'comment').disabled).toBe(false);
-    expect(row(menu, 'approve').disabled).toBe(true);
-    expect(row(menu, 'request changes').disabled).toBe(true);
-    expect([...menu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__with-comment')].every((button) => button.disabled)).toBe(true);
-    // No notes in the menu: the reason is the row's tooltip, and read with the button.
-    expect(row(menu, 'approve').closest('li')?.getAttribute('title')).toBe("Pull request authors can't approve their own pull requests.");
-    expect(row(menu, 'request changes').closest('li')?.getAttribute('title')).toBe("Pull request authors can't request changes on their own pull requests.");
-    expect(row(menu, 'approve').querySelector('.sr-only')?.textContent).toContain("can't approve");
+    mount();
+    expect(segment('approve').getAttribute('aria-disabled')).toBe('true');
+    expect(segment('request changes').getAttribute('aria-disabled')).toBe('true');
+    expect(segment('comment').hasAttribute('aria-disabled')).toBe(false);
+    expect(segment('approve').title).toBe("Pull request authors can't approve their own pull requests.");
+    expect(segment('request changes').title).toBe("Pull request authors can't request changes on their own pull requests.");
+    segment('approve').click();
+    segment('request changes').dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
+    expect(sent.some((url) => url.endsWith('/submit_review'))).toBe(false);
     // The comment box keeps them listed and disabled too.
-    row(menu, 'comment').click();
+    segment('comment').click();
     const radios = [...document.querySelectorAll<HTMLInputElement>('.geld-quick-review__panel input[type="radio"]')];
     expect(radios.map((radio) => radio.disabled)).toEqual([false, true, true]);
   });
@@ -198,11 +225,10 @@ describe('the tab bar button', () => {
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     await new Promise((resolve) => setTimeout(resolve, 0));
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
-    const button = document.querySelector<HTMLButtonElement>('.geld-quick-review');
+    const button = document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]');
     expect(button?.querySelector('.geld-quick-review__count')?.textContent).toBe('1');
-    expect(button?.getAttribute('aria-label')).toBe('Submit review, 1 pending comment');
+    expect(button?.getAttribute('aria-label')).toBe('Comment, 1 pending comment');
     button?.click();
-    document.querySelector<HTMLButtonElement>('.geld-quick-review__item[data-event="comment"]')?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
     expect(box?.querySelector('.geld-quick-review__pending-toggle')?.textContent).toBe('Pending comments1');
