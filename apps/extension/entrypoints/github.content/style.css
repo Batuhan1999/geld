@@ -755,6 +755,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   padding: 0 6px;
   background: transparent;
   box-shadow: none;
+  transition: background-color 150ms ease-out;
 }
 
 .geld-quick-review__glyph {
@@ -766,6 +767,9 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: block;
   color: var(--fgColor-muted, #59636e);
   opacity: 0.8;
+  transition:
+    color 150ms ease-out,
+    opacity 150ms ease-out;
 }
 
 .geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
@@ -783,13 +787,13 @@ html[data-geld-quick-review] details.js-reviews-container {
   background: var(--control-transparent-bgColor-active, rgba(208, 215, 222, 0.48));
 }
 
-/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. */
 /*
  * ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and say so in the theme's own success and danger colours, background
- * and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
+ * (half the muted surface) and icon. Theme variables only, no fixed green or red: colour-blind and high-contrast themes
+ * redefine these.
  */
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) {
-  background: var(--bgColor-success-muted);
+  background: color-mix(in srgb, var(--bgColor-success-muted) 50%, transparent);
 }
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
@@ -798,7 +802,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) {
-  background: var(--bgColor-danger-muted);
+  background: color-mix(in srgb, var(--bgColor-danger-muted) 50%, transparent);
 }
 
 .geld-quick-review[data-instant] .geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']) .geld-quick-review__glyph > svg {
@@ -806,7 +810,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   opacity: 1;
 }
 
-/* Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
+/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
 .geld-quick-review__segment.btn[aria-disabled='true'] {
   border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
   background: transparent;
