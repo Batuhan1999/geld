@@ -11,6 +11,7 @@ import type { RefDetails, RefState } from './refs';
 import { ICON_CHECK, ICON_GIT_COMPARE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_ISSUE_CLOSED, ICON_ISSUE_OPENED, ICON_LINK, ICON_X } from '../ui/icons';
 import { openMinimized } from './chat';
 import { commitDate } from './commit-dates';
+import { normalizeAvatarSrc } from './crawler';
 import { compareHome, onRestore, teleportInto } from './teleport';
 import { relativeTimeElement } from './time';
 
@@ -78,6 +79,8 @@ export function joinCommitSubjects(list: HTMLElement): void {
 }
 
 const ATTR_EVENT_HIDDEN = 'data-geld-event-hidden';
+/** What the quick view's stylesheet hides in a timeline row (keep in step with `.geld-review__qv` rules in style.css), so a picture there is not shown. */
+const QV_HIDDEN = `[${ATTR_EVENT_HIDDEN}], .TimelineItem-avatar, .avatar-parent-child`;
 
 const COMMIT_ROWS = '.js-commits-list-item, [data-testid="commit-row"], [data-testid="timeline-commit-row"], .TimelineItem:has(> .TimelineItem-badge .octicon-git-commit)';
 
@@ -238,6 +241,21 @@ function compactEvents(list: HTMLElement, headSha: string | null): void {
         if (child === line || child.classList.contains('Details-content--hidden') || child.hasAttribute(ATTR_EVENT_HIDDEN)) continue;
         hide(child);
       }
+      // Its loose words too ("closed this" sits between the links as bare text), which no attribute can hide in place.
+      for (const node of [...body.childNodes]) {
+        if (node.nodeType !== Node.TEXT_NODE || (node.textContent ?? '').trim() === '') continue;
+        const wrap = createElement('span', { [ATTR_EVENT_HIDDEN]: '' });
+        node.replaceWith(wrap);
+        wrap.append(node);
+        undo.push(() => wrap.replaceWith(node));
+      }
+      // Where GitHub draws the actor's picture outside the body (and so outside what is hidden), it is the picture.
+      const ours = line.querySelector<HTMLImageElement>('.geld-review__push-avatar');
+      const shown = ours === null ? null : normalizeAvatarSrc(ours.getAttribute('src') ?? '');
+      const twin = [...row.querySelectorAll<HTMLImageElement>('img.avatar, img.avatar-user, img[class*="avatar"]')].find(
+        (img) => !line.contains(img) && img.closest(QV_HIDDEN) === null && normalizeAvatarSrc(img.currentSrc || img.getAttribute('src') || '') === shown,
+      );
+      if (twin !== undefined) line.querySelector('.geld-review__event-who')?.remove();
     }
     if (when !== null) line.append(relativeTimeElement(when, TIME_CLASS));
     if (kind === null && when === null) continue;

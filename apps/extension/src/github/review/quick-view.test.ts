@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { joinCommitSubjects } from './quick-view';
+import { joinCommitSubjects, renderQuickView } from './quick-view';
 import { restoreAll } from './teleport';
 
 /**
@@ -45,5 +45,48 @@ describe('joinCommitSubjects', () => {
     joinCommitSubjects(other);
     expect(other.querySelector('a')?.textContent).toBe('fix: trim…');
     expect(other.querySelector('pre')?.textContent).toBe('…and then some other thought');
+  });
+});
+
+const AVATAR = 'https://avatars.githubusercontent.com/u/10746682?s=40&v=4';
+
+/** A close event as GitHub renders it: the actor's picture and name as links, the words between them bare text (microsoft/vscode#343264, Oct 2026); `column` adds the actor's picture again outside the body, as the reported mintlify/mint#12609 row showed it. */
+function closeEvent(column: boolean): HTMLElement {
+  const home = document.createElement('div');
+  const picture = `<a class="d-inline-block" href="/sandy081"><img class="avatar avatar-user" src="${AVATAR}" width="20" height="20" alt="@sandy081"></a>`;
+  home.innerHTML = `<div class="TimelineItem" id="event-1"><div class="TimelineItem-badge"></div>${column ? `<div class="geld-test-column">${picture.replace('s=40', 's=60')}</div>` : ''}<div class="TimelineItem-body">${picture}<a class="author" href="/sandy081">sandy081</a>
+          closed this
+      <a href="#event-1" class="Link--secondary"><relative-time datetime="2026-10-21T17:35:24Z">Oct 21, 2026</relative-time></a></div></div>`;
+  document.body.append(home);
+  const node = home.firstElementChild;
+  if (!(node instanceof HTMLElement)) throw new Error('fixture');
+  return node;
+}
+
+describe('compactEvents', () => {
+  it('says a state change once, words and picture', () => {
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    renderQuickView(slot, [closeEvent(false)]);
+    const body = slot.querySelector('.TimelineItem-body');
+    // The line says it; the sentence's bare words are hidden with the links around them.
+    expect(slot.querySelector('.geld-review__event-words')?.textContent).toBe('closed this');
+    const loose = [...(body?.childNodes ?? [])].filter((node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '');
+    expect(loose).toHaveLength(0);
+    expect([...(body?.querySelectorAll('[data-geld-event-hidden]') ?? [])].some((node) => node.textContent?.trim() === 'closed this')).toBe(true);
+    expect(slot.querySelectorAll('.geld-review__event-who')).toHaveLength(1);
+    // Home again, the words are GitHub's bare text as before.
+    restoreAll();
+    expect(document.querySelector('#event-1 .TimelineItem-body')?.textContent).toContain('closed this');
+    expect(document.querySelector('#event-1 [data-geld-event-hidden]')).toBeNull();
+  });
+
+  it('leaves out its own picture where GitHub shows the same one outside the hidden sentence', () => {
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    renderQuickView(slot, [closeEvent(true)]);
+    expect(slot.querySelector('.geld-review__event-who')).toBeNull();
+    expect(slot.querySelector('.geld-review__event-words')?.textContent).toBe('closed this');
+    restoreAll();
   });
 });
