@@ -57,6 +57,23 @@ export function parsePendingComments(payload: unknown): readonly PendingComment[
   return out;
 }
 
+/**
+ * A comment's link on the Files changed tab as the page's own tab names it:
+ * GitHub still answers with `/pull/N/files#r<id>`, which github.com now
+ * redirects to `/pull/N/changes#r<id>` (verified Oct 2026), so from the
+ * Changes tab itself the link reloaded the page where the same-document
+ * jump scrolls to the comment. Left alone where the tab is still `/files`
+ * (GitHub Enterprise Server before the move).
+ */
+export function linkOnFilesTab(href: string, pullPath: string, tabIsChanges: boolean): string {
+  if (!tabIsChanges) return href;
+  const files = `${pullPath}/files`;
+  for (const prefix of [files, `${location.origin}${files}`]) {
+    if (href === prefix || href.startsWith(`${prefix}#`) || href.startsWith(`${prefix}?`)) return `${prefix.slice(0, -'/files'.length)}/changes${href.slice(prefix.length)}`;
+  }
+  return href;
+}
+
 function jsonHeaders(): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' };
   const nonce = document.querySelector<HTMLMetaElement>('meta[name="fetch-nonce"]')?.content ?? '';

@@ -921,6 +921,12 @@ html[data-geld-quick-review] details.js-reviews-container {
   /* Its trash can stands in the pending rows' glyph column: the rows' hover surface overhangs 8px the same way. */
   margin-left: -8px;
   padding-left: 8px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* As Primer's `btn-octicon-danger` (GitHub's trash cans in branch and file lists): muted at rest, the danger colour to act, never a surface. */
+.geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard:is(:hover, :focus-visible, :active) {
+  background: transparent;
   color: var(--fgColor-danger, #d1242f);
 }
 
@@ -961,6 +967,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__count {
   position: absolute;
+  /* Above the group's buttons, which Primer lifts to z-index 1 when focused, pressed or hovered. */
+  z-index: 2;
   top: -7px;
   right: -7px;
   box-sizing: border-box;

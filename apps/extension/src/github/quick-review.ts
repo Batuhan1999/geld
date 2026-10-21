@@ -4,7 +4,7 @@ import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
-import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
+import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
 
@@ -674,7 +674,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     submit.disabled = state.sending || !canSubmit(draft.event, body.value, pending > 0);
     discard.hidden = pending === 0;
     discard.disabled = state.sending;
-    renderPending(pendingSection, state.pending, pending, pendingOpen, () => {
+    renderPending(pendingSection, pullPath, state.pending, pending, pendingOpen, () => {
       pendingOpen = !pendingOpen;
       refresh();
     });
@@ -763,7 +763,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
  * GitHub's own count is ahead of the list (a comment added on Files changed
  * since the list was read).
  */
-function renderPending(section: HTMLElement, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
+function renderPending(section: HTMLElement, pullPath: string, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
   section.replaceChildren();
   section.hidden = count === 0;
   if (count === 0) return;
@@ -775,11 +775,12 @@ function renderPending(section: HTMLElement, comments: readonly PendingComment[]
   toggle.addEventListener('click', onToggle);
   section.append(toggle);
   if (!open || comments === null) return;
+  const tabIsChanges = location.pathname.startsWith(`${pullPath}/changes`) || document.querySelector(`a[href="${pullPath}/changes"]`) !== null;
   const list = createElement('ul', { class: 'geld-quick-review__pending-list' });
   for (const comment of comments) {
     const file = comment.path.split('/').pop() ?? comment.path;
     const where = comment.line === null ? file : `${file}:${comment.line}`;
-    const link = createElement('a', { class: 'geld-quick-review__pending-row', href: comment.href ?? '#', title: `${comment.path}${comment.line === null ? '' : `, line ${comment.line}`}` }, [
+    const link = createElement('a', { class: 'geld-quick-review__pending-row', href: comment.href === null ? '#' : linkOnFilesTab(comment.href, pullPath, tabIsChanges), title: `${comment.path}${comment.line === null ? '' : `, line ${comment.line}`}` }, [
       createElement('span', { class: 'geld-quick-review__pending-glyph' }, [svgFromString(ICON_COMMENT)]),
       createElement('span', { class: 'geld-quick-review__pending-text' }, inlineText(firstSentence(comment.body))),
       createElement('span', { class: 'geld-quick-review__pending-where' }, [where]),

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { parsePendingComments, pendingCountOnPage } from './pending-review';
+import { linkOnFilesTab, parsePendingComments, pendingCountOnPage } from './pending-review';
 
 /** A `page_data/thread_previews` answer as GitHub gave it on brandonmcconnell/geld#68 (Oct 2026), trimmed. */
 const THREAD = {
@@ -61,5 +61,16 @@ describe('pendingCountOnPage', () => {
     expect(pendingCountOnPage()).toBe(2);
     document.body.innerHTML = '';
     expect(pendingCountOnPage()).toBeNull();
+  });
+});
+
+describe('linkOnFilesTab', () => {
+  it('names the Changes tab GitHub now redirects /files to, so a link from that tab jumps in place', () => {
+    expect(linkOnFilesTab('/acme/widgets/pull/7/files#r1', '/acme/widgets/pull/7', true)).toBe('/acme/widgets/pull/7/changes#r1');
+    expect(linkOnFilesTab(`${location.origin}/acme/widgets/pull/7/files#r1`, '/acme/widgets/pull/7', true)).toBe(`${location.origin}/acme/widgets/pull/7/changes#r1`);
+    // A commit's files, another pull request, or a tab still called /files are left alone.
+    expect(linkOnFilesTab('/acme/widgets/pull/7/files/abc123#r1', '/acme/widgets/pull/7', true)).toBe('/acme/widgets/pull/7/files/abc123#r1');
+    expect(linkOnFilesTab('/acme/widgets/pull/70/files#r1', '/acme/widgets/pull/7', true)).toBe('/acme/widgets/pull/70/files#r1');
+    expect(linkOnFilesTab('/acme/widgets/pull/7/files#r1', '/acme/widgets/pull/7', false)).toBe('/acme/widgets/pull/7/files#r1');
   });
 });
