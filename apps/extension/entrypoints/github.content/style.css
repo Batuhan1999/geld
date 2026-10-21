@@ -3414,7 +3414,8 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 
 /* The picture's link as a flex box (over GitHub's `d-inline-block`): the picture fills the first line's 20px
  * exactly, where an inline image sits a pixel low on its baseline. */
-.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body a:has(> .avatar) {
+/* Never one Geld hid: a state change's line carries its own picture, and this rule's `!important` beat the hiding. */
+.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body a:has(> .avatar):not([data-geld-event-hidden]) {
   display: flex !important;
   height: 20px;
 }
@@ -3422,12 +3423,12 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 /* The other layout GitHub uses (a title change): the avatar inline in the sentence. It takes the same column —
  * out of the flow, the body indented past it — so the words start 8px after it, as in the rows above and below,
  * and wrap to that indent. */
-.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body:has(> a > .avatar) {
+.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body:has(> a:not([data-geld-event-hidden]) > .avatar) {
   position: relative;
   padding-left: 28px;
 }
 
-.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body > a:has(> .avatar) {
+.geld-review__qv .TimelineItem:has(> .TimelineItem-badge) .TimelineItem-body > a:has(> .avatar):not([data-geld-event-hidden]) {
   position: absolute;
   top: 0;
   left: 0;
