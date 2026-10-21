@@ -32,17 +32,14 @@ describe('isInstantClick', () => {
 });
 
 describe('segmentHint', () => {
-  it('names the verdict and the shortcut, or GitHub’s reason it is closed to the author', () => {
-    expect(segmentHint('approve', false, '⌘')).toEqual(['Approve', '⌘ 1-click review']);
-    expect(segmentHint('request changes', false, 'Ctrl')).toEqual(['Request changes', 'Ctrl 1-click review']);
-    expect(segmentHint('comment', false, '⌘')).toEqual(['Comment']);
-    expect(segmentHint('approve', true, '⌘')).toEqual(["Pull request authors can't approve their own pull requests."]);
-    expect(segmentHint('comment', true, '⌘')).toEqual(['Comment']);
+  it('names the verdict and the shortcut, or what a click does while the key is held', () => {
+    expect(segmentHint('approve', '⌘')).toEqual(['Approve', '⌘ 1-click review']);
+    expect(segmentHint('request changes', 'Ctrl')).toEqual(['Request changes', 'Ctrl 1-click review']);
+    expect(segmentHint('comment', '⌘')).toEqual(['Comment']);
     // While the key is held a click sends at once, and the tooltip says that alone.
-    expect(segmentHint('approve', false, '⌘', true)).toEqual(['Approve without comments']);
-    expect(segmentHint('request changes', false, 'Ctrl', true)).toEqual(['Request changes without comments']);
-    expect(segmentHint('comment', false, '⌘', true)).toEqual(['Comment']);
-    expect(segmentHint('approve', true, '⌘', true)).toEqual(["Pull request authors can't approve their own pull requests."]);
+    expect(segmentHint('approve', '⌘', true)).toEqual(['Approve without comments']);
+    expect(segmentHint('request changes', 'Ctrl', true)).toEqual(['Request changes without comments']);
+    expect(segmentHint('comment', '⌘', true)).toEqual(['Comment']);
   });
 });
 
@@ -273,25 +270,11 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('');
   });
 
-  it('shows the author ✓ and ✗ disabled, with GitHub’s reason, and does nothing on them', async () => {
-    const sent: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      sent.push(String(input));
-      return new Response('{}', { status: 404 });
-    }));
+  it('leaves the author 💬 alone, since GitHub refuses their own approval and change request', () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
     mount();
-    expect(segment('approve').getAttribute('aria-disabled')).toBe('true');
-    expect(segment('request changes').getAttribute('aria-disabled')).toBe('true');
-    expect(segment('comment').hasAttribute('aria-disabled')).toBe(false);
-    expect(segment('approve').title).toBe("Pull request authors can't approve their own pull requests.");
-    expect(segment('request changes').title).toBe("Pull request authors can't request changes on their own pull requests.");
-    segment('approve').click();
-    segment('request changes').dispatchEvent(new MouseEvent('click', instant));
-    await settle();
-    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
-    expect(sent.some((url) => url.endsWith('/submit_review'))).toBe(false);
-    // The comment box opens for a comment only.
+    const group = document.querySelector('.geld-quick-review__group');
+    expect([...(group?.children ?? [])].map((child) => child.getAttribute('data-event'))).toEqual(['comment']);
     segment('comment').click();
     expect(chosen()).toBe('Comment');
   });

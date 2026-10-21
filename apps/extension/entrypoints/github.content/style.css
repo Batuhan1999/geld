@@ -801,12 +801,12 @@ html[data-geld-quick-review] details.js-reviews-container {
   transform: translateY(1px);
 }
 
-.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
+.geld-quick-review__segment.btn:hover {
   border-color: var(--button-default-borderColor-hover, #d1d9e0);
   background: var(--button-default-bgColor-hover, #eff2f5);
 }
 
-.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) .geld-quick-review__glyph > svg,
+.geld-quick-review__segment.btn:hover .geld-quick-review__glyph > svg,
 .geld-quick-review__segment[aria-expanded='true'] .geld-quick-review__glyph > svg {
   color: var(--fgColor-default, #1f2328);
 }
@@ -821,42 +821,30 @@ html[data-geld-quick-review] details.js-reviews-container {
  * surface laid over it at 70%, so the grey still shows through) and colour the icon. Theme variables only, no fixed green
  * or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='approve']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='request changes']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
 }
 
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
 .geld-quick-review__glyph--instant,
-.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
+.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
   display: none;
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph--instant {
+.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph--instant {
   display: flex;
-}
-
-/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer greys a disabled button's surface: here the fainter icon says it, the group's surface stays one. */
-.geld-quick-review__segment.btn[aria-disabled='true'] {
-  border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
-  background: var(--button-default-bgColor-rest, #f6f8fa);
-  cursor: not-allowed;
-}
-
-.geld-quick-review__segment[aria-disabled='true'] .geld-quick-review__glyph > svg {
-  color: var(--fgColor-disabled, #818b98);
-  opacity: 0.6;
 }
 
 .geld-quick-review[aria-busy='true'] .geld-quick-review__segment {

@@ -61,8 +61,8 @@ const ATTR_INSTANT = 'data-instant';
 interface EventInfo {
   readonly value: ReviewEvent;
   readonly label: string;
-  /** GitHub's reason the author cannot take this one, when they cannot. */
-  readonly authorNote: string | null;
+  /** Whether the pull request's author may take it: GitHub refuses an author's own approval and request for changes. */
+  readonly authorMay: boolean;
   /** The segment's glyph. */
   readonly icon: string;
   /** Its glyph while the instant key is held, for the verdicts a ⌘-click sends at once. */
@@ -74,11 +74,11 @@ interface EventInfo {
 }
 
 const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
-  comment: { value: 'comment', label: 'Comment', authorNote: null, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
+  comment: { value: 'comment', label: 'Comment', authorMay: true, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
   approve: {
     value: 'approve',
     label: 'Approve',
-    authorNote: "Pull request authors can't approve their own pull requests.",
+    authorMay: false,
     icon: ICON_CHECK,
     instantIcon: ICON_CHECK_SEND,
     submitClass: 'btn-primary',
@@ -87,7 +87,7 @@ const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
   'request changes': {
     value: 'request changes',
     label: 'Request changes',
-    authorNote: "Pull request authors can't request changes on their own pull requests.",
+    authorMay: false,
     icon: ICON_X,
     instantIcon: ICON_X_SEND,
     submitClass: 'geld-quick-review__submit--danger',
@@ -108,12 +108,10 @@ const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
 
 /**
  * A segment's tooltip, one entry per line: its verdict and the key for a
- * 1-click review, what a click does while that key is held, or GitHub's
- * reason it is closed to the reader.
+ * 1-click review, or what a click does while that key is held.
  */
-export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string, held = false): readonly string[] {
+export function segmentHint(event: ReviewEvent, instantKey: string, held = false): readonly string[] {
   const info = EVENT_INFO[event];
-  if (isAuthor && info.authorNote !== null) return [info.authorNote];
   if (info.instantIcon === null) return [info.label];
   if (held) return [`${info.label} without comments`];
   return [info.label, `${instantKey} 1-click review`];
@@ -201,6 +199,8 @@ interface Mounted {
   /** What is placed in the tab bar: the group, with the status line before it. */
   readonly root: HTMLElement;
   readonly segments: { readonly [E in ReviewEvent]: HTMLButtonElement };
+  /** Primer's button group holding the segments the reader may use. */
+  readonly group: HTMLElement;
   /** "Approved", "Submitting…": what the controls have just done, read out as it changes. */
   readonly status: HTMLElement;
   host: HTMLElement | null;
@@ -418,7 +418,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const segments = { approve: segment('approve'), 'request changes': segment('request changes'), comment: segment('comment') };
   // Primer rounds the group's outer corners on `:first-child` / `:last-child`: the tooltips stand beside it, not between.
   const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
-  const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
+  const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, INSTANT_KEY)) ?? []);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
@@ -430,6 +430,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const state: Mounted = {
     root,
     segments,
+    group,
     status,
     host: null,
     counter,
@@ -461,7 +462,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   followInstantKey(root, keys.signal, () => describeSegments(state));
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
-      if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
+      if (state.sending) return;
       if (state.panel !== null && state.opener === event) {
         closePanel(true);
         return;
@@ -504,21 +505,19 @@ function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () =
 
 function describeSegments(state: Mounted): void {
   const held = state.root.hasAttribute(ATTR_INSTANT);
-  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, state.isAuthor === true, INSTANT_KEY, held));
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held));
 }
 
-/** What the author cannot do stays in the group, disabled, its tooltip GitHub's reason (re-read: the header may come late). */
+/**
+ * On their own pull request the author has only 💬: ✓ and ✗ leave the group
+ * (out of the DOM, not hidden, since Primer rounds the group's corners on
+ * `:first-child`/`:last-child`). Re-read each pass, the header may come late.
+ */
 function showAuthor(state: Mounted): void {
   const isAuthor = isAuthorViewing();
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
-  for (const event of SEGMENT_ORDER) {
-    const button = state.segments[event];
-    const closed = isAuthor && EVENT_INFO[event].authorNote !== null;
-    if (closed) button.setAttribute('aria-disabled', 'true');
-    else button.removeAttribute('aria-disabled');
-  }
-  describeSegments(state);
+  state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
 }
 
 function closePanel(restoreFocus = false): void {
@@ -644,7 +643,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
 function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
-  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && EVENT_INFO[event].authorNote !== null ? 'comment' : event);
+  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
   draft.event = allowed(initial);
 
   const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
