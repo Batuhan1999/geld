@@ -216,9 +216,10 @@ button:hover {
     background: var(--hover);
 }
 
+/* Inset: the cut corners' clip-path would cut an outline away. */
 button:focus-visible {
-    outline: 3px solid var(--focus);
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: inset 0 0 0 3px var(--focus);
 }
 
 button.primary {
