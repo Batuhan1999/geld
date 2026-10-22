@@ -347,6 +347,20 @@ describe('the tab bar button', () => {
     document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
     expect(document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title')?.value).toBe('Title (#7)');
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(true);
+  });
+
+  it('says a stacked pull request merges the stack below it too', async () => {
+    const stacked = (): string => {
+      const payload = JSON.parse(mergeBox('MERGEABLE', true));
+      payload.mergeRequirements.conditions = [{ type: 'STACK', result: 'PASSED', isStacked: true }];
+      return JSON.stringify(payload);
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(stacked(), { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(false);
   });
 
   it('confirms a merge only with the chosen method’s commit, whatever order GitHub answers in', async () => {
