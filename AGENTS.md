@@ -933,6 +933,7 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   A click opens the comment box with that verdict chosen, so the box is also the confirmation (the segment reads as pressed, `aria-expanded`;
   the same segment again closes it);
   ⌘-click on a Mac, Ctrl-click elsewhere (`isInstantClick`), on ✓ or ✗ sends at once with no comment, and 💬 always opens the box, being there for the words.
+  With words waiting in the box (its draft for this pull request), the instant click opens the box with that verdict instead, since an empty send would leave them out and the reload after it would drop them.
   While that key is held the group says so before the click (`followInstantKey`: `data-instant` from every key event, from the pointer over the group since the key may have gone down in another window, cleared on blur;
   the listeners go with the group): ✓ and ✗ swap their glyph for one with a small arrow in the bottom-right corner (`ICON_CHECK_SEND`, `ICON_X_SEND`: Octicons has no "send at once" mark, so the check and the cross stand exactly where the plain glyphs do, and the swap moves nothing, with an arrow at the octicons' 1.5 stroke tucked into the free bottom-right corner, `sendArrow(dx, dy)`;
   the cross's lower arm reaches that corner, so its arrow sits further out and overhangs the 16px box, which the svg's `overflow: visible` and the segment's padding allow), both glyphs in the segment and the stylesheet showing one (`.geld-quick-review__glyph--instant`).
