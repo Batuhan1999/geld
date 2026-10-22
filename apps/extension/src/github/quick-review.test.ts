@@ -526,6 +526,21 @@ describe('the tab bar button', () => {
     expect(sent).toEqual(['mark_ready_for_review']);
   });
 
+  it('unpresses the last pull request’s verdict when the controls move to another whose merge box cannot be read', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('MERGEABLE', true, { reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(false);
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+  });
+
   it('reopens a closed pull request, and leaves a merged one’s pill as GitHub drew it', async () => {
     window.localStorage.clear();
     resetStatusHints();
