@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import type { MergeSubmission } from './merge-actions';
-import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox } from './merge-actions';
+import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox, readyRequest, viewerVerdict } from './merge-actions';
 
 /** A `page_data/merge_box` answer as GitHub gave it on brandonmcconnell/geld#74 (Oct 2026), trimmed. */
 function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean } = {}): unknown {
@@ -11,6 +11,11 @@ function payload(overrides: { readonly state?: string; readonly draft?: boolean;
       isDraft: overrides.draft ?? false,
       viewerCanClose: overrides.canClose ?? true,
       viewerCanAdminBypassMergeRequirements: overrides.canBypass ?? false,
+      viewerCanMarkReadyForReview: overrides.draft ?? false,
+      latestOpinionatedReviews: [
+        { id: 1, author: { login: 'aeschli' }, state: 'APPROVED' },
+        { id: 2, author: { login: 'Alice' }, state: 'CHANGES_REQUESTED' },
+      ],
       viewerMergeActions: [
         { allowableStatus: 'BLOCKED', name: 'MERGE_QUEUE', mergeMethods: [{ allowableStatus: 'BLOCKED', isDefault: true, name: 'MERGE' }] },
         {
@@ -41,6 +46,11 @@ describe('parseMergeBox', () => {
       open: true,
       draft: false,
       canClose: true,
+      canMarkReady: false,
+      verdicts: [
+        { login: 'aeschli', state: 'APPROVED' },
+        { login: 'Alice', state: 'CHANGES_REQUESTED' },
+      ],
       mergeable: true,
       canBypass: false,
       methods: ['SQUASH', 'MERGE'],
@@ -50,6 +60,13 @@ describe('parseMergeBox', () => {
       stacked: false,
     });
     expect(parseMergeBox({ nope: true })).toBeNull();
+  });
+
+  it('knows the reader’s own standing verdict, whatever the case of their login', () => {
+    const box = parseMergeBox(payload());
+    if (box === null) throw new Error('fixture');
+    expect(viewerVerdict(box, 'alice')).toBe('CHANGES_REQUESTED');
+    expect(viewerVerdict(box, 'bob')).toBeNull();
   });
 });
 
@@ -82,6 +99,13 @@ describe('the requests', () => {
     expect(JSON.parse(String(stacked.init.body))).toEqual({ mergeAction: 'DIRECT_MERGE', bypassRules: 'true', mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c' });
     // A rebase writes no commit of its own.
     expect(JSON.parse(String(mergeRequest('/o/r/pull/7', { ...commit, method: 'REBASE' }, '').init.body))).toEqual({ bypassBranchProtections: false, mergeMethod: 'REBASE', authorEmail: 'a@b.c' });
+  });
+
+  it('takes a draft out of draft with nothing but the request', () => {
+    const ready = readyRequest('/o/r/pull/7', 'n1');
+    expect(ready.url).toBe('/o/r/pull/7/page_data/mark_ready_for_review');
+    expect(ready.init.method).toBe('POST');
+    expect(ready.init.body).toBeUndefined();
   });
 
   it('closes with nothing but the request', () => {

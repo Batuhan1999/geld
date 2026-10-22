@@ -857,6 +857,31 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-closed);
 }
 
+.geld-quick-review__segment.btn[data-action='ready']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+}
+
+.geld-quick-review__segment.btn[data-action='ready']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-open);
+}
+
+/*
+ * The reader's standing verdict: ✓ or ✗ pressed in (Primer's selected surface, an inner shadow) with its glyph in the
+ * verdict's colour. Still a button: pressing it again leaves a new review.
+ */
+.geld-quick-review__segment.btn[data-current] {
+  background: var(--button-default-bgColor-selected, var(--button-default-bgColor-active, #e6eaef));
+  box-shadow: inset 0 1px 2px rgba(31, 35, 40, 0.15);
+}
+
+.geld-quick-review__segment.btn[data-event='approve'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger);
+}
+
 .geld-quick-review__actions-group[hidden] {
   display: none;
 }
@@ -1106,15 +1131,19 @@ html[data-geld-quick-review] details.js-reviews-container {
   padding-top: 12px;
 }
 
-/* GitHub's Close pull request: a default button with the closed glyph in its colour. */
-.geld-quick-review__footer .btn.geld-quick-review__close-submit {
+/* GitHub's Close pull request and Ready for review: default buttons, the glyph in its state's colour. */
+.geld-quick-review__footer .btn.geld-quick-review__confirm-submit {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.geld-quick-review__close-submit > svg {
+.geld-quick-review__confirm-submit[data-action='close'] > svg {
   color: var(--fgColor-closed, #d1242f);
+}
+
+.geld-quick-review__confirm-submit[data-action='ready'] > svg {
+  color: var(--fgColor-open, #1a7f37);
 }
 
 /* "Pending comments N", as GitHub's dialog lists them under the choices. */

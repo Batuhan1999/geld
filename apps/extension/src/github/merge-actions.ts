@@ -4,8 +4,9 @@
  * (verified Oct 2026 by reading its bundle and capturing its requests with
  * the writes stubbed): `GET page_data/merge_box?merge_method=…&bypass_requirements=…`
  * says whether the reader can merge (directly, or only by bypassing the
- * rules) and close; `POST page_data/merge` merges; `POST page_data/close_pull_request`
- * closes. Same origin and session as the page, so they work from any tab.
+ * rules), close and mark a draft ready, and whose verdicts stand; `POST page_data/merge`
+ * merges; `POST page_data/close_pull_request` closes; `POST page_data/mark_ready_for_review`
+ * takes a draft out of draft. Same origin and session as the page, so they work from any tab.
  */
 
 export type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE';
@@ -14,6 +15,10 @@ export interface MergeBox {
   readonly open: boolean;
   readonly draft: boolean;
   readonly canClose: boolean;
+  /** Whether the reader may take the draft out of draft ("Ready for review"). */
+  readonly canMarkReady: boolean;
+  /** Each reviewer's standing verdict, as GitHub counts them (their latest approval or request for changes, dismissed ones gone). */
+  readonly verdicts: readonly ReviewVerdict[];
   /** Whether GitHub would merge it now with the method asked for (the rules, checks, reviews and conflicts all allow it). */
   readonly mergeable: boolean;
   /** Whether the reader is an admin GitHub lets bypass the rules that block it. */
@@ -26,6 +31,11 @@ export interface MergeBox {
   readonly authorEmail: string | null;
   /** Part of a GitHub stack: GitHub merges it through the stack's own request, `enqueue_stack`, not `merge`. */
   readonly stacked: boolean;
+}
+
+export interface ReviewVerdict {
+  readonly login: string;
+  readonly state: 'APPROVED' | 'CHANGES_REQUESTED';
 }
 
 /** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), or none. */
@@ -59,10 +69,19 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
   const email = stringOf(requirements.defaultCommitAuthorEmail);
   const conditions = Array.isArray(requirements.conditions) ? requirements.conditions : [];
   const stacked = conditions.some((condition) => isRecord(condition) && condition.type === 'STACK' && condition.isStacked === true);
+  const reviews = Array.isArray(pull.latestOpinionatedReviews) ? pull.latestOpinionatedReviews : [];
+  const verdicts: ReviewVerdict[] = [];
+  for (const review of reviews) {
+    if (!isRecord(review) || !isRecord(review.author)) continue;
+    const login = stringOf(review.author.login);
+    if (login !== '' && (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')) verdicts.push({ login, state: review.state });
+  }
   return {
     open: pull.state === 'OPEN',
     draft: pull.isDraft === true,
     canClose: pull.viewerCanClose === true,
+    canMarkReady: pull.viewerCanMarkReadyForReview === true,
+    verdicts,
     mergeable: requirements.state === 'MERGEABLE',
     canBypass: pull.viewerCanAdminBypassMergeRequirements === true,
     methods,
@@ -134,6 +153,16 @@ export function closeRequest(pullPath: string, nonce: string): { readonly url: s
   return { url: `${pullPath}/page_data/close_pull_request`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
 }
 
+/** What GitHub's merge box sends to take a draft out of draft: nothing but the request (a body only carries Copilot's review effort). */
+export function readyRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  return { url: `${pullPath}/page_data/mark_ready_for_review`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
+}
+
+/** The reader's own standing verdict on the pull request, if they have one. */
+export function viewerVerdict(box: MergeBox, login: string): ReviewVerdict['state'] | null {
+  return box.verdicts.find((verdict) => verdict.login.toLowerCase() === login.toLowerCase())?.state ?? null;
+}
+
 function fetchNonce(): string {
   return document.querySelector<HTMLMetaElement>('meta[name="fetch-nonce"]')?.content ?? '';
 }
@@ -165,16 +194,16 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
 }
 
 /** The reason a merge or close failed, in GitHub's words when it gave any. */
-export function actionErrorText(action: 'merge' | 'close', status: number, payload: unknown): string {
-  const verb = action === 'merge' ? 'merge' : 'close';
+export function actionErrorText(action: 'merge' | 'close' | 'ready', status: number, payload: unknown): string {
+  const verb = action === 'ready' ? 'mark the pull request ready for review' : `${action} the pull request`;
   if (isRecord(payload)) {
     const said = stringOf(payload.error).trim();
     const metadata = isRecord(payload.metadata) ? payload.metadata : {};
     const rules = Array.isArray(metadata.ruleErrors) ? metadata.ruleErrors.map((rule) => (isRecord(rule) ? stringOf(rule.message) : stringOf(rule))).filter((rule) => rule !== '') : [];
     const words = [said, ...rules].filter((word) => word !== '');
-    if (words.length > 0) return `GitHub could not ${verb} the pull request: ${words.join(' ')}`;
+    if (words.length > 0) return `GitHub could not ${verb}: ${words.join(' ')}`;
   }
-  return `GitHub could not ${verb} the pull request (HTTP ${status}).`;
+  return `GitHub could not ${verb} (HTTP ${status}).`;
 }
 
 /** Whether a merge answer says it went through (GitHub answers `{ status: "merged" }`, or `"failed"` with an error). */

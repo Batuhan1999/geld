@@ -255,6 +255,9 @@ describe('the tab bar button', () => {
     expect(sent).toEqual([{ url: '/acme/widgets/pull/7/page_data/submit_review', body: JSON.stringify({ body: '', event: 'approve', headSha: SHA }) }]);
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('Approved');
+    // The new verdict is the reader's standing one now: ✓ pressed, ✗ not.
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    expect(segment('request changes').hasAttribute('data-current')).toBe(false);
   });
 
   it('asks for words with GitHub’s reason when it refuses an instant verdict', async () => {
@@ -279,9 +282,9 @@ describe('the tab bar button', () => {
     expect(chosen()).toBe('Comment');
   });
 
-  const mergeBox = (state: string, canClose: boolean): string =>
+  const mergeBox = (state: string, canClose: boolean, extra: { readonly draft?: boolean; readonly reviews?: readonly unknown[] } = {}): string =>
     JSON.stringify({
-      pullRequest: { state: 'OPEN', isDraft: false, viewerCanClose: canClose, viewerCanAdminBypassMergeRequirements: false, viewerMergeActions: [{ name: 'DIRECT_MERGE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true }] }] },
+      pullRequest: { state: 'OPEN', isDraft: extra.draft ?? false, viewerCanMarkReadyForReview: extra.draft ?? false, latestOpinionatedReviews: extra.reviews ?? [], viewerCanClose: canClose, viewerCanAdminBypassMergeRequirements: false, viewerMergeActions: [{ name: 'DIRECT_MERGE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true }] }] },
       mergeRequirements: { state, conditions: [], commitMessageHeadline: 'Title (#7)', commitMessageBody: '' },
     });
 
@@ -291,11 +294,28 @@ describe('the tab bar button', () => {
     for (let i = 0; i < 4; i += 1) await settle();
     const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
     expect(actions?.hidden).toBe(false);
-    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['merge', 'close']);
+    // Close first, merge last, so a bypass's lock stands on the group's corner.
+    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'merge']);
     // The merge box opens on GitHub's commit for its default method.
     document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
     expect(document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title')?.value).toBe('Title (#7)');
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
+  });
+
+  it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes('/page_data/merge_box') ? new Response(mergeBox('UNMERGEABLE', true, { draft: true, reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }), { status: 200 }) : new Response('{}', { status: 404 }),
+      ),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
+    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'ready']);
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    expect(segment('approve').getAttribute('aria-label')).toBe('Approve (your current review)');
+    expect(segment('request changes').hasAttribute('data-current')).toBe(false);
   });
 
   it('says "Review" on 💬 when it is the only action the reader has', async () => {
