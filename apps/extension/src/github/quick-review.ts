@@ -8,8 +8,9 @@ import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
+import type { SidebarReviewer } from './review/crawler';
 import type { ReviewTally } from './review-tally';
-import { fetchReviewTally, tallyWords } from './review-tally';
+import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
@@ -42,6 +43,8 @@ export interface QuickReviewContext {
   readonly groups: readonly HeaderStatGroup[];
   /** The head commit when the review is sent (it may move while the popover is open). */
   readonly headSha: () => string | null;
+  /** Whether the conversation digest is on: then `#geld-reviews` waits for its Reviews row rather than settle for the sidebar. */
+  readonly digest?: boolean;
 }
 
 const GROUP_CLASS = 'geld-quick-review';
@@ -64,6 +67,8 @@ type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
+/** On the group until what the reader may do is read: it is not drawn meanwhile. */
+const ATTR_LOADING = 'data-loading';
 /** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
 const ATTR_PENDING = 'data-pending';
 /** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
@@ -245,7 +250,14 @@ interface Mounted {
   /** "Ready for review", in merge's place on a draft the reader may take out of draft. */
   readonly readyButton: HTMLButtonElement;
   /** "3 ✓ 1 ✗ 3 💬": how the reviews stand, left of the group, for reading only. */
-  readonly tally: HTMLElement;
+  readonly tally: HTMLAnchorElement;
+  /** The reviewers the tally counts, for its snapshot card. */
+  reviewers: readonly SidebarReviewer[];
+  /** The snapshot card while it shows, and the timer that shows or hides it. */
+  snapshot: HTMLElement | null;
+  snapshotTimer: number;
+  /** Until the first reading of what the reader may do lands (or `READY_WAIT_MS` passes), the control is not drawn. */
+  loadingTimer: number;
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
@@ -311,17 +323,22 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted === null) mounted = createControls(pullPath, context);
   if (mounted.pullPath !== pullPath) {
     closePanel();
+    hideSnapshot(mounted);
     mounted.pullPath = pullPath;
+    mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     // The last pull request's merge, close and standing verdict are not this one's: none until its merge box is read.
     mounted.mergeActions = null;
     showActions(mounted);
     showVerdict(mounted, null);
     // The last pull request's pending comments are not this one's: none until this one's are read.
     mounted.pending = null;
-    // Another pull request's counts never stand in for this one's: nothing until its reviews are read.
+    // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
+    mounted.reviewers = [];
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
+    holdUntilReady(mounted);
   }
   mounted.context = context;
+  followReviewHash(context);
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   if (mounted.mergeFor !== pullPath) void loadMergeActions(mounted);
   showCount(mounted);
@@ -429,6 +446,8 @@ export function removeQuickReview(): void {
   closePanel();
   window.clearTimeout(mounted.submittedTimer);
   window.clearTimeout(mounted.mergeTimer);
+  window.clearTimeout(mounted.loadingTimer);
+  hideSnapshot(mounted);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
   mounted.stickyWatch.disconnect();
@@ -469,7 +488,7 @@ function withBreaks(lines: readonly string[]): (string | HTMLElement)[] {
 function createControls(pullPath: string, context: QuickReviewContext): Mounted {
   const counter = createElement('span', { class: 'geld-quick-review__count', 'aria-hidden': 'true', hidden: '' });
   const status = createElement('span', { class: 'geld-quick-review__status', role: 'status' });
-  const tally = createElement('span', { class: 'geld-quick-review__tally', role: 'img', hidden: '' });
+  const tally = createElement('a', { class: 'geld-quick-review__tally', href: `${pullPath}${REVIEWS_HASH}`, hidden: '' });
   const segment = (event: ReviewEvent): HTMLButtonElement => {
     const info = EVENT_INFO[event];
     tipIds += 1;
@@ -502,7 +521,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const actions = createElement('div', { class: 'BtnGroup geld-quick-review__group geld-quick-review__actions-group', role: 'group', 'aria-label': 'Merge or close', hidden: '' });
   const actionTips = [describe(mergeButton, ['Merge pull request']), describe(closeButton, ['Close pull request']), describe(readyButton, ['Ready for review'])].filter((tip): tip is HTMLElement => tip !== null);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
-  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), actions, ...tips, ...actionTips]);
+  // Drawn once what the reader may do is known: close and merge arriving later would push the group aside.
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '', [ATTR_LOADING]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), actions, ...tips, ...actionTips]);
   const keys = new AbortController();
   const stickyWatch = new MutationObserver(() => {
     if (mounted !== state) return;
@@ -522,6 +542,10 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     closeButton,
     readyButton,
     tally,
+    reviewers: [],
+    snapshot: null,
+    snapshotTimer: 0,
+    loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
     mergeRead: 0,
@@ -553,6 +577,19 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     { passive: true, signal: keys.signal },
   );
   followInstantKey(root, keys.signal, () => describeSegments(state));
+  armSnapshot(state);
+  holdUntilReady(state);
+  // The tally's link from this very tab changes only the hash: resolve it there and then.
+  window.addEventListener(
+    'hashchange',
+    () => {
+      // A new target: the last landing's re-landings would pull the page back to the Reviews row.
+      landing?.abort();
+      landing = null;
+      followReviewHash(state.context);
+    },
+    { signal: keys.signal },
+  );
   const opensBox = (button: HTMLButtonElement, kind: 'merge' | 'close' | 'ready', open: (state: Mounted) => void): void => {
     button.addEventListener('click', () => {
       if (state.sending) return;
@@ -674,18 +711,51 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   state.mergeRead += 1;
   const read = state.mergeRead;
   const current = (): boolean => mounted === state && state.pullPath === pullPath && state.mergeRead === read;
-  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close.
-  void fetchReviewTally(pullPath).then((tally) => {
-    if (tally !== null && current()) showTally(state, tally);
+  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close. The control is drawn once both are in.
+  let waiting = 2;
+  const settle = (): void => {
+    waiting -= 1;
+    if (waiting === 0) ready(state);
+  };
+  let sidebar: readonly SidebarReviewer[] | null = null;
+  const showReviewers = (): void => {
+    if (sidebar === null) return;
+    state.reviewers = standingReviewers(sidebar, state.mergeActions?.box.verdicts ?? []);
+    showTally(state, tallyOf(state.reviewers));
+  };
+  void fetchReviewers(pullPath).then((reviewers) => {
+    if (!current()) return;
+    sidebar = reviewers;
+    showReviewers();
+    settle();
   });
   const actions = await readMergeActions(pullPath);
   if (!current()) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
+  showReviewers();
+  settle();
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
   return actions;
+}
+
+const READY_WAIT_MS = 1500;
+
+/** Keep the control undrawn until what the reader may do is read, or for `READY_WAIT_MS` at most. */
+function holdUntilReady(state: Mounted): void {
+  state.root.setAttribute(ATTR_LOADING, '');
+  window.clearTimeout(state.loadingTimer);
+  state.loadingTimer = window.setTimeout(() => ready(state), READY_WAIT_MS);
+}
+
+function ready(state: Mounted): void {
+  window.clearTimeout(state.loadingTimer);
+  if (state.root.hasAttribute(ATTR_LOADING)) {
+    state.root.removeAttribute(ATTR_LOADING);
+    positionPanel();
+  }
 }
 
 const TALLY_PARTS: ReadonlyArray<{ readonly key: keyof ReviewTally; readonly icon: string; readonly tone: string }> = [
@@ -704,9 +774,204 @@ function showTally(state: Mounted, tally: ReviewTally): void {
     ),
   );
   state.tally.setAttribute('aria-label', words);
-  state.tally.title = words;
   state.tally.hidden = words === '';
 }
+
+const SNAPSHOT_DELAY_MS = 200;
+
+const SNAPSHOT_STATE: { readonly [S in SidebarReviewer['state']]: { readonly words: string; readonly icon: string; readonly tone: string } } = {
+  approved: { words: 'approved', icon: ICON_CHECK, tone: 'approved' },
+  changes_requested: { words: 'requested changes', icon: ICON_X, tone: 'changes' },
+  commented: { words: 'commented', icon: ICON_COMMENT, tone: 'commented' },
+  dismissed: { words: 'commented', icon: ICON_COMMENT, tone: 'commented' },
+  awaiting: { words: 'awaiting review', icon: ICON_COMMENT, tone: 'commented' },
+};
+
+/**
+ * Resting on the tally (or focusing it) shows the reviews behind it: one
+ * line per reviewer, their picture, name and standing review, each a link
+ * to that review on the conversation. The card hangs under the tally and
+ * stays while the pointer is on it.
+ */
+function armSnapshot(state: Mounted): void {
+  const later = (show: boolean): void => snapshotSoon(state, show);
+  state.tally.addEventListener('pointerenter', () => later(true), { signal: state.keys.signal });
+  state.tally.addEventListener('pointerleave', () => later(false), { signal: state.keys.signal });
+  state.tally.addEventListener('focus', () => showSnapshot(state), { signal: state.keys.signal });
+  state.tally.addEventListener('blur', () => later(false), { signal: state.keys.signal });
+  state.tally.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Escape') hideSnapshot(state);
+      else if (event.key === 'Tab' && !event.shiftKey && state.snapshot !== null) {
+        const first = state.snapshot.querySelector<HTMLElement>('a');
+        if (first === null) return;
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    },
+    { signal: state.keys.signal },
+  );
+}
+
+function snapshotSoon(state: Mounted, show: boolean): void {
+  window.clearTimeout(state.snapshotTimer);
+  state.snapshotTimer = window.setTimeout(() => (show ? showSnapshot(state) : hideSnapshot(state)), SNAPSHOT_DELAY_MS);
+}
+
+function showSnapshot(state: Mounted): void {
+  window.clearTimeout(state.snapshotTimer);
+  if (state.snapshot !== null || state.reviewers.length === 0 || !state.tally.isConnected) return;
+  const verdicts = state.mergeActions?.box.verdicts ?? [];
+  const card = createElement('div', { class: 'geld-quick-review__snapshot', [OWN_UI_ATTRIBUTE]: '', role: 'group', 'aria-label': 'Reviews' }, [
+    ...state.reviewers.map((reviewer) => {
+      const look = SNAPSHOT_STATE[reviewer.state];
+      const id = verdicts.find((verdict) => verdict.login.toLowerCase() === reviewer.login.toLowerCase())?.id ?? null;
+      return createElement('a', { class: 'geld-quick-review__snapshot-row', href: reviewLink(state.pullPath, reviewer.login, id) }, [
+        reviewer.avatarSrc === null
+          ? createElement('span', { class: 'geld-quick-review__snapshot-avatar', 'aria-hidden': 'true' })
+          : createElement('img', { class: `geld-quick-review__snapshot-avatar${reviewer.bot ? ' geld-quick-review__snapshot-avatar--bot' : ''}`, src: reviewer.avatarSrc, alt: '', width: '20', height: '20' }),
+        createElement('span', { class: 'geld-quick-review__snapshot-name' }, [reviewer.login]),
+        createElement('span', { class: 'geld-quick-review__snapshot-state', 'data-tone': look.tone }, [svgFromString(look.icon), look.words]),
+      ]);
+    }),
+  ]);
+  card.addEventListener('pointerenter', () => window.clearTimeout(state.snapshotTimer));
+  card.addEventListener('pointerleave', () => snapshotSoon(state, false));
+  card.addEventListener('focusin', () => window.clearTimeout(state.snapshotTimer));
+  card.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node) || (!card.contains(next) && next !== state.tally)) snapshotSoon(state, false);
+  });
+  // The card is at the end of the page, not after the tally in the tab order: Tab walks it as if it were.
+  card.addEventListener('keydown', (event) => {
+    const links = [...card.querySelectorAll<HTMLElement>('a')];
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      // Focus first: the tally's focus would open a new card if this one were already gone.
+      state.tally.focus({ preventScroll: true });
+      hideSnapshot(state);
+    } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === links[0]) {
+      event.preventDefault();
+      state.tally.focus({ preventScroll: true });
+    } else if (event.key === 'Tab' && !event.shiftKey && document.activeElement === links.at(-1)) {
+      event.preventDefault();
+      hideSnapshot(state);
+      state.group.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    }
+  });
+  document.body.append(card);
+  state.snapshot = card;
+  const rect = state.tally.getBoundingClientRect();
+  const left = Math.max(8, Math.min(rect.left, document.documentElement.clientWidth - card.offsetWidth - 8));
+  card.style.left = `${Math.round(left)}px`;
+  card.style.top = `${Math.round(rect.bottom + 6)}px`;
+  // Fixed, so scrolling the page cannot reach what overflows the window: the list scrolls inside the room left.
+  card.style.maxHeight = `${Math.max(120, Math.round(window.innerHeight - rect.bottom - 18))}px`;
+  // And it hangs from the tally: when the tally moves with the page, the card goes rather than float over other things.
+  window.addEventListener('scroll', () => hideSnapshot(state), { passive: true, once: true, signal: state.keys.signal });
+}
+
+/** The login in a reviewer marker; a malformed escape (a hand-edited `%`) reads as no one, so the marker falls back to the Reviews row. */
+function loginOfMarker(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function hideSnapshot(state: Mounted): void {
+  window.clearTimeout(state.snapshotTimer);
+  state.snapshot?.remove();
+  state.snapshot = null;
+}
+
+/**
+ * On the conversation, Geld's review markers resolve once the page holds
+ * their target: `#geld-reviews` opens the digest's Reviews row (or brings
+ * the sidebar's Reviewers into view), and `#geld-review-by-<login>`
+ * becomes that reviewer's latest review's own anchor, which the browser
+ * (or the digest, folding the timeline) then lands on. Tried each pass for
+ * `HASH_PATIENCE_MS`, since the timeline loads in pieces; a reviewer never
+ * found falls back to the reviews.
+ */
+function followReviewHash(context: QuickReviewContext): void {
+  const kind = context.page.kind;
+  const hash = window.location.hash;
+  if (kind !== 'pull-conversation' || !(hash === REVIEWS_HASH || hash.startsWith(REVIEW_BY_HASH))) {
+    hashSince = null;
+    return;
+  }
+  if (hashSince === null || hashSince.hash !== hash) hashSince = { hash, at: Date.now() };
+  const patient = Date.now() - hashSince.at < HASH_PATIENCE_MS;
+  if (hash.startsWith(REVIEW_BY_HASH)) {
+    const login = loginOfMarker(hash.slice(REVIEW_BY_HASH.length));
+    const reviews = [...document.querySelectorAll<HTMLElement>('[id^="pullrequestreview-"]')].filter((node) => /^pullrequestreview-\d+$/.test(node.id) && reviewAuthorIs(node, login));
+    const latest = reviews.at(-1);
+    if (latest !== undefined) {
+      hashSince = null;
+      window.location.replace(`#${latest.id}`);
+      return;
+    }
+    if (patient) return;
+  }
+  const row = document.querySelector<HTMLElement>(REVIEWS_ROW);
+  // The digest mounts after the controls on a fresh load: while it is on and may still come, the sidebar does not do.
+  if (row === null && context.digest === true && patient) return;
+  const sidebar = document.querySelector<HTMLElement>('form[id^="pull-request-reviewers-form"], [data-testid="sidebar-reviewers"], [data-testid="reviewers-section"]');
+  const target = row ?? sidebar;
+  if (target === null) {
+    if (!patient) hashSince = null;
+    return;
+  }
+  hashSince = null;
+  history.replaceState(history.state, '', `${window.location.pathname}${window.location.search}`);
+  if (row === null) {
+    (target.closest('.discussion-sidebar-item') ?? target).scrollIntoView({ block: 'center' });
+    return;
+  }
+  const landRow = (): void => {
+    const current = document.querySelector<HTMLElement>(REVIEWS_ROW)?.closest('li');
+    if (current !== null && current !== undefined) window.scrollBy({ top: current.getBoundingClientRect().top - LANDING_OFFSET, behavior: 'instant' });
+  };
+  // Landed before the click: opening a row makes the digest hold it at the viewport top it has at that moment.
+  landRow();
+  if (row.getAttribute('aria-expanded') !== 'true') row.click();
+  // The page above is still settling while the conversation loads, so the row is brought back under the sticky
+  // header a few times over the next second, unless the reader scrolls first.
+  landing?.abort();
+  const settle = new AbortController();
+  landing = settle;
+  const stop = (): void => settle.abort();
+  window.addEventListener('wheel', stop, { once: true, passive: true, signal: settle.signal });
+  window.addEventListener('keydown', stop, { once: true, signal: settle.signal });
+  for (const delay of [300, 900]) {
+    window.setTimeout(() => {
+      if (!settle.signal.aborted) landRow();
+    }, delay);
+  }
+}
+
+/** The Reviews row's re-landings in flight: the reader scrolling, or another hash, ends them. */
+let landing: AbortController | null = null;
+
+/** Room left above a row brought into view: GitHub's sticky header and a little air. */
+const LANDING_OFFSET = 96;
+
+const REVIEWS_ROW = '.geld-review [data-geld-focus="main:reviews"]';
+
+/** A review row's author is `login`: GitHub writes "Name (login)" or the login alone, and links the profile (or the App). */
+function reviewAuthorIs(node: Element, login: string): boolean {
+  const author = node.querySelector('.author');
+  if (author === null) return false;
+  const text = (author.textContent ?? '').trim().toLowerCase();
+  const href = (author.getAttribute('href') ?? '').toLowerCase();
+  return text === login || text.endsWith(`(${login})`) || href === `/${login}`;
+}
+
+const HASH_PATIENCE_MS = 15_000;
+let hashSince: { readonly hash: string; readonly at: number } | null = null;
 
 /**
  * Close (in its closed colour), then merge (in GitHub's merge colour, a

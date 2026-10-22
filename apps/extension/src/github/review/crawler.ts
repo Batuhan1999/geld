@@ -891,9 +891,12 @@ export function crawlSidebarReviewers(root: ParentNode = document): readonly Sid
     const text = [tip?.textContent ?? '', control?.getAttribute('aria-label') ?? '', row.querySelector('tool-tip')?.textContent ?? ''].join(' ');
     const state = sidebarReviewerState(text, row.querySelector('.reviewers-status-icon svg, .reviewers-status-icon .octicon'));
     if (state === null) continue;
-    const link = who.querySelector('a[href]');
-    const bot = /\[bot\]$/i.test(login) || (link?.getAttribute('href') ?? '').startsWith('/apps/');
-    out.push({ login, avatarSrc: srcOfImage(who.querySelector('img')) ?? avatarSrcForLogin(login), state, bot });
+    const href = who.querySelector('a[href]')?.getAttribute('href') ?? '';
+    const app = /^\/apps\/([^/?#]+)/.exec(href)?.[1];
+    const bot = /\[bot\]$/i.test(login) || app !== undefined;
+    // Copilot's row draws an octicon, not a picture: its App's mark comes from the registry by the App's slug.
+    const appMark = app === undefined ? null : appAvatarForLogin(`${app}[bot]`);
+    out.push({ login, avatarSrc: srcOfImage(who.querySelector('img')) ?? appMark ?? avatarSrcForLogin(login), state, bot });
   }
   return out;
 }
