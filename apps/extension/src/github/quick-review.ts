@@ -210,6 +210,9 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   for (const group of groups) {
     const host = group.host;
     if (!host.isConnected || host.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    // GitHub hides the header's counts on narrow screens: placed there, the button would be hidden with them while
+    // GitHub's own was hidden for it, leaving no way to review. A style read, not a layout one.
+    if (!host.checkVisibility()) continue;
     if (host.id === 'diffstat' || host.closest('[data-component="PageHeader"], .gh-header, #partial-discussion-header') !== null) return host;
   }
   return null;
@@ -256,6 +259,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** Each read of the merge box takes the next number: an answer from a read a newer one replaced is dropped, whatever order they land in. */
+  mergeRead: number;
   mergeTimer: number;
   isAuthor: boolean | null;
   pullPath: string;
@@ -285,6 +290,12 @@ interface Mounted {
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
 
+/** A sent box's words go; the Comment / Review choice is the reader's for the visit and stays. */
+function clearDraft(pullPath: string): void {
+  const kind = drafts.get(pullPath)?.kind ?? null;
+  drafts.set(pullPath, { body: '', event: 'comment', kind });
+}
+
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
   if (draft === undefined) {
@@ -309,6 +320,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.pullPath = pullPath;
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     mounted.mergeActions = null;
+    // The last pull request's pending comments are not this one's: none until this one's are read.
+    mounted.pending = null;
     // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
     mounted.reviewers = [];
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
@@ -524,6 +537,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
+    mergeRead: 0,
     mergeTimer: 0,
     isAuthor: null,
     pullPath,
@@ -588,7 +602,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       closePanel();
       void sendReview(state, event, '').then((failure) => {
         // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason.
-        if (failure !== null) openComposer(state, event, failure);
+        // A refused 💬 was a review of the pending comments: its box opens as a review, whatever the reader's usual choice.
+        if (failure !== null) openComposer(state, event, failure, event === 'comment' ? 'review' : null);
       });
     });
   }
@@ -663,8 +678,10 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   const pullPath = state.pullPath;
   state.mergeFor = pullPath;
   window.clearTimeout(state.mergeTimer);
+  state.mergeRead += 1;
+  const read = state.mergeRead;
   const [actions, reviewers] = await Promise.all([readMergeActions(pullPath), fetchReviewers(pullPath)]);
-  if (mounted !== state || state.pullPath !== pullPath) return null;
+  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
   if (reviewers !== null) {
@@ -929,6 +946,9 @@ function positionPanel(): void {
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {
@@ -1019,7 +1039,9 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       const payload: unknown = await response.json().catch(() => null);
       return reviewErrorText(response.status, payload);
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
@@ -1059,7 +1081,8 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       const said = messageOf(payload);
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
       window.location.reload();
@@ -1090,7 +1113,7 @@ const KIND_INFO: { readonly [K in CommentKind]: { readonly label: string; readon
  * segment that opened it chose the verdict, and another segment changes it
  * in place. After a refused send, GitHub's reason above the buttons.
  */
-function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null, kindNow: CommentKind | null = null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
@@ -1118,7 +1141,9 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   ]);
 
   let pendingOpen = false;
-  const kind = (): CommentKind => draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+  // This box's kind when it was opened for one (a refused review of pending comments), else the reader's choice.
+  let opened: CommentKind | null = kindNow;
+  const kind = (): CommentKind => opened ?? draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
   const posting = (): boolean => draft.event === 'comment' && kind() === 'comment';
   const showVerdict = (): void => {
     const info = EVENT_INFO[draft.event];
@@ -1133,9 +1158,12 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     if (!split) closeKindMenu();
     panel.setAttribute('aria-label', split ? KIND_INFO[kind()].label : info.label);
   };
+  let menuKeys: AbortController | null = null;
   const closeKindMenu = (): void => {
     kindMenu.hidden = true;
     kindToggle.setAttribute('aria-expanded', 'false');
+    menuKeys?.abort();
+    menuKeys = null;
   };
   const openKindMenu = (): void => {
     kindMenu.replaceChildren(
@@ -1148,6 +1176,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
         ]);
         item.addEventListener('click', () => {
           draft.kind = option;
+          opened = null;
           showCommentKind(state);
           closeKindMenu();
           showVerdict();
@@ -1164,6 +1193,10 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     kindMenu.style.left = `${Math.round(Math.max(8, toggle.right - kindMenu.offsetWidth))}px`;
     kindMenu.style.top = `${Math.round(Math.max(8, toggle.top - kindMenu.offsetHeight - 4))}px`;
     kindMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+    // Fixed where the caret was: when the box moves (the page scrolls, the window changes) it closes rather than stay behind.
+    menuKeys = new AbortController();
+    window.addEventListener('scroll', closeKindMenu, { passive: true, once: true, signal: menuKeys.signal });
+    window.addEventListener('resize', closeKindMenu, { once: true, signal: menuKeys.signal });
   };
   const refresh = (): void => {
     const pending = pendingCount(state);
@@ -1315,6 +1348,8 @@ function openMergeBox(state: Mounted): void {
   const bypass = known.offer === 'bypass';
   let method: MergeMethod = known.box.methods[0] ?? 'SQUASH';
   let box: MergeBox = known.box;
+  // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
+  let boxFor: MergeMethod = method;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -1337,15 +1372,26 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = box.commitTitle;
-      message.value = box.commitMessage;
+      title.value = boxFor === method ? box.commitTitle : '';
+      message.value = boxFor === method ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
     const past = bypass && consent.checked;
     submit.className = `btn btn-sm geld-quick-review__submit ${past ? 'geld-quick-review__submit--danger' : 'btn-primary'}`;
     if (!state.sending) submit.textContent = past ? 'Bypass rules and merge' : METHOD_CONFIRM[method];
-    submit.disabled = state.sending || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+    submit.disabled = state.sending || boxFor !== method || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+  };
+  // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
+  // An answer for a method no longer chosen is dropped; a failed one leaves the fields to the reader.
+  const load = (asked: MergeMethod): void => {
+    void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
+      if (state.panel !== panel || method !== asked) return;
+      if (fresh !== null) box = fresh;
+      boxFor = asked;
+      fill();
+      refresh();
+    });
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
@@ -1366,13 +1412,7 @@ function openMergeBox(state: Mounted): void {
     method = chosen;
     fill();
     refresh();
-    // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
-    void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-      if (fresh === null || state.panel !== panel || method !== chosen) return;
-      box = fresh;
-      fill();
-      refresh();
-    });
+    load(chosen);
   });
   for (const field of [title, message]) {
     field.addEventListener('input', () => {
@@ -1397,12 +1437,7 @@ function openMergeBox(state: Mounted): void {
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
-  void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-    if (fresh === null || state.panel !== panel) return;
-    box = fresh;
-    fill();
-    refresh();
-  });
+  load(method);
 }
 
 /**
