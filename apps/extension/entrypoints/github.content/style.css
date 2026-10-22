@@ -728,9 +728,32 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  /*
+   * Primer's group floats its buttons, so its min-content is one button wide: a flex row sized from min-content (the
+   * sticky toolbar's) then shrank below the group and its last buttons ran past the toolbar's edge.
+   */
+  min-width: max-content;
   /* A 26px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
   margin: -4px 12px -4px 0;
   white-space: nowrap;
+}
+
+/* In the Files changed tab's stuck toolbar, where GitHub's own button would be: the toolbar's row spaces it, at its 28px. */
+.geld-quick-review[data-geld-place] {
+  margin: 0;
+}
+
+/* At the end of the other tabs' compact header's title row, right of the title, which gives way to it. */
+.geld-quick-review[data-geld-place='header'] {
+  /* Primer's header row orders its parts with `order`; the group comes last. */
+  order: 99;
+  align-self: center;
+  margin-left: auto;
+  padding-left: 16px;
+}
+
+.geld-quick-review[data-geld-place] .geld-quick-review__segment.btn {
+  height: 28px;
 }
 
 /*
@@ -744,7 +767,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
 }
 
-/* [✓ | ✗ | 💬]: Primer's button group kept to its outline and dividers, no fill, three quiet grey icons. */
+/*
+ * [✓ | ✗ | 💬]: a Primer button group dressed as the Files changed toolbar's own default buttons (Merge status, the
+ * settings gear): their surface, border, resting shadow and muted icons, from the same tokens.
+ */
 .geld-quick-review__segment.btn {
   display: inline-flex;
   align-items: center;
@@ -753,8 +779,9 @@ html[data-geld-quick-review] details.js-reviews-container {
   height: 26px;
   min-width: 28px;
   padding: 0 6px;
-  background: transparent;
-  box-shadow: none;
+  border-color: var(--button-default-borderColor-rest, #d1d9e0);
+  background: var(--button-default-bgColor-rest, #f6f8fa);
+  box-shadow: var(--button-default-shadow-resting, 0 1px 0 0 rgba(31, 35, 40, 0.04));
   transition: none;
 }
 
@@ -766,7 +793,6 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__glyph > svg {
   display: block;
   color: var(--fgColor-muted, #59636e);
-  opacity: 0.8;
   transition: none;
 }
 
@@ -775,61 +801,50 @@ html[data-geld-quick-review] details.js-reviews-container {
   transform: translateY(1px);
 }
 
-.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) {
-  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+.geld-quick-review__segment.btn:hover {
+  border-color: var(--button-default-borderColor-hover, #d1d9e0);
+  background: var(--button-default-bgColor-hover, #eff2f5);
 }
 
-.geld-quick-review__segment.btn:hover:not([aria-disabled='true']) .geld-quick-review__glyph > svg,
+.geld-quick-review__segment.btn:hover .geld-quick-review__glyph > svg,
 .geld-quick-review__segment[aria-expanded='true'] .geld-quick-review__glyph > svg {
   color: var(--fgColor-default, #1f2328);
-  opacity: 1;
 }
 
 /* The segment whose comment box is open reads as pressed. */
 .geld-quick-review__segment.btn[aria-expanded='true'] {
-  background: var(--control-transparent-bgColor-active, rgba(208, 215, 222, 0.48));
+  background: var(--button-default-bgColor-active, #e6eaef);
 }
 
 /*
- * ✓ and ✗ under the pointer, and only there, in the theme's own success and danger: the muted surface and the icon. Theme
- * variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
+ * ✓ and ✗ under the pointer, and only there, tint that surface with the theme's own success and danger (the muted
+ * surface laid over it at 70%, so the grey still shows through) and colour the icon. Theme variables only, no fixed green
+ * or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true'], [aria-expanded='true']):hover {
-  background: var(--bgColor-success-muted);
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true'], [aria-expanded='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true'], [aria-expanded='true']):hover {
-  background: var(--bgColor-danger-muted);
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true'], [aria-expanded='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
 }
 
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
 .geld-quick-review__glyph--instant,
-.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
+.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
   display: none;
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment:not([aria-disabled='true']) .geld-quick-review__glyph--instant {
+.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph--instant {
   display: flex;
-}
-
-/* Shown, never hidden: what the author cannot do, fainter, GitHub's reason its tooltip. Primer fills a disabled button grey: here the fainter icon says it, the outline stays as it is. */
-.geld-quick-review__segment.btn[aria-disabled='true'] {
-  border-color: var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
-  background: transparent;
-  cursor: not-allowed;
-}
-
-.geld-quick-review__segment[aria-disabled='true'] .geld-quick-review__glyph > svg {
-  color: var(--fgColor-disabled, #818b98);
-  opacity: 0.6;
 }
 
 .geld-quick-review[aria-busy='true'] .geld-quick-review__segment {
@@ -850,6 +865,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 /* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */
 .Overlay.geld-quick-review__panel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   right: auto;
   bottom: auto;
   z-index: 100;
@@ -863,7 +880,9 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   padding: 12px 12px 0;
+  overflow-y: auto;
 }
 
 .geld-quick-review__body {
@@ -906,6 +925,12 @@ html[data-geld-quick-review] details.js-reviews-container {
   /* Its trash can stands in the pending rows' glyph column: the rows' hover surface overhangs 8px the same way. */
   margin-left: -8px;
   padding-left: 8px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* As Primer's `btn-octicon-danger` (GitHub's trash cans in branch and file lists): muted at rest, the danger colour to act, never a surface. */
+.geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard:is(:hover, :focus-visible, :active) {
+  background: transparent;
   color: var(--fgColor-danger, #d1242f);
 }
 
@@ -946,6 +971,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__count {
   position: absolute;
+  /* Above the group's buttons, which Primer lifts to z-index 1 when focused, pressed or hovered. */
+  z-index: 2;
   top: -7px;
   right: -7px;
   box-sizing: border-box;

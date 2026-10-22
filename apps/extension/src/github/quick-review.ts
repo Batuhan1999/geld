@@ -4,7 +4,7 @@ import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
-import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
+import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
 
@@ -43,6 +43,17 @@ const PANEL_CLASS = 'geld-quick-review__panel';
 const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
+/** On the group while it rides a sticky header: `toolbar` (Files changed, where GitHub's own button would be) or `header` (every other tab). */
+const ATTR_PLACE = 'data-geld-place';
+/** GitHub's own review control, React's Files changed view or the classic one; hidden while the group is mounted. */
+const GITHUB_REVIEW_CONTROL = '[class*="ReviewMenuButton"], details.js-reviews-container';
+/** The toolbar that holds it and sticks to the top of the viewport as the diff scrolls. */
+const STICKY_TOOLBAR = 'section[class*="stickyHeader"], .js-sticky';
+const STICKY_REVIEW_CONTROL = `:is(${STICKY_TOOLBAR}) :is(${GITHUB_REVIEW_CONTROL})`;
+/** The compact pull request header the other tabs show once the page header has scrolled away: `display: none` until it sticks. */
+const STICKY_PR_HEADER = '[class*="prHeader"][class*="stickyHeader"]';
+
+type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
@@ -50,8 +61,8 @@ const ATTR_INSTANT = 'data-instant';
 interface EventInfo {
   readonly value: ReviewEvent;
   readonly label: string;
-  /** GitHub's reason the author cannot take this one, when they cannot. */
-  readonly authorNote: string | null;
+  /** Whether the pull request's author may take it: GitHub refuses an author's own approval and request for changes. */
+  readonly authorMay: boolean;
   /** The segment's glyph. */
   readonly icon: string;
   /** Its glyph while the instant key is held, for the verdicts a ⌘-click sends at once. */
@@ -63,11 +74,11 @@ interface EventInfo {
 }
 
 const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
-  comment: { value: 'comment', label: 'Comment', authorNote: null, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
+  comment: { value: 'comment', label: 'Comment', authorMay: true, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
   approve: {
     value: 'approve',
     label: 'Approve',
-    authorNote: "Pull request authors can't approve their own pull requests.",
+    authorMay: false,
     icon: ICON_CHECK,
     instantIcon: ICON_CHECK_SEND,
     submitClass: 'btn-primary',
@@ -76,7 +87,7 @@ const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
   'request changes': {
     value: 'request changes',
     label: 'Request changes',
-    authorNote: "Pull request authors can't request changes on their own pull requests.",
+    authorMay: false,
     icon: ICON_X,
     instantIcon: ICON_X_SEND,
     submitClass: 'geld-quick-review__submit--danger',
@@ -97,12 +108,10 @@ const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
 
 /**
  * A segment's tooltip, one entry per line: its verdict and the key for a
- * 1-click review, what a click does while that key is held, or GitHub's
- * reason it is closed to the reader.
+ * 1-click review, or what a click does while that key is held.
  */
-export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string, held = false): readonly string[] {
+export function segmentHint(event: ReviewEvent, instantKey: string, held = false): readonly string[] {
   const info = EVENT_INFO[event];
-  if (isAuthor && info.authorNote !== null) return [info.authorNote];
   if (info.instantIcon === null) return [info.label];
   if (held) return [`${info.label} without comments`];
   return [info.label, `${instantKey} 1-click review`];
@@ -193,6 +202,8 @@ interface Mounted {
   /** What is placed in the tab bar: the group, with the status line before it. */
   readonly root: HTMLElement;
   readonly segments: { readonly [E in ReviewEvent]: HTMLButtonElement };
+  /** Primer's button group holding the segments the reader may use. */
+  readonly group: HTMLElement;
   /** "Approved", "Submitting…": what the controls have just done, read out as it changes. */
   readonly status: HTMLElement;
   host: HTMLElement | null;
@@ -215,6 +226,14 @@ interface Mounted {
   pendingFor: string | null;
   /** Stops following the instant key. */
   readonly keys: AbortController;
+  /** The tab bar's line counts the group stands before, from the last pass. */
+  anchor: HTMLElement | null;
+  /** The sticky headers being watched for when they stick (the Files changed toolbar, the compact header), and the watch. */
+  toolbar: Element | null;
+  header: Element | null;
+  readonly stickyWatch: MutationObserver;
+  /** Whether the Files changed toolbar is stuck, read from its box on scroll (never on a pass, which must not measure). */
+  toolbarStuck: boolean;
 }
 
 let mounted: Mounted | null = null;
@@ -248,7 +267,9 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   showCount(mounted);
   showAuthor(mounted);
-  if (anchor.previousElementSibling !== mounted.root) anchor.insertAdjacentElement('beforebegin', mounted.root);
+  mounted.anchor = anchor;
+  watchSticky(mounted);
+  place(mounted);
   const host = anchor.parentElement;
   if (mounted.host !== host) {
     mounted.host?.removeAttribute(ATTR_HOST);
@@ -259,6 +280,90 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (!document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.setAttribute(ATTR_ACTIVE, '');
 }
 
+function isStuck(element: Element): boolean {
+  // React's class is `is-stuck__<hash>`, the classic toolbar's `is-stuck`.
+  return [...element.classList].some((name) => name === 'is-stuck' || name.startsWith('is-stuck__'));
+}
+
+/**
+ * Whether the Files changed toolbar is stuck, from its box: a sticky element
+ * stands at its `top` once stuck and below it in its place. GitHub's own
+ * `is-stuck` class comes a frame after the toolbar has visibly stuck (its
+ * observer reports after paint), the first time noticeably, so the class
+ * alone left the toolbar showing without the group for a moment.
+ */
+function measureToolbarStuck(toolbar: Element): boolean {
+  const top = Number.parseFloat(getComputedStyle(toolbar).top);
+  return toolbar.getBoundingClientRect().top <= (Number.isFinite(top) ? top : 0) + 0.5;
+}
+
+/**
+ * Where the group rides while a sticky header shows: the Files changed
+ * toolbar just before GitHub's hidden review button, or the end of the
+ * compact pull request header's title row the other tabs show; null while neither is
+ * stuck, the group in view in the tab bar.
+ */
+function stickyPlace(state: Mounted): { readonly place: Place; readonly put: (root: HTMLElement) => void; readonly placed: (root: HTMLElement) => boolean } | null {
+  const control = document.querySelector<HTMLElement>(STICKY_REVIEW_CONTROL);
+  if (control !== null) {
+    if (!state.toolbarStuck) return null;
+    return { place: 'toolbar', put: (root) => control.insertAdjacentElement('beforebegin', root), placed: (root) => control.previousElementSibling === root };
+  }
+  const header = document.querySelector<HTMLElement>(STICKY_PR_HEADER);
+  if (header === null || !isStuck(header)) return null;
+  // Inside the title row, after the title (which gives way), so the row's centred width and padding hold it as the page's content edge.
+  const row = header.querySelector<HTMLElement>('[class*="TitleArea"]') ?? header;
+  return { place: 'header', put: (root) => row.append(root), placed: (root) => row.lastElementChild === root };
+}
+
+/**
+ * Follow the sticky headers' class, which GitHub flips as they stick and let
+ * go, so the group moves in the same task rather than at the next pass; the
+ * compact header shows on that very flip, so the move is never seen.
+ */
+function watchSticky(state: Mounted): void {
+  const toolbar = document.querySelector(STICKY_REVIEW_CONTROL)?.closest(STICKY_TOOLBAR) ?? null;
+  const header = document.querySelector(STICKY_PR_HEADER);
+  if (toolbar === state.toolbar && header === state.header) return;
+  const newToolbar = toolbar !== state.toolbar;
+  state.stickyWatch.disconnect();
+  state.toolbar = toolbar;
+  state.header = header;
+  for (const element of [toolbar, header]) if (element !== null) state.stickyWatch.observe(element, { attributes: true, attributeFilter: ['class'] });
+  // A page opened (or restored) scrolled down: read the new toolbar's box once, off the pass, which must not measure.
+  if (newToolbar) {
+    requestAnimationFrame(() => {
+      if (mounted === state) followToolbar(state);
+    });
+  }
+}
+
+/** Re-read the toolbar's box (scroll, or its class flipping) and move the group when that changes where it belongs. */
+function followToolbar(state: Mounted): void {
+  const toolbar = state.toolbar?.isConnected === true ? state.toolbar : null;
+  const stuck = toolbar !== null && measureToolbarStuck(toolbar);
+  if (stuck !== state.toolbarStuck) {
+    state.toolbarStuck = stuck;
+    place(state);
+  }
+}
+
+/** In a stuck header, so it is always to hand while reviewing; otherwise before the tab bar's counts. */
+function place(state: Mounted): void {
+  const sticky = stickyPlace(state);
+  if (sticky !== null) {
+    if (!sticky.placed(state.root)) sticky.put(state.root);
+  } else if (state.anchor !== null && state.anchor.previousElementSibling !== state.root) {
+    state.anchor.insertAdjacentElement('beforebegin', state.root);
+  }
+  const place = sticky?.place ?? null;
+  if (state.root.getAttribute(ATTR_PLACE) !== place) {
+    if (place === null) state.root.removeAttribute(ATTR_PLACE);
+    else state.root.setAttribute(ATTR_PLACE, place);
+    positionPanel();
+  }
+}
+
 export function removeQuickReview(): void {
   if (document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.removeAttribute(ATTR_ACTIVE);
   if (mounted === null) return;
@@ -266,6 +371,7 @@ export function removeQuickReview(): void {
   window.clearTimeout(mounted.submittedTimer);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
+  mounted.stickyWatch.disconnect();
   mounted.root.remove();
   mounted = null;
 }
@@ -318,15 +424,51 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const segments = { approve: segment('approve'), 'request changes': segment('request changes'), comment: segment('comment') };
   // Primer rounds the group's outer corners on `:first-child` / `:last-child`: the tooltips stand beside it, not between.
   const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
-  const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
+  const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, INSTANT_KEY)) ?? []);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
-  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys };
+  const stickyWatch = new MutationObserver(() => {
+    if (mounted !== state) return;
+    followToolbar(state);
+    place(state);
+  });
+  const state: Mounted = {
+    root,
+    segments,
+    group,
+    status,
+    host: null,
+    counter,
+    opener: null,
+    isAuthor: null,
+    pullPath,
+    context,
+    panel: null,
+    retarget: null,
+    sending: false,
+    submittedTimer: 0,
+    pending: null,
+    pendingFor: null,
+    keys,
+    anchor: null,
+    toolbar: null,
+    header: null,
+    stickyWatch,
+    toolbarStuck: false,
+  };
+  // Scroll events come before the frame is painted, so a toolbar that sticks on this scroll has the group in that frame.
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (mounted === state) followToolbar(state);
+    },
+    { passive: true, signal: keys.signal },
+  );
   followInstantKey(root, keys.signal, () => describeSegments(state));
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
-      if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
+      if (state.sending) return;
       // The instant key wins over the open box: the arrow and the tooltip promised a send. Words waiting in the box are
       // the exception: an empty send would leave them out (and a reload after it would drop them), so the box takes the verdict.
       const wanted = isInstantClick(event, click, MAC);
@@ -375,21 +517,21 @@ function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () =
 
 function describeSegments(state: Mounted): void {
   const held = state.root.hasAttribute(ATTR_INSTANT);
-  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, state.isAuthor === true, INSTANT_KEY, held));
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held));
 }
 
-/** What the author cannot do stays in the group, disabled, its tooltip GitHub's reason (re-read: the header may come late). */
+/**
+ * On their own pull request the author has only 💬: ✓ and ✗ leave the group
+ * (out of the DOM, not hidden, since Primer rounds the group's corners on
+ * `:first-child`/`:last-child`). Re-read each pass, the header may come late.
+ */
 function showAuthor(state: Mounted): void {
   const isAuthor = isAuthorViewing();
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
-  for (const event of SEGMENT_ORDER) {
-    const button = state.segments[event];
-    const closed = isAuthor && EVENT_INFO[event].authorNote !== null;
-    if (closed) button.setAttribute('aria-disabled', 'true');
-    else button.removeAttribute('aria-disabled');
-  }
-  describeSegments(state);
+  state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
+  // The header said "author" only after a box opened on ✓ or ✗: the box takes Comment, the one verdict left.
+  if (isAuthor && state.retarget !== null && state.opener !== null && !EVENT_INFO[state.opener].authorMay) state.retarget('comment');
 }
 
 function closePanel(restoreFocus = false): void {
@@ -412,14 +554,23 @@ function onOutsidePointer(event: PointerEvent): void {
   closePanel();
 }
 
-/** Under the group, its right edge on the group's, inside the viewport; in page coordinates, so it scrolls with the bar. */
+/**
+ * Under the group, its right edge on the group's, inside the viewport: in
+ * page coordinates under the tab bar, so it scrolls with the bar, and fixed
+ * under the stuck toolbar, which stays put as the page scrolls.
+ */
 function positionPanel(): void {
   if (mounted === null || mounted.panel === null || !mounted.root.isConnected) return;
+  const fixed = mounted.root.hasAttribute(ATTR_PLACE);
   const rect = mounted.root.getBoundingClientRect();
   const width = mounted.panel.offsetWidth;
   const left = Math.max(16, Math.min(rect.right - width, document.documentElement.clientWidth - width - 16));
-  mounted.panel.style.top = `${Math.round(rect.bottom + window.scrollY + 4)}px`;
-  mounted.panel.style.left = `${Math.round(left + window.scrollX)}px`;
+  mounted.panel.style.position = fixed ? 'fixed' : '';
+  mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
+  mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: ReviewEvent): void {
@@ -515,7 +666,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
 function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
-  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && EVENT_INFO[event].authorNote !== null ? 'comment' : event);
+  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
   draft.event = allowed(initial);
 
   const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
@@ -550,7 +701,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     discard.disabled = state.sending;
     if (shown !== null && shown.comments === state.pending && shown.count === pending && shown.open === pendingOpen) return;
     shown = { comments: state.pending, count: pending, open: pendingOpen };
-    renderPending(pendingSection, state.pending, pending, pendingOpen, () => {
+    renderPending(pendingSection, pullPath, state.pending, pending, pendingOpen, () => {
       pendingOpen = !pendingOpen;
       refresh();
     });
@@ -641,7 +792,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
  * GitHub's own count is ahead of the list (a comment added on Files changed
  * since the list was read).
  */
-function renderPending(section: HTMLElement, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
+function renderPending(section: HTMLElement, pullPath: string, comments: readonly PendingComment[] | null, count: number, open: boolean, onToggle: () => void): void {
   section.replaceChildren();
   section.hidden = count === 0;
   if (count === 0) return;
@@ -653,11 +804,12 @@ function renderPending(section: HTMLElement, comments: readonly PendingComment[]
   toggle.addEventListener('click', onToggle);
   section.append(toggle);
   if (!open || comments === null) return;
+  const tabIsChanges = location.pathname.startsWith(`${pullPath}/changes`) || document.querySelector(`a[href="${pullPath}/changes"]`) !== null;
   const list = createElement('ul', { class: 'geld-quick-review__pending-list' });
   for (const comment of comments) {
     const file = comment.path.split('/').pop() ?? comment.path;
     const where = comment.line === null ? file : `${file}:${comment.line}`;
-    const link = createElement('a', { class: 'geld-quick-review__pending-row', href: comment.href ?? '#', title: `${comment.path}${comment.line === null ? '' : `, line ${comment.line}`}` }, [
+    const link = createElement('a', { class: 'geld-quick-review__pending-row', href: comment.href === null ? '#' : linkOnFilesTab(comment.href, pullPath, tabIsChanges), title: `${comment.path}${comment.line === null ? '' : `, line ${comment.line}`}` }, [
       createElement('span', { class: 'geld-quick-review__pending-glyph' }, [svgFromString(ICON_COMMENT)]),
       createElement('span', { class: 'geld-quick-review__pending-text' }, inlineText(firstSentence(comment.body))),
       createElement('span', { class: 'geld-quick-review__pending-where' }, [where]),

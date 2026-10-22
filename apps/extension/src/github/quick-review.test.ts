@@ -32,17 +32,14 @@ describe('isInstantClick', () => {
 });
 
 describe('segmentHint', () => {
-  it('names the verdict and the shortcut, or GitHub’s reason it is closed to the author', () => {
-    expect(segmentHint('approve', false, '⌘')).toEqual(['Approve', '⌘ 1-click review']);
-    expect(segmentHint('request changes', false, 'Ctrl')).toEqual(['Request changes', 'Ctrl 1-click review']);
-    expect(segmentHint('comment', false, '⌘')).toEqual(['Comment']);
-    expect(segmentHint('approve', true, '⌘')).toEqual(["Pull request authors can't approve their own pull requests."]);
-    expect(segmentHint('comment', true, '⌘')).toEqual(['Comment']);
+  it('names the verdict and the shortcut, or what a click does while the key is held', () => {
+    expect(segmentHint('approve', '⌘')).toEqual(['Approve', '⌘ 1-click review']);
+    expect(segmentHint('request changes', 'Ctrl')).toEqual(['Request changes', 'Ctrl 1-click review']);
+    expect(segmentHint('comment', '⌘')).toEqual(['Comment']);
     // While the key is held a click sends at once, and the tooltip says that alone.
-    expect(segmentHint('approve', false, '⌘', true)).toEqual(['Approve without comments']);
-    expect(segmentHint('request changes', false, 'Ctrl', true)).toEqual(['Request changes without comments']);
-    expect(segmentHint('comment', false, '⌘', true)).toEqual(['Comment']);
-    expect(segmentHint('approve', true, '⌘', true)).toEqual(["Pull request authors can't approve their own pull requests."]);
+    expect(segmentHint('approve', '⌘', true)).toEqual(['Approve without comments']);
+    expect(segmentHint('request changes', 'Ctrl', true)).toEqual(['Request changes without comments']);
+    expect(segmentHint('comment', '⌘', true)).toEqual(['Comment']);
   });
 });
 
@@ -87,6 +84,55 @@ describe('the tab bar button', () => {
     if (!(element instanceof HTMLElement)) throw new Error('fixture');
     return element;
   };
+
+  it('rides in the Files changed toolbar the moment it sticks, where GitHub’s own button would be', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section class="stickyHeader__x toolbar__y" style="top: 0px"><div class="row"><button class="ReviewMenuButton__z">Submit review</button></div></section>');
+    const toolbar = document.querySelector('section');
+    if (toolbar === null) throw new Error('fixture');
+    let top = 262;
+    toolbar.getBoundingClientRect = () => new DOMRect(0, top, 1000, 48);
+    const page = { kind: 'pull-files' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const group = document.querySelector('.geld-quick-review');
+    const own = document.querySelector('.ReviewMenuButton__z');
+    expect(counts().previousElementSibling).toBe(group);
+    // The scroll that sticks it moves the group in the same task, before GitHub's class (a frame later) says so.
+    top = 0;
+    window.dispatchEvent(new Event('scroll'));
+    expect(own?.previousElementSibling).toBe(group);
+    expect(group?.getAttribute('data-geld-place')).toBe('toolbar');
+    // A pass while stuck keeps it there, without measuring.
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(own?.previousElementSibling).toBe(group);
+    // Its box is fixed under the toolbar, and keeps to the room left in the window so its buttons stay in view.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]')?.click();
+    const box = document.querySelector<HTMLElement>('.geld-quick-review__panel');
+    expect(box?.style.position).toBe('fixed');
+    expect(box?.style.maxHeight).toMatch(/^\d+px$/);
+    box?.querySelector<HTMLButtonElement>('.btn-invisible:not(.geld-quick-review__discard)')?.click();
+    top = 262;
+    window.dispatchEvent(new Event('scroll'));
+    expect(counts().previousElementSibling).toBe(group);
+    expect(group?.hasAttribute('data-geld-place')).toBe(false);
+  });
+
+  it('rides at the end of the compact header the other tabs show once it sticks', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<div class="PageHeader stickyHeader__x prHeader__y"><div class="PageHeader-TitleArea"><h2>Title</h2></div></div>');
+    const header = document.querySelector('.prHeader__y');
+    const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    const group = document.querySelector('.geld-quick-review');
+    expect(counts().previousElementSibling).toBe(group);
+    // GitHub shows the header on the same class flip that the group follows, so it is there as the header appears.
+    header?.classList.add('is-stuck__w');
+    await Promise.resolve();
+    expect(header?.querySelector('.PageHeader-TitleArea')?.lastElementChild).toBe(group);
+    expect(group?.getAttribute('data-geld-place')).toBe('header');
+    header?.classList.remove('is-stuck__w');
+    await Promise.resolve();
+    expect(counts().previousElementSibling).toBe(group);
+  });
 
   it('sits left of the line counts on every pull request tab, once', () => {
     const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
@@ -266,26 +312,22 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('');
   });
 
-  it('shows the author ✓ and ✗ disabled, with GitHub’s reason, and does nothing on them', async () => {
-    const sent: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      sent.push(String(input));
-      return new Response('{}', { status: 404 });
-    }));
+  it('leaves the author 💬 alone, since GitHub refuses their own approval and change request', () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
     mount();
-    expect(segment('approve').getAttribute('aria-disabled')).toBe('true');
-    expect(segment('request changes').getAttribute('aria-disabled')).toBe('true');
-    expect(segment('comment').hasAttribute('aria-disabled')).toBe(false);
-    expect(segment('approve').title).toBe("Pull request authors can't approve their own pull requests.");
-    expect(segment('request changes').title).toBe("Pull request authors can't request changes on their own pull requests.");
-    segment('approve').click();
-    segment('request changes').dispatchEvent(new MouseEvent('click', instant));
-    await settle();
-    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
-    expect(sent.some((url) => url.endsWith('/submit_review'))).toBe(false);
-    // The comment box opens for a comment only.
+    const group = document.querySelector('.geld-quick-review__group');
+    expect([...(group?.children ?? [])].map((child) => child.getAttribute('data-event'))).toEqual(['comment']);
     segment('comment').click();
+    expect(chosen()).toBe('Comment');
+  });
+
+  it('turns an open ✓ box into a comment when the page then says the reader is the author', () => {
+    document.head.innerHTML = '<meta name="user-login" content="alice">';
+    mount();
+    segment('approve').click();
+    expect(chosen()).toBe('Approve');
+    document.head.innerHTML = '<meta name="user-login" content="bob">';
+    mount();
     expect(chosen()).toBe('Comment');
   });
 
