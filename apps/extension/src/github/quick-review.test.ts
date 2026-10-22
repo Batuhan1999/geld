@@ -461,6 +461,13 @@ describe('the tab bar button', () => {
     expect(segment('approve').hasAttribute('data-current')).toBe(true);
     expect(segment('approve').getAttribute('aria-label')).toBe('Approve (your current review)');
     expect(segment('request changes').hasAttribute('data-current')).toBe(false);
+    // Another pull request in the same tab whose merge box cannot be read: no verdict stands pressed for it.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(false);
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
   });
 
   it('reads the merge box again when the header’s state changes in place, as a draft marked ready does', async () => {
