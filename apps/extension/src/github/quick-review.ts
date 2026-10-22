@@ -121,6 +121,9 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   for (const group of groups) {
     const host = group.host;
     if (!host.isConnected || host.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    // GitHub hides the header's counts on narrow screens: placed there, the button would be hidden with them while
+    // GitHub's own was hidden for it, leaving no way to review. A style read, not a layout one.
+    if (!host.checkVisibility()) continue;
     if (host.id === 'diffstat' || host.closest('[data-component="PageHeader"], .gh-header, #partial-discussion-header') !== null) return host;
   }
   return null;
@@ -171,6 +174,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pullPath !== pullPath) {
     closePanel();
     mounted.pullPath = pullPath;
+    // The last pull request's pending comments are not this one's: none until this one's are read.
+    mounted.pending = null;
   }
   mounted.context = context;
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
