@@ -837,6 +837,75 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-danger);
 }
 
+/*
+ * Merge and close, their own group right of the review group, tinting the same surface on hover with GitHub's state
+ * colours, which accessible themes redefine: merged (`done`, purple by default) and closed (red by default).
+ */
+.geld-quick-review__segment.btn[data-action='merge']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+}
+
+.geld-quick-review__segment.btn[data-action='merge']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-done);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-closed);
+}
+
+.geld-quick-review__actions-group[hidden] {
+  display: none;
+}
+
+/* Only an admin's bypass would merge it: a lock on the button's corner, as the pending count sits on the review group's. */
+.geld-quick-review__lock {
+  position: absolute;
+  z-index: 2;
+  top: -7px;
+  right: -7px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bgColor-neutral-emphasis, #59636e);
+  box-shadow: 0 0 0 2px var(--bgColor-default, #ffffff);
+  color: var(--fgColor-onEmphasis, #ffffff);
+  pointer-events: none;
+}
+
+.geld-quick-review__segment[data-bypass] .geld-quick-review__lock {
+  display: inline-flex;
+}
+
+/* Over Primer's `.btn .octicon` muted colour. */
+.geld-quick-review__segment .geld-quick-review__lock > svg {
+  width: 10px;
+  height: 10px;
+  color: inherit;
+}
+
+/* 💬 alone in the whole control: "Review" before its icon, so it does not read as a stray button. */
+.geld-quick-review__label {
+  display: none;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.geld-quick-review[data-alone] .geld-quick-review__label {
+  display: inline;
+}
+
+.geld-quick-review[data-alone] .geld-quick-review__segment[data-event='comment'] {
+  gap: 6px;
+  padding: 0 8px;
+}
+
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
 .geld-quick-review__glyph--instant,
 .geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
@@ -988,6 +1057,64 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__count[hidden] {
   display: none;
+}
+
+/* The merge box: the method, the commit GitHub would write (editable), and GitHub's bypass checkbox when that is the only way. */
+.geld-quick-review__method[hidden],
+.geld-quick-review__commit[hidden],
+.geld-quick-review__bypass[hidden] {
+  display: none;
+}
+
+.geld-quick-review__method {
+  align-self: flex-start;
+}
+
+.geld-quick-review__commit-body {
+  font-size: 12px;
+}
+
+.geld-quick-review__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.geld-quick-review__bypass {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.geld-quick-review__bypass > input {
+  margin-top: 2px;
+}
+
+/* The close box is only its buttons (and GitHub's reason after a refusal): as wide as they are. */
+.Overlay.geld-quick-review__panel.geld-quick-review__panel--compact {
+  width: auto;
+  max-width: min(424px, calc(100vw - 32px));
+}
+
+.geld-quick-review__panel--compact .Overlay-body:has(> .geld-quick-review__error[hidden]:only-child) {
+  display: none;
+}
+
+.geld-quick-review__panel--compact .Overlay-footer.geld-quick-review__footer {
+  padding-top: 12px;
+}
+
+/* GitHub's Close pull request: a default button with the closed glyph in its colour. */
+.geld-quick-review__footer .btn.geld-quick-review__close-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.geld-quick-review__close-submit > svg {
+  color: var(--fgColor-closed, #d1242f);
 }
 
 /* "Pending comments N", as GitHub's dialog lists them under the choices. */
