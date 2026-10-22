@@ -13,7 +13,7 @@ import { inlineText } from './review/inline-text';
 import type { SidebarReviewer } from './review/crawler';
 import type { ReviewTally } from './review-tally';
 import type { StatusOption } from './status-pill';
-import { rememberStatusHint, removeStatusPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
+import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
 import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
@@ -604,7 +604,10 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     },
     { passive: true, signal: keys.signal },
   );
-  followInstantKey(root, keys.signal, () => describeSegments(state));
+  followInstantKey(root, keys.signal, () => {
+    describeSegments(state);
+    showInstantMerge(state);
+  });
   armSnapshot(state);
   holdUntilReady(state);
   // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for a review segment, not before.
@@ -676,6 +679,14 @@ function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () =
   window.addEventListener('keyup', read, { capture: true, signal });
   root.addEventListener('pointermove', read, { signal });
   window.addEventListener('blur', () => held(false), { signal });
+  // The pills stand in the header, outside the root: the pointer over one reads the key too.
+  document.addEventListener(
+    'pointermove',
+    (event) => {
+      if (event.target instanceof Element && event.target.closest('button.geld-status-pill') !== null) read(event);
+    },
+    { passive: true, signal },
+  );
 }
 
 function describeSegments(state: Mounted): void {
@@ -1008,12 +1019,71 @@ function showStatus(state: Mounted): void {
   if (options !== null && repo !== null && actions !== null && statusOf(actions.box) !== 'merged') rememberStatusHint(repo, options.length > 0);
   const on = options !== null ? options.length > 0 : repo !== null && statusHint(repo) === true && !/merged/i.test(pullRequestStateWords());
   state.pills = syncStatusPills(on, openFromPill);
+  showInstantMerge(state);
   if (state.statusMenu !== null && (state.statusOpener === null || !state.pills.includes(state.statusOpener))) closeStatusMenu(state);
 }
 
 /** Every pill's click: a pill may be put in place before the controls are mounted (`reassertStatusPills`). */
-function openFromPill(pill: HTMLButtonElement): void {
-  if (mounted !== null) toggleStatusMenu(mounted, pill);
+function openFromPill(pill: HTMLButtonElement, click: MouseEvent): void {
+  if (mounted === null) return;
+  if (instantMergeReady(mounted) && (MAC ? click.metaKey : click.ctrlKey)) void instantMerge(mounted, pill);
+  else toggleStatusMenu(mounted, pill);
+}
+
+/**
+ * Whether a held ⌘ (Ctrl) makes the pill a 1-click merge: an approved pull
+ * request (an approval standing, no request for changes) that GitHub would
+ * merge now with its default method. A merge only past the rules (an
+ * admin's bypass) never goes in one click: its box asks for GitHub's checkbox.
+ */
+function instantMergeReady(state: Mounted): boolean {
+  const actions = state.mergeActions;
+  // A stacked pull request merges the stack below it too: that wants the merge box's sentence, not a 1-click merge.
+  if (actions === null || actions.offer !== 'merge' || actions.box.stacked || state.sending) return false;
+  const verdicts = actions.box.verdicts;
+  return verdicts.some((verdict) => verdict.state === 'APPROVED') && !verdicts.some((verdict) => verdict.state === 'CHANGES_REQUESTED');
+}
+
+/** While the key is held over an approved pull request, the pill reads "Merge" in GitHub's merge colour, outlined. */
+function showInstantMerge(state: Mounted): void {
+  const on = state.root.hasAttribute(ATTR_INSTANT) && instantMergeReady(state);
+  const method = state.mergeActions?.box.methods[0] ?? 'SQUASH';
+  for (const pill of state.pills) {
+    if (pill.hasAttribute(ATTR_INSTANT_MERGE) === on) continue;
+    pill.toggleAttribute(ATTR_INSTANT_MERGE, on);
+    if (on) pill.setAttribute('aria-label', `Merge now: ${METHOD_LABEL[method]}`);
+    else pill.removeAttribute('aria-label');
+  }
+}
+
+/**
+ * Merge at once with GitHub's default method and the commit it would write,
+ * as the merge box would send it; on success the pill turns into GitHub's
+ * merged pill before the page reloads, and a refusal opens the merge box with
+ * GitHub's reason.
+ */
+async function instantMerge(state: Mounted, pill: HTMLButtonElement): Promise<void> {
+  closeStatusMenu(state);
+  closePanel();
+  state.statusOpener = pill;
+  const pullPath = state.pullPath;
+  // What was read may be a minute old: an approval dismissed or changes requested since must not merge in one click.
+  for (const each of state.pills) each.setAttribute('aria-busy', 'true');
+  const fresh = await readMergeActions(pullPath);
+  for (const each of state.pills) each.removeAttribute('aria-busy');
+  if (mounted !== state || state.pullPath !== pullPath) return;
+  if (fresh !== null) state.mergeActions = fresh;
+  showStatus(state);
+  if (fresh === null || !instantMergeReady(state)) {
+    // No longer an approved pull request GitHub would merge (or GitHub could not say): the reader chooses from the menu.
+    if (pill.isConnected) openStatusMenu(state, pill);
+    return;
+  }
+  const box = fresh.box;
+  const method = box.methods[0] ?? 'SQUASH';
+  const request = mergeRequest(state.pullPath, { method, commitTitle: box.commitTitle, commitMessage: box.commitMessage, authorEmail: box.authorEmail, bypass: false, stacked: box.stacked }, fetchNonce());
+  const failed = await sendAction(state, 'merge', request, () => showMergedPills(state.pills));
+  if (failed !== null && mounted === state) openMergeBox(state, failed);
 }
 
 /**
@@ -1651,7 +1721,7 @@ function boxFooter(left: readonly HTMLElement[], cancel: HTMLButtonElement, subm
 const ACTION_STATUS: { readonly [K in StatusAction]: string } = { merge: 'Merging…', close: 'Closing…', ready: 'Marking ready…', draft: 'Converting to draft…', reopen: 'Reopening…' };
 
 /** Send a merge, close or ready for review; on success the page reloads, since every part of it (header, timeline, tabs) changes with the state. */
-async function sendAction(state: Mounted, kind: StatusAction, request: { readonly url: string; readonly init: RequestInit }): Promise<string | null> {
+async function sendAction(state: Mounted, kind: StatusAction, request: { readonly url: string; readonly init: RequestInit }, done: () => void = () => undefined): Promise<string | null> {
   state.sending = true;
   state.root.setAttribute('aria-busy', 'true');
   window.clearTimeout(state.submittedTimer);
@@ -1662,6 +1732,7 @@ async function sendAction(state: Mounted, kind: StatusAction, request: { readonl
     const payload: unknown = await response.json().catch(() => null);
     const failed = typeof payload === 'object' && payload !== null && Reflect.get(payload, 'status') === 'failed';
     if (!response.ok || failed) return actionErrorText(kind, response.status, payload);
+    done();
     window.location.reload();
     return null;
   } catch {
@@ -1682,7 +1753,7 @@ async function sendAction(state: Mounted, kind: StatusAction, request: { readonl
  * take it, GitHub's own checkbox, which the confirmation waits on. Read
  * afresh as it opens, since checks and reviews land meanwhile.
  */
-function openMergeBox(state: Mounted): void {
+function openMergeBox(state: Mounted, failure: string | null = null): void {
   const pullPath = state.pullPath;
   const known = state.mergeActions;
   if (known === null || known.offer === null) return;
@@ -1708,6 +1779,10 @@ function openMergeBox(state: Mounted): void {
   const stackNote = createElement('p', { class: 'geld-quick-review__stack-note color-fg-muted' }, ['Merges every pull request in the stack up to and including this one.']);
   stackNote.hidden = !known.box.stacked;
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
+  if (failure !== null) {
+    error.textContent = failure;
+    error.hidden = false;
+  }
   const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-sm geld-quick-review__submit' });
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-label': 'Merge pull request' }, [
