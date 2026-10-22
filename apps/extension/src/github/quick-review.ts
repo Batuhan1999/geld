@@ -277,6 +277,8 @@ interface Mounted {
   retarget: ((event: ReviewEvent) => void) | null;
   /** The open box's own refresh: a send finishing for another box (one closed meanwhile) re-enables this one. */
   panelRefresh: (() => void) | null;
+  /** What the open box set up outside itself (the kind menu's window listeners), undone when the box closes. */
+  panelCleanup: (() => void) | null;
   /** A review on its way: the controls and the box wait for it. */
   sending: boolean;
   submittedTimer: number;
@@ -559,6 +561,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     panel: null,
     retarget: null,
     panelRefresh: null,
+    panelCleanup: null,
     sending: false,
     submittedTimer: 0,
     pending: null,
@@ -992,6 +995,8 @@ function buttonFor(state: Mounted, opener: Opener): HTMLButtonElement {
 
 function closePanel(restoreFocus = false): void {
   if (mounted === null || mounted.panel === null) return;
+  mounted.panelCleanup?.();
+  mounted.panelCleanup = null;
   mounted.panel.remove();
   mounted.panel = null;
   mounted.retarget = null;
@@ -1373,6 +1378,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
 
   showPanel(state, panel, initial);
   state.panelRefresh = refresh;
+  state.panelCleanup = closeKindMenu;
   state.retarget = (event) => {
     draft.event = allowed(event);
     if (state.opener !== null) buttonFor(state, state.opener).setAttribute('aria-expanded', 'false');
