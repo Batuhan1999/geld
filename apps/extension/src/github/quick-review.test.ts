@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { HeaderStatGroup } from './header-stats';
+import { resetStatusHints } from './status-pill';
 import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
 
 const SHA = 'a'.repeat(40);
@@ -329,37 +330,54 @@ describe('the tab bar button', () => {
     expect(chosen()).toBe('Comment');
   });
 
-  const mergeBox = (state: string, canClose: boolean, extra: { readonly draft?: boolean; readonly reviews?: readonly unknown[] } = {}): string =>
+  const mergeBox = (state: string, canClose: boolean, extra: { readonly draft?: boolean; readonly reviews?: readonly unknown[]; readonly convert?: boolean; readonly pull?: string } = {}): string =>
     JSON.stringify({
-      pullRequest: { state: 'OPEN', isDraft: extra.draft ?? false, viewerCanMarkReadyForReview: extra.draft ?? false, latestOpinionatedReviews: extra.reviews ?? [], viewerCanClose: canClose, viewerCanAdminBypassMergeRequirements: false, viewerMergeActions: [{ name: 'DIRECT_MERGE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true }] }] },
+      pullRequest: { state: extra.pull ?? 'OPEN', isDraft: extra.draft ?? false, viewerCanMarkReadyForReview: extra.draft ?? false, viewerCanConvertToDraft: extra.convert ?? false, latestOpinionatedReviews: extra.reviews ?? [], viewerCanClose: canClose, viewerCanAdminBypassMergeRequirements: false, viewerMergeActions: [{ name: 'DIRECT_MERGE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true }] }] },
       mergeRequirements: { state, conditions: [], commitMessageHeadline: 'Title (#7)', commitMessageBody: '' },
     });
-
-  it('offers merge and close, in their own group, only where the merge box says the reader may', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
-    mount();
-    for (let i = 0; i < 4; i += 1) await settle();
-    const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
-    expect(actions?.hidden).toBe(false);
-    // Close first, merge last, so a bypass's lock stands on the group's corner.
-    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'merge']);
-    // The merge box opens on GitHub's commit for its default method.
-    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
-    expect(document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title')?.value).toBe('Title (#7)');
-    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
-    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(true);
-  });
+  /** GitHub's status label in the header, as React's StateLabel renders it. */
+  const withLabel = (words: string, status: string): HTMLElement => {
+    document.querySelector('[data-component="PageHeader"]')?.insertAdjacentHTML('afterbegin', `<span class="prc-StateLabel-x" data-component="StateLabel" data-size="medium" data-status="${status}"><svg></svg>${words}</span>`);
+    const label = document.querySelector<HTMLElement>('[data-component="StateLabel"]');
+    if (label === null) throw new Error('fixture');
+    return label;
+  };
+  const pill = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('button[data-geld-status-pill]');
+  const menuRows = (): string[][] =>
+    [...document.querySelectorAll('.geld-quick-review__status-menu .geld-quick-review__menu-item')].map((item) => [
+      item.getAttribute('data-status') ?? '',
+      item.querySelector('.geld-quick-review__menu-note')?.textContent ?? '',
+      item.getAttribute('aria-checked') ?? '',
+    ]);
+  const stubBox = (box: () => string, sent: string[] = []): string[] => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/page_data/merge_box')) return new Response(box(), { status: 200 });
+        if (init?.method === 'POST') {
+          sent.push(url.replace(/^.*\/page_data\//, ''));
+          return new Response(url.includes('convert_to_draft') ? '{"error":"Not allowed"}' : '{}', { status: url.includes('convert_to_draft') ? 422 : 200 });
+        }
+        return new Response('{}', { status: 404 });
+      }),
+    );
+    return sent;
+  };
 
   it('says a stacked pull request merges the stack below it too', async () => {
-    const stacked = (): string => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => {
       const payload = JSON.parse(mergeBox('MERGEABLE', true));
       payload.mergeRequirements.conditions = [{ type: 'STACK', result: 'PASSED', isStacked: true }];
       return JSON.stringify(payload);
-    };
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(stacked(), { status: 200 }) : new Response('{}', { status: 404 }))));
+    });
+    withLabel('Open', 'pullOpened');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
-    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
     expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(false);
   });
 
@@ -386,12 +404,16 @@ describe('the tab bar button', () => {
         return new Response(JSON.stringify(payload), { status: 200 });
       }),
     );
+    window.localStorage.clear();
+    resetStatusHints();
+    withLabel('Open', 'pullOpened');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
     // Both reads the box makes from here on are slow.
     slow.add('SQUASH');
     slow.add('MERGE');
-    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
     const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
     const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
     const submit = document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .geld-quick-review__submit');
@@ -431,10 +453,12 @@ describe('the tab bar button', () => {
         return new Response(JSON.stringify(payload), { status: 200 });
       }),
     );
+    withLabel('Open', 'pullOpened');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
     failMerge = true;
-    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
     for (let i = 0; i < 3; i += 1) await settle();
     const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
     const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
@@ -447,21 +471,68 @@ describe('the tab bar button', () => {
     expect(title.value).toBe('');
   });
 
-  it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) =>
-        String(input).includes('/page_data/merge_box') ? new Response(mergeBox('UNMERGEABLE', true, { draft: true, reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }), { status: 200 }) : new Response('{}', { status: 404 }),
-      ),
-    );
+  it('turns the header’s status pill into a menu of the statuses the reader may switch to, closed last', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('MERGEABLE', true, { convert: true }));
+    const label = withLabel('Open', 'pullOpened');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
-    const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
-    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'ready']);
+    // GitHub's label stays, hidden; Geld's pill stands beside it in the label's own classes and status, with a caret.
+    expect(label.hasAttribute('data-geld-status-hidden')).toBe(true);
+    expect(label.nextElementSibling).toBe(pill());
+    expect(pill()?.classList.contains('prc-StateLabel-x')).toBe(true);
+    expect(pill()?.getAttribute('data-status')).toBe('pullOpened');
+    expect(pill()?.textContent).toBe('Open');
+    expect(pill()?.querySelector('.geld-status-pill__caret')).not.toBeNull();
+    expect(document.querySelector('.geld-quick-review__actions-group')).toBeNull();
+    pill()?.click();
+    expect(menuRows()).toEqual([
+      ['open', 'Current status', 'true'],
+      ['draft', 'Convert to draft', 'false'],
+      ['merged', 'Squash and merge', 'false'],
+      ['closed', 'Close pull request', 'false'],
+    ]);
+    // Merged opens the merge box on GitHub's commit for its default method, under the pill.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
+    expect(document.querySelector('.geld-quick-review__status-menu')).toBeNull();
+    expect(document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title')?.value).toBe('Title (#7)');
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
+    // Closing asks first.
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="closed"]')?.click();
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__confirm-submit')?.textContent).toBe('Close pull request');
+  });
+
+  it('shows Open, not “Ready for review”, on a draft, and marks it ready at once; a refusal opens the box with GitHub’s reason', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const sent = stubBox(() => mergeBox('UNMERGEABLE', true, { draft: true, reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }));
+    withLabel('Draft', 'draft');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
     expect(segment('approve').hasAttribute('data-current')).toBe(true);
     expect(segment('approve').getAttribute('aria-label')).toBe('Approve (your current review)');
-    expect(segment('request changes').hasAttribute('data-current')).toBe(false);
-    // Another pull request in the same tab whose merge box cannot be read: no verdict stands pressed for it.
+    pill()?.click();
+    expect(menuRows()).toEqual([
+      ['open', 'Ready for review', 'false'],
+      ['draft', 'Current status', 'true'],
+      ['closed', 'Close pull request', 'false'],
+    ]);
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload, pathname: window.location.pathname, hash: '', search: '' });
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="open"]')?.click();
+    await settle();
+    expect(sent).toEqual(['mark_ready_for_review']);
+  });
+
+  it('unpresses the last pull request’s verdict when the controls move to another whose merge box cannot be read', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('MERGEABLE', true, { reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
     window.history.replaceState(null, '', '/acme/widgets/pull/8');
     applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
@@ -470,7 +541,92 @@ describe('the tab bar button', () => {
     window.history.replaceState(null, '', '/acme/widgets/pull/7');
   });
 
+  it('reopens a closed pull request, and leaves a merged one’s pill as GitHub drew it', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const sent = stubBox(() => mergeBox('UNMERGEABLE', true, { pull: 'CLOSED' }));
+    withLabel('Closed', 'pullClosed');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    pill()?.click();
+    expect(menuRows()).toEqual([
+      ['open', 'Reopen pull request', 'false'],
+      ['closed', 'Current status', 'true'],
+    ]);
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="open"]')?.click();
+    await settle();
+    expect(sent).toEqual(['reopen_pull_request']);
+    removeQuickReview();
+    expect(pill()).toBeNull();
+    expect(document.querySelector('[data-component="StateLabel"]')?.hasAttribute('data-geld-status-hidden')).toBe(false);
+  });
+
+  it('keeps GitHub’s own pill where there is nothing to switch to, a merged pull request', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('UNMERGEABLE', false, { pull: 'MERGED' }));
+    const merged = withLabel('Merged', 'pullMerged');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(pill()).toBeNull();
+    expect(merged.hasAttribute('data-geld-status-hidden')).toBe(false);
+    // Nothing is learnt about the reader's rights in this repository from a merged pull request.
+    expect(window.localStorage.getItem('geld:status-menu')).toBeNull();
+  });
+
+  it('opens GitHub’s reason when converting to a draft is refused', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const sent = stubBox(() => mergeBox('BLOCKED', false, { convert: true }));
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    pill()?.click();
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'draft']);
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="draft"]')?.click();
+    await settle();
+    await settle();
+    expect(sent).toEqual(['convert_to_draft']);
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__error')?.textContent).toBe('GitHub could not convert the pull request to a draft: Not allowed');
+  });
+
+  it('keeps the status pill working where the review group stands aside, and takes it away when switched off', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('MERGEABLE', true));
+    withLabel('Open', 'pullOpened');
+    // Narrow: GitHub hides the counts, so the review group is not placed and GitHub's own button shows.
+    counts().style.display = 'none';
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(document.documentElement.hasAttribute('data-geld-quick-review')).toBe(false);
+    pill()?.click();
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
+    // Focus leaving the menu (Tab) closes it.
+    document.querySelector('.geld-quick-review__status-menu')?.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body }));
+    expect(document.querySelector('.geld-quick-review__status-menu')).toBeNull();
+    applyQuickReview(false, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(pill()).toBeNull();
+    expect(document.querySelector('[data-component="StateLabel"]')?.hasAttribute('data-geld-status-hidden')).toBe(false);
+  });
+
+  it('swaps the pill from the first paint where the reader could change the status last time in this repository', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    window.localStorage.setItem('geld:status-menu', JSON.stringify({ 'acme/widgets': true }));
+    stubBox(() => mergeBox('MERGEABLE', true));
+    withLabel('Open', 'pullOpened');
+    mount();
+    // Before the merge box answers.
+    expect(pill()).not.toBeNull();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(pill()).not.toBeNull();
+  });
+
   it('reads the merge box again when the header’s state changes in place, as a draft marked ready does', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
     let draft = true;
     let reads = 0;
     vi.stubGlobal(
@@ -481,23 +637,26 @@ describe('the tab bar button', () => {
         return new Response(mergeBox(draft ? 'UNMERGEABLE' : 'MERGEABLE', true, { draft }), { status: 200 });
       }),
     );
-    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
-    const label = document.querySelector('[data-component="StateLabel"]');
-    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    const label = withLabel('Draft', 'draft');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(actionsNow()).toEqual(['close', 'ready']);
+    pill()?.click();
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'draft', 'closed']);
+    pill()?.click();
     const afterLoad = reads;
     // A pass with nothing changed reads nothing.
     mount();
     expect(reads).toBe(afterLoad);
     // GitHub's live update: the pull request is ready for review, and the label says so.
     draft = false;
-    label?.setAttribute('title', 'Status: Open');
+    label.setAttribute('data-status', 'pullOpened');
+    label.lastChild?.replaceWith('Open');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
     expect(reads).toBeGreaterThan(afterLoad);
-    expect(actionsNow()).toEqual(['close', 'merge']);
+    expect(pill()?.textContent).toBe('Open');
+    pill()?.click();
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
   });
 
   it('keeps the newest reading when an older read of the merge box answers last', async () => {
@@ -517,20 +676,27 @@ describe('the tab bar button', () => {
         return answer;
       }),
     );
-    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
-    const label = document.querySelector('[data-component="StateLabel"]');
-    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    window.localStorage.clear();
+    resetStatusHints();
+    const label = withLabel('Draft', 'draft');
+    const statuses = (): string[] => {
+      pill()?.click();
+      const rows = menuRows().map((row) => row[0] ?? '');
+      pill()?.click();
+      return rows;
+    };
     mount();
     await settle();
     draft = false;
-    label?.setAttribute('title', 'Status: Open');
+    label.setAttribute('data-status', 'pullOpened');
+    label.lastChild?.replaceWith('Open');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(actionsNow()).toEqual(['close', 'merge']);
+    expect(statuses()).toEqual(['open', 'merged', 'closed']);
     if (gate.release === null) throw new Error('the first read was not held');
     gate.release();
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(actionsNow()).toEqual(['close', 'merge']);
+    expect(statuses()).toEqual(['open', 'merged', 'closed']);
   });
 
   it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
@@ -769,14 +935,13 @@ describe('the tab bar button', () => {
     expect(JSON.parse(String(request.init.body))).toEqual({ text: 'Hello' });
   });
 
-  it('draws the control once what the reader may do is read, so close and merge never push it aside', async () => {
+  it('draws the control once the reviews are read, so the tally never pushes it aside', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
     mount();
     const root = document.querySelector('.geld-quick-review');
     expect(root?.hasAttribute('data-loading')).toBe(true);
     for (let i = 0; i < 4; i += 1) await settle();
     expect(root?.hasAttribute('data-loading')).toBe(false);
-    expect(document.querySelector<HTMLElement>('.geld-quick-review__actions-group')?.hidden).toBe(false);
   });
 
   it('links the tally to the reviews and shows who reviewed on it, each a link to their review', async () => {
