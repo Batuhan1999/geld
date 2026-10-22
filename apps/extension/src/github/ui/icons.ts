@@ -184,6 +184,24 @@ export const ICON_X_CIRCLE_FILL = octicon(
   'octicon-x-circle-fill',
 );
 
+export const ICON_TRASH = octicon(
+  '<path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z"></path>',
+  'octicon-trash',
+);
+
+/**
+ * Octicons has no "send at once" mark: the glyph exactly where the plain one stands (so the swap moves nothing), and an
+ * arrow at the octicons' 1.5 stroke tucked into its free bottom-right corner, overhanging the 16px box where it must.
+ */
+const sendArrow = (dx: number, dy: number): string =>
+  `<path transform="translate(${dx} ${dy})" d="M11.97 9.97a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06l.97-.97H9.75a.75.75 0 0 1 0-1.5h3.19l-.97-.97a.75.75 0 0 1 0-1.06Z"></path>`;
+
+/** ✓ that sends at once. */
+export const ICON_CHECK_SEND = octicon(`<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path>${sendArrow(0.75, 0.75)}`, 'octicon-check');
+
+/** ✗ that sends at once: the cross's lower arm reaches the corner, so the arrow sits further out. */
+export const ICON_X_SEND = octicon(`<path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path>${sendArrow(1.5, 2)}`, 'octicon-x');
+
 export const ICON_X = octicon(
   '<path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path>',
   'octicon-x',

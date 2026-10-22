@@ -6,16 +6,19 @@ import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
-import { ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRIANGLE_DOWN, ICON_X } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
- * "Submit review" in the pull request's tab bar, left of the line counts, on
- * every tab. GitHub's own button exists only on the Files changed tab and is
- * React's, so this is Geld's: the same 28px primary button, a popover with
- * GitHub's wording, and the request GitHub's dialog sends (`PUT
- * page_data/submit_review`, verified Oct 2026), which needs nothing from
- * that tab. While it is mounted GitHub's button is hidden, so the action
- * shows once.
+ * The review controls in the pull request's tab bar, left of the line
+ * counts, on every tab: one button group, [✓ | ✗ | 💬], Approve, Request
+ * changes and Comment. A click opens the comment box with that verdict
+ * chosen, so the box is also the confirmation; ⌘-click (Ctrl-click off a
+ * Mac) on ✓ or ✗ sends it at once without a comment, while 💬 always opens
+ * the box, being there for the words. GitHub's own Submit review exists
+ * only on the Files changed tab and is React's, so this is Geld's, and it
+ * sends the request GitHub's dialog sends (`PUT page_data/submit_review`,
+ * verified Oct 2026), which needs nothing from that tab. While it is
+ * mounted GitHub's button is hidden, so the action shows once.
  */
 
 export type ReviewEvent = 'comment' | 'approve' | 'request changes';
@@ -34,24 +37,76 @@ export interface QuickReviewContext {
   readonly headSha: () => string | null;
 }
 
-const BUTTON_CLASS = 'geld-quick-review';
+const GROUP_CLASS = 'geld-quick-review';
 const PANEL_CLASS = 'geld-quick-review__panel';
 /** On `<html>` while the button is mounted; the stylesheet hides GitHub's own review button under it. */
 const ATTR_ACTIVE = 'data-geld-quick-review';
 /** On the box holding the button and the counts; the stylesheet centres both on the tabs there. */
 const ATTR_HOST = 'data-geld-quick-review-host';
 const SUBMITTED_MS = 3000;
+/** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
+const ATTR_INSTANT = 'data-instant';
 
-const EVENTS: readonly { readonly value: ReviewEvent; readonly label: string; readonly note: string; readonly authorNote: string | null }[] = [
-  { value: 'comment', label: 'Comment', note: 'Submit general feedback without explicit approval.', authorNote: null },
-  { value: 'approve', label: 'Approve', note: 'Submit feedback and approve merging these changes.', authorNote: "Pull request authors can't approve their own pull requests." },
-  {
+interface EventInfo {
+  readonly value: ReviewEvent;
+  readonly label: string;
+  /** GitHub's reason the author cannot take this one, when they cannot. */
+  readonly authorNote: string | null;
+  /** The segment's glyph. */
+  readonly icon: string;
+  /** Its glyph while the instant key is held, for the verdicts a ⌘-click sends at once. */
+  readonly instantIcon: string | null;
+  /** The submit button's look in the comment box, as GitHub colours these verdicts. */
+  readonly submitClass: string;
+  /** What the controls say for a moment after it went through. */
+  readonly done: string;
+}
+
+const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
+  comment: { value: 'comment', label: 'Comment', authorNote: null, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
+  approve: {
+    value: 'approve',
+    label: 'Approve',
+    authorNote: "Pull request authors can't approve their own pull requests.",
+    icon: ICON_CHECK,
+    instantIcon: ICON_CHECK_SEND,
+    submitClass: 'btn-primary',
+    done: 'Approved',
+  },
+  'request changes': {
     value: 'request changes',
     label: 'Request changes',
-    note: 'Submit feedback suggesting changes.',
     authorNote: "Pull request authors can't request changes on their own pull requests.",
+    icon: ICON_X,
+    instantIcon: ICON_X_SEND,
+    submitClass: 'geld-quick-review__submit--danger',
+    done: 'Changes requested',
   },
-];
+};
+
+/** The segments, left to right: the verdicts first, the comment last (it carries the pending count). */
+const SEGMENT_ORDER: readonly ReviewEvent[] = ['approve', 'request changes', 'comment'];
+
+/** Whether a click asked to send at once, without the box: ⌘ on a Mac, Ctrl elsewhere, on ✓ or ✗ only. */
+export function isInstantClick(event: ReviewEvent, click: Pick<MouseEvent, 'metaKey' | 'ctrlKey'>, mac: boolean): boolean {
+  return event !== 'comment' && (mac ? click.metaKey : click.ctrlKey);
+}
+
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
+
+/**
+ * A segment's tooltip, one entry per line: its verdict and the key for a
+ * 1-click review, what a click does while that key is held, or GitHub's
+ * reason it is closed to the reader.
+ */
+export function segmentHint(event: ReviewEvent, isAuthor: boolean, instantKey: string, held = false): readonly string[] {
+  const info = EVENT_INFO[event];
+  if (isAuthor && info.authorNote !== null) return [info.authorNote];
+  if (info.instantIcon === null) return [info.label];
+  if (held) return [`${info.label} without comments`];
+  return [info.label, `${instantKey} 1-click review`];
+}
 
 /** `/owner/repo/pull/N` for a pull request page, else null. */
 export function pullPathOf(pathname: string): string | null {
@@ -135,23 +190,35 @@ interface Draft {
 }
 
 interface Mounted {
-  readonly button: HTMLButtonElement;
+  /** What is placed in the tab bar: the group, with the status line before it. */
+  readonly root: HTMLElement;
+  readonly segments: { readonly [E in ReviewEvent]: HTMLButtonElement };
+  /** "Approved", "Submitting…": what the controls have just done, read out as it changes. */
+  readonly status: HTMLElement;
   host: HTMLElement | null;
-  readonly label: HTMLElement;
-  /** "Submit review 1": the reader's pending comments, as GitHub's button counts them. */
+  /** On the group's top-right corner: the reader's pending comments, as GitHub's button counts them. */
   readonly counter: HTMLElement;
+  /** The segment the open box came from, for its pressed look and for focus when it closes. */
+  opener: ReviewEvent | null;
+  isAuthor: boolean | null;
   pullPath: string;
   context: QuickReviewContext;
+  /** The open comment box. */
   panel: HTMLElement | null;
+  /** Gives the open box another verdict, keeping its words. */
+  retarget: ((event: ReviewEvent) => void) | null;
+  /** A review on its way: the controls and the box wait for it. */
+  sending: boolean;
   submittedTimer: number;
   /** The pending comments last read for {@link pendingFor}; null until read (or when GitHub could not say). */
   pending: readonly PendingComment[] | null;
   pendingFor: string | null;
+  /** Stops following the instant key. */
+  readonly keys: AbortController;
 }
 
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
-let panelIds = 0;
 
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
@@ -170,7 +237,7 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     removeQuickReview();
     return;
   }
-  if (mounted === null) mounted = createButton(pullPath, context);
+  if (mounted === null) mounted = createControls(pullPath, context);
   if (mounted.pullPath !== pullPath) {
     closePanel();
     mounted.pullPath = pullPath;
@@ -180,7 +247,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   mounted.context = context;
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   showCount(mounted);
-  if (anchor.previousElementSibling !== mounted.button) anchor.insertAdjacentElement('beforebegin', mounted.button);
+  showAuthor(mounted);
+  if (anchor.previousElementSibling !== mounted.root) anchor.insertAdjacentElement('beforebegin', mounted.root);
   const host = anchor.parentElement;
   if (mounted.host !== host) {
     mounted.host?.removeAttribute(ATTR_HOST);
@@ -197,24 +265,176 @@ export function removeQuickReview(): void {
   closePanel();
   window.clearTimeout(mounted.submittedTimer);
   mounted.host?.removeAttribute(ATTR_HOST);
-  mounted.button.remove();
+  mounted.keys.abort();
+  mounted.root.remove();
   mounted = null;
 }
 
-function createButton(pullPath: string, context: QuickReviewContext): Mounted {
-  const label = createElement('span', {}, ['Submit review']);
-  const counter = createElement('span', { class: 'Counter geld-quick-review__count', hidden: '' });
-  const button = createElement(
-    'button',
-    { type: 'button', class: `btn btn-sm btn-primary ${BUTTON_CLASS}`, [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
-    [label, counter, svgFromString(ICON_TRIANGLE_DOWN)],
-  );
-  const state: Mounted = { button, host: null, label, counter, pullPath, context, panel: null, submittedTimer: 0, pending: null, pendingFor: null };
-  button.addEventListener('click', () => {
-    if (state.panel !== null) closePanel();
-    else openPanel();
-  });
+let tipIds = 0;
+
+/**
+ * A segment's words in GitHub's own tooltip (the page defines `tool-tip`; one
+ * made here is upgraded like its own), read as its description; the
+ * segment's name is its `aria-label`. Where the page has no `tool-tip` (an
+ * Enterprise version before it) the words are its title. Lines are broken
+ * with `<br>`, which the tooltip shows and a screen reader reads as a pause.
+ */
+function describe(button: HTMLButtonElement, lines: readonly string[]): HTMLElement | null {
+  const tip = button.closest(`.${GROUP_CLASS}`)?.querySelector(`[id="${button.id}-tip"]`) ?? null;
+  if (tip instanceof HTMLElement) {
+    if (tip.textContent !== lines.join('')) tip.replaceChildren(...withBreaks(lines));
+    return null;
+  }
+  // A segment that took the `title` keeps it: a `tool-tip` made later would be attached to nothing.
+  if (button.hasAttribute('title') || document.querySelector('tool-tip') === null) {
+    button.title = lines.join('\n');
+    return null;
+  }
+  const created = document.createElement('tool-tip');
+  for (const [name, value] of Object.entries({ id: `${button.id}-tip`, for: button.id, popover: 'manual', 'data-direction': 's', 'data-type': 'description', class: 'sr-only position-absolute', role: 'tooltip' })) created.setAttribute(name, value);
+  created.append(...withBreaks(lines));
+  return created;
+}
+
+function withBreaks(lines: readonly string[]): (string | HTMLElement)[] {
+  return lines.flatMap((line, index) => (index === 0 ? [line] : [document.createElement('br'), line]));
+}
+
+function createControls(pullPath: string, context: QuickReviewContext): Mounted {
+  const counter = createElement('span', { class: 'geld-quick-review__count', 'aria-hidden': 'true', hidden: '' });
+  const status = createElement('span', { class: 'geld-quick-review__status', role: 'status' });
+  const segment = (event: ReviewEvent): HTMLButtonElement => {
+    const info = EVENT_INFO[event];
+    tipIds += 1;
+    return createElement(
+      'button',
+      { type: 'button', id: `geld-quick-review-${tipIds}`, class: 'btn btn-sm BtnGroup-item geld-quick-review__segment', 'data-event': event, 'aria-label': info.label, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
+      [
+        createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
+        ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
+      ],
+    );
+  };
+  const segments = { approve: segment('approve'), 'request changes': segment('request changes'), comment: segment('comment') };
+  // Primer rounds the group's outer corners on `:first-child` / `:last-child`: the tooltips stand beside it, not between.
+  const group = createElement('div', { class: 'BtnGroup geld-quick-review__group', role: 'group', 'aria-label': 'Submit review' }, SEGMENT_ORDER.map((event) => segments[event]));
+  const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, false, INSTANT_KEY)) ?? []);
+  // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
+  const keys = new AbortController();
+  const state: Mounted = { root, segments, status, host: null, counter, opener: null, isAuthor: null, pullPath, context, panel: null, retarget: null, sending: false, submittedTimer: 0, pending: null, pendingFor: null, keys };
+  followInstantKey(root, keys.signal, () => describeSegments(state));
+  for (const event of SEGMENT_ORDER) {
+    segments[event].addEventListener('click', (click) => {
+      if (state.sending || segments[event].getAttribute('aria-disabled') === 'true') return;
+      // The instant key wins over the open box: the arrow and the tooltip promised a send. Words waiting in the box are
+      // the exception: an empty send would leave them out (and a reload after it would drop them), so the box takes the verdict.
+      const wanted = isInstantClick(event, click, MAC);
+      const instant = wanted && (drafts.get(state.pullPath)?.body ?? '').trim() === '';
+      if (!wanted && state.panel !== null && state.opener === event) {
+        closePanel(true);
+        return;
+      }
+      if (!instant) {
+        // Another verdict while the box is open: the box stays, words and all, and takes the new verdict.
+        if (state.panel !== null && state.retarget !== null) state.retarget(event);
+        else openComposer(state, event, null);
+        return;
+      }
+      closePanel();
+      const sentFrom = state.pullPath;
+      void sendReview(state, event, '').then((failure) => {
+        // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason,
+        // unless the reader has moved on (another pull request, or no controls): that box would review the wrong one.
+        if (failure !== null && mounted === state && state.pullPath === sentFrom) openComposer(state, event, failure);
+      });
+    });
+  }
   return state;
+}
+
+/**
+ * Mark the group while the instant key (⌘ on a Mac, Ctrl elsewhere) is held,
+ * so ✓ and ✗ show before the click that they will send at once (their
+ * glyphs gain an arrow, their tooltips say so). Read from every key event
+ * and from the pointer over the group (the key may have gone down while
+ * another window had focus); let go when the window loses focus.
+ */
+function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () => void): void {
+  const held = (on: boolean): void => {
+    if (root.hasAttribute(ATTR_INSTANT) === on) return;
+    root.toggleAttribute(ATTR_INSTANT, on);
+    onChange();
+  };
+  const read = (event: KeyboardEvent | MouseEvent): void => held(MAC ? event.metaKey : event.ctrlKey);
+  window.addEventListener('keydown', read, { capture: true, signal });
+  window.addEventListener('keyup', read, { capture: true, signal });
+  root.addEventListener('pointermove', read, { signal });
+  window.addEventListener('blur', () => held(false), { signal });
+}
+
+function describeSegments(state: Mounted): void {
+  const held = state.root.hasAttribute(ATTR_INSTANT);
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, state.isAuthor === true, INSTANT_KEY, held));
+}
+
+/** What the author cannot do stays in the group, disabled, its tooltip GitHub's reason (re-read: the header may come late). */
+function showAuthor(state: Mounted): void {
+  const isAuthor = isAuthorViewing();
+  if (state.isAuthor === isAuthor) return;
+  state.isAuthor = isAuthor;
+  for (const event of SEGMENT_ORDER) {
+    const button = state.segments[event];
+    const closed = isAuthor && EVENT_INFO[event].authorNote !== null;
+    if (closed) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+  }
+  describeSegments(state);
+}
+
+function closePanel(restoreFocus = false): void {
+  if (mounted === null || mounted.panel === null) return;
+  mounted.panel.remove();
+  mounted.panel = null;
+  mounted.retarget = null;
+  const opener = mounted.opener === null ? null : mounted.segments[mounted.opener];
+  mounted.opener = null;
+  for (const event of SEGMENT_ORDER) mounted.segments[event].setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', onOutsidePointer, true);
+  window.removeEventListener('resize', positionPanel);
+  if (restoreFocus) opener?.focus();
+}
+
+function onOutsidePointer(event: PointerEvent): void {
+  if (mounted === null || mounted.panel === null) return;
+  const target = event.target;
+  if (target instanceof Node && (mounted.panel.contains(target) || mounted.root.contains(target))) return;
+  closePanel();
+}
+
+/** Under the group, its right edge on the group's, inside the viewport; in page coordinates, so it scrolls with the bar. */
+function positionPanel(): void {
+  if (mounted === null || mounted.panel === null || !mounted.root.isConnected) return;
+  const rect = mounted.root.getBoundingClientRect();
+  const width = mounted.panel.offsetWidth;
+  const left = Math.max(16, Math.min(rect.right - width, document.documentElement.clientWidth - width - 16));
+  mounted.panel.style.top = `${Math.round(rect.bottom + window.scrollY + 4)}px`;
+  mounted.panel.style.left = `${Math.round(left + window.scrollX)}px`;
+}
+
+function showPanel(state: Mounted, panel: HTMLElement, opener: ReviewEvent): void {
+  closePanel();
+  state.panel = panel;
+  state.opener = opener;
+  state.segments[opener].setAttribute('aria-expanded', 'true');
+  document.body.append(panel);
+  positionPanel();
+  document.addEventListener('pointerdown', onOutsidePointer, true);
+  window.addEventListener('resize', positionPanel);
+}
+
+function isAuthorViewing(): boolean {
+  return authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
 }
 
 /** Bumped by every read of the pending comments and by a discard: only the latest read's answer is kept. */
@@ -243,89 +463,91 @@ function showCount(state: Mounted): void {
   const text = count > 0 ? String(count) : '';
   if (state.counter.textContent !== text) state.counter.textContent = text;
   if (state.counter.hidden !== (count === 0)) state.counter.hidden = count === 0;
-  const name = count > 0 ? `Submit review, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : 'Submit review';
-  if (state.button.getAttribute('aria-label') !== name) state.button.setAttribute('aria-label', name);
+  const name = count > 0 ? `Comment, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : 'Comment';
+  if (state.segments.comment.getAttribute('aria-label') !== name) state.segments.comment.setAttribute('aria-label', name);
 }
 
-function closePanel(restoreFocus = false): void {
-  if (mounted === null || mounted.panel === null) return;
-  mounted.panel.remove();
-  mounted.panel = null;
-  mounted.button.setAttribute('aria-expanded', 'false');
-  document.removeEventListener('pointerdown', onOutsidePointer, true);
-  window.removeEventListener('resize', positionPanel);
-  if (restoreFocus) mounted.button.focus();
+/**
+ * Send one review. On success the box's draft goes, and the Files changed
+ * tab (or any tab with pending comments) reloads: GitHub's view still shows
+ * the comments just published as pending until it does. Elsewhere the
+ * button says what went through for a moment.
+ */
+async function sendReview(state: Mounted, event: ReviewEvent, body: string): Promise<string | null> {
+  const headSha = state.context.headSha() ?? detectHeadSha();
+  if (headSha === null) return 'Could not read the pull request’s head commit. Reload the page and try again.';
+  const pullPath = state.pullPath;
+  const { url, init } = submitReviewRequest(pullPath, { body, event, headSha }, fetchNonce());
+  state.sending = true;
+  state.root.setAttribute('aria-busy', 'true');
+  window.clearTimeout(state.submittedTimer);
+  state.status.textContent = 'Submitting…';
+  try {
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      return reviewErrorText(response.status, payload);
+    }
+    // An instant send leaves words saved in the box out on purpose: they stay for the next box.
+    if (body !== '') drafts.delete(pullPath);
+    if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
+      window.location.reload();
+      return null;
+    }
+    showDone(state, EVENT_INFO[event].done);
+    return null;
+  } catch {
+    return 'GitHub could not submit the review.';
+  } finally {
+    state.sending = false;
+    state.root.removeAttribute('aria-busy');
+    if (state.status.textContent === 'Submitting…') state.status.textContent = '';
+  }
 }
 
-function onOutsidePointer(event: PointerEvent): void {
-  if (mounted === null || mounted.panel === null) return;
-  const target = event.target;
-  if (target instanceof Node && (mounted.panel.contains(target) || mounted.button.contains(target))) return;
-  closePanel();
-}
-
-/** Under the button, its right edge on the button's, inside the viewport; in page coordinates, so it scrolls with the bar. */
-function positionPanel(): void {
-  if (mounted === null || mounted.panel === null || !mounted.button.isConnected) return;
-  const rect = mounted.button.getBoundingClientRect();
-  const width = mounted.panel.offsetWidth;
-  const left = Math.max(16, Math.min(rect.right - width, document.documentElement.clientWidth - width - 16));
-  mounted.panel.style.top = `${Math.round(rect.bottom + window.scrollY + 4)}px`;
-  mounted.panel.style.left = `${Math.round(left + window.scrollX)}px`;
-}
-
-function openPanel(): void {
-  if (mounted === null) return;
-  const state = mounted;
+/**
+ * The comment box: the words, the pending comments and Cancel beside a
+ * submit button that names the verdict in its colour ("Approve" green,
+ * "Request changes" red, "Comment" grey). No title and no choices: the
+ * segment that opened it chose the verdict, and another segment changes it
+ * in place. After a refused send, GitHub's reason above the buttons.
+ */
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
-  const isAuthor = authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
-  if (isAuthor && draft.event !== 'comment') draft.event = 'comment';
+  const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && EVENT_INFO[event].authorNote !== null ? 'comment' : event);
+  draft.event = allowed(initial);
 
-  panelIds += 1;
-  const titleId = `geld-quick-review-${panelIds}-title`;
-  const close = createElement('button', { type: 'button', class: 'close-button Overlay-closeButton', 'aria-label': 'Close' }, [svgFromString(ICON_X)]);
-  const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '6' });
+  const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
   body.value = draft.body;
-  const choices = EVENTS.map(({ value, label, note, authorNote }) => {
-    const disabled = isAuthor && authorNote !== null;
-    const input = createElement('input', { type: 'radio', name: `geld-review-event-${panelIds}`, value });
-    input.checked = draft.event === value;
-    input.disabled = disabled;
-    input.addEventListener('change', () => {
-      if (input.checked) draft.event = value;
-      refresh();
-    });
-    return createElement('div', { class: `form-checkbox geld-quick-review__choice${disabled ? ' geld-quick-review__choice--disabled' : ''}` }, [
-      createElement('label', {}, [input, ` ${label}`]),
-      createElement('p', { class: 'note' }, [disabled && authorNote !== null ? authorNote : note]),
-    ]);
-  });
   const pendingSection = createElement('div', { class: 'geld-quick-review__pending' });
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
-  const discard = createElement('button', { type: 'button', class: 'btn btn-danger', hidden: '' }, ['Discard review']);
-  const cancel = createElement('button', { type: 'button', class: 'btn' }, ['Cancel']);
-  const submit = createElement('button', { type: 'button', class: 'btn btn-primary' }, ['Submit review']);
-  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-labelledby': titleId }, [
-    createElement('div', { class: 'Overlay-header' }, [
-      createElement('div', { class: 'Overlay-headerContentWrap' }, [
-        createElement('div', { class: 'Overlay-titleWrap' }, [createElement('h1', { class: 'Overlay-title', id: titleId }, ['Finish your review'])]),
-        createElement('div', { class: 'Overlay-actionWrap' }, [close]),
-      ]),
-    ]),
-    createElement('div', { class: 'Overlay-body' }, [body, createElement('fieldset', { class: 'geld-quick-review__events' }, [createElement('legend', { class: 'sr-only' }, ['Review type']), ...choices]), pendingSection, error]),
-    createElement('div', { class: 'Overlay-footer Overlay-footer--divided geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
+  if (failure !== null) {
+    error.textContent = failure;
+    error.hidden = false;
+  }
+  const discard = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible geld-quick-review__discard', hidden: '' }, [svgFromString(ICON_TRASH), 'Discard review']);
+  const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
+  const submit = createElement('button', { type: 'button', class: 'btn btn-sm' });
+  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
+    createElement('div', { class: 'Overlay-body' }, [body, pendingSection, error]),
+    createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
   ]);
 
-  let sending = false;
-  let pendingOpen = true;
+  let pendingOpen = false;
+  const showVerdict = (): void => {
+    const info = EVENT_INFO[draft.event];
+    submit.className = `btn btn-sm geld-quick-review__submit ${info.submitClass}`.trim();
+    if (!state.sending) submit.textContent = info.label;
+    panel.setAttribute('aria-label', info.label);
+  };
   // The list is rebuilt only when what it shows changed, not on every keystroke (which would also reset its scroll).
   let shown: { readonly comments: readonly PendingComment[] | null; readonly count: number; readonly open: boolean } | null = null;
   const refresh = (): void => {
     const pending = pendingCount(state);
-    submit.disabled = sending || !canSubmit(draft.event, body.value, pending > 0);
+    submit.disabled = state.sending || !canSubmit(draft.event, body.value, pending > 0);
     discard.hidden = pending === 0;
-    discard.disabled = sending;
+    discard.disabled = state.sending;
     if (shown !== null && shown.comments === state.pending && shown.count === pending && shown.open === pendingOpen) return;
     shown = { comments: state.pending, count: pending, open: pendingOpen };
     renderPending(pendingSection, state.pending, pending, pendingOpen, () => {
@@ -335,39 +557,19 @@ function openPanel(): void {
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
-    const headSha = state.context.headSha() ?? detectHeadSha();
-    if (headSha === null) {
-      error.textContent = 'Could not read the pull request’s head commit. Reload the page and try again.';
-      error.hidden = false;
-      return;
-    }
-    sending = true;
     error.hidden = true;
     submit.textContent = 'Submitting…';
+    const pending = sendReview(state, draft.event, body.value);
     refresh();
-    const { url, init } = submitReviewRequest(pullPath, { body: body.value, event: draft.event, headSha }, fetchNonce());
-    try {
-      const response = await fetch(url, init);
-      if (!response.ok) {
-        const payload: unknown = await response.json().catch(() => null);
-        throw new Error(reviewErrorText(response.status, payload));
-      }
-      drafts.delete(pullPath);
-      closePanel(true);
-      // The Files changed tab shows the pending comments that were just published as still pending until it reloads.
-      if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
-        window.location.reload();
-        return;
-      }
-      showSubmitted(state);
-    } catch (failure) {
-      error.textContent = failure instanceof Error && failure.message !== '' ? failure.message : 'GitHub could not submit the review.';
-      error.hidden = false;
-    } finally {
-      sending = false;
-      submit.textContent = 'Submit review';
-      refresh();
+    const failed = await pending;
+    showVerdict();
+    if (failed === null) {
+      if (state.panel === panel) closePanel(true);
+      return;
     }
+    error.textContent = failed;
+    error.hidden = false;
+    refresh();
   };
 
   body.addEventListener('input', () => {
@@ -383,16 +585,15 @@ function openPanel(): void {
       void send();
     }
   });
-  close.addEventListener('click', () => closePanel(true));
   cancel.addEventListener('click', () => closePanel(true));
   submit.addEventListener('click', () => void send());
   discard.addEventListener('click', () => {
     // GitHub's own words and its own (native) confirmation, as its Discard review asks.
     if (!window.confirm('Are you sure you want to cancel? You will lose all your pending comments.')) return;
-    sending = true;
+    state.sending = true;
     refresh();
     void discardPendingReview(pullPath).then((done) => {
-      sending = false;
+      state.sending = false;
       if (!done) {
         error.textContent = 'GitHub could not discard the review.';
         error.hidden = false;
@@ -412,15 +613,20 @@ function openPanel(): void {
     });
   });
 
-  state.panel = panel;
-  state.button.setAttribute('aria-expanded', 'true');
-  document.body.append(panel);
-  positionPanel();
+  showPanel(state, panel, initial);
+  state.retarget = (event) => {
+    draft.event = allowed(event);
+    if (state.opener !== null) state.segments[state.opener].setAttribute('aria-expanded', 'false');
+    state.opener = event;
+    state.segments[event].setAttribute('aria-expanded', 'true');
+    error.hidden = true;
+    showVerdict();
+    refresh();
+    body.focus({ preventScroll: true });
+  };
+  showVerdict();
   refresh();
   body.focus({ preventScroll: true });
-  document.addEventListener('pointerdown', onOutsidePointer, true);
-  window.addEventListener('resize', positionPanel);
-
   // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
   void loadPending(state).then(() => {
     if (state.panel === panel) refresh();
@@ -428,10 +634,10 @@ function openPanel(): void {
 }
 
 /**
- * "Pending comments N" under the choices, one line per comment as the
+ * "Pending comments N" under the words, one line per comment as the
  * digest lists threads: the comment's first sentence, then its file and
  * line, the line leading to the comment on the Files changed tab. Folds,
- * open at first. Nothing when there are none; the count alone while
+ * closed at first. Nothing when there are none; the count alone while
  * GitHub's own count is ahead of the list (a comment added on Files changed
  * since the list was read).
  */
@@ -462,10 +668,10 @@ function renderPending(section: HTMLElement, comments: readonly PendingComment[]
   section.append(list);
 }
 
-function showSubmitted(state: Mounted): void {
+function showDone(state: Mounted, words: string): void {
   window.clearTimeout(state.submittedTimer);
-  state.label.textContent = 'Review submitted';
+  state.status.textContent = words;
   state.submittedTimer = window.setTimeout(() => {
-    state.label.textContent = 'Submit review';
+    state.status.textContent = '';
   }, SUBMITTED_MS);
 }
