@@ -1,0 +1,124 @@
+// @vitest-environment happy-dom
+import { describe, expect, it } from 'vitest';
+import type { MergeSubmission } from './merge-actions';
+import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox, readyRequest, viewerVerdict } from './merge-actions';
+
+/** A `page_data/merge_box` answer as GitHub gave it on brandonmcconnell/geld#74 (Oct 2026), trimmed. */
+function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean } = {}): unknown {
+  return {
+    pullRequest: {
+      state: 'OPEN',
+      isDraft: overrides.draft ?? false,
+      viewerCanClose: overrides.canClose ?? true,
+      viewerCanAdminBypassMergeRequirements: overrides.canBypass ?? false,
+      viewerCanMarkReadyForReview: overrides.draft ?? false,
+      latestOpinionatedReviews: [
+        { id: 1, author: { login: 'aeschli' }, state: 'APPROVED' },
+        { id: 2, author: { login: 'Alice' }, state: 'CHANGES_REQUESTED' },
+      ],
+      viewerMergeActions: [
+        { allowableStatus: 'BLOCKED', name: 'MERGE_QUEUE', mergeMethods: [{ allowableStatus: 'BLOCKED', isDefault: true, name: 'MERGE' }] },
+        {
+          allowableStatus: overrides.direct ?? 'ALLOWED',
+          name: 'DIRECT_MERGE',
+          mergeMethods: [
+            { allowableStatus: 'ALLOWED', isDefault: false, name: 'MERGE' },
+            { allowableStatus: 'ALLOWED', isDefault: true, name: 'SQUASH' },
+            { allowableStatus: 'BLOCKED', isDefault: false, name: 'REBASE' },
+          ],
+        },
+      ],
+    },
+    mergeRequirements: {
+      state: overrides.state ?? 'MERGEABLE',
+      conditions: [{ type: 'STACK', result: 'PASSED', isStacked: overrides.stacked ?? false }],
+      defaultCommitAuthorEmail: 'brandon@dreamthinkbuild.com',
+      commitMessageHeadline: 'Submit review from any pull request tab (#74)',
+      commitMessageBody: '* Submit review from any pull request tab',
+    },
+  };
+}
+
+describe('parseMergeBox', () => {
+  it('reads what the reader may do and the commit GitHub would write', () => {
+    const box = parseMergeBox(payload());
+    expect(box).toEqual({
+      open: true,
+      draft: false,
+      canClose: true,
+      canMarkReady: false,
+      verdicts: [
+        { login: 'aeschli', state: 'APPROVED' },
+        { login: 'Alice', state: 'CHANGES_REQUESTED' },
+      ],
+      mergeable: true,
+      canBypass: false,
+      methods: ['SQUASH', 'MERGE'],
+      commitTitle: 'Submit review from any pull request tab (#74)',
+      commitMessage: '* Submit review from any pull request tab',
+      authorEmail: 'brandon@dreamthinkbuild.com',
+      stacked: false,
+    });
+    expect(parseMergeBox({ nope: true })).toBeNull();
+  });
+
+  it('knows the reader’s own standing verdict, whatever the case of their login', () => {
+    const box = parseMergeBox(payload());
+    if (box === null) throw new Error('fixture');
+    expect(viewerVerdict(box, 'alice')).toBe('CHANGES_REQUESTED');
+    expect(viewerVerdict(box, 'bob')).toBeNull();
+  });
+});
+
+describe('mergeOffer', () => {
+  const read = (overrides: Parameters<typeof payload>[0]) => {
+    const box = parseMergeBox(payload(overrides));
+    if (box === null) throw new Error('fixture');
+    return box;
+  };
+  it('offers a merge GitHub would take now, a bypass only past the rules, and nothing otherwise', () => {
+    expect(mergeOffer(read({}), null)).toBe('merge');
+    expect(mergeOffer(read({ state: 'UNMERGEABLE', canBypass: true }), read({ canBypass: true }))).toBe('bypass');
+    expect(mergeOffer(read({ state: 'UNMERGEABLE', canBypass: true }), read({ state: 'UNMERGEABLE', canBypass: true }))).toBeNull();
+    expect(mergeOffer(read({ state: 'UNMERGEABLE' }), null)).toBeNull();
+    expect(mergeOffer(read({ draft: true }), null)).toBeNull();
+    // A repository that only merges through its queue allows no direct merge.
+    expect(mergeOffer(read({ direct: 'BLOCKED' }), null)).toBeNull();
+  });
+});
+
+describe('the requests', () => {
+  const commit: MergeSubmission = { method: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c', bypass: false, stacked: false };
+  it('merges as GitHub’s merge box does, through the stack’s request for a stacked pull request', () => {
+    const plain = mergeRequest('/o/r/pull/7', commit, 'n1');
+    expect(plain.url).toBe('/o/r/pull/7/page_data/merge');
+    expect(plain.init.method).toBe('POST');
+    expect(JSON.parse(String(plain.init.body))).toEqual({ bypassBranchProtections: false, mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c' });
+    const stacked = mergeRequest('/o/r/pull/7', { ...commit, stacked: true, bypass: true }, 'n1');
+    expect(stacked.url).toBe('/o/r/pull/7/page_data/enqueue_stack');
+    expect(JSON.parse(String(stacked.init.body))).toEqual({ mergeAction: 'DIRECT_MERGE', bypassRules: 'true', mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c' });
+    // A rebase writes no commit of its own.
+    expect(JSON.parse(String(mergeRequest('/o/r/pull/7', { ...commit, method: 'REBASE' }, '').init.body))).toEqual({ bypassBranchProtections: false, mergeMethod: 'REBASE', authorEmail: 'a@b.c' });
+  });
+
+  it('takes a draft out of draft with nothing but the request', () => {
+    const ready = readyRequest('/o/r/pull/7', 'n1');
+    expect(ready.url).toBe('/o/r/pull/7/page_data/mark_ready_for_review');
+    expect(ready.init.method).toBe('POST');
+    expect(ready.init.body).toBeUndefined();
+  });
+
+  it('closes with nothing but the request', () => {
+    const close = closeRequest('/o/r/pull/7', 'n1');
+    expect(close.url).toBe('/o/r/pull/7/page_data/close_pull_request');
+    expect(close.init.method).toBe('POST');
+    expect(close.init.body).toBeUndefined();
+  });
+
+  it('says why GitHub refused, rules included', () => {
+    expect(actionErrorText('merge', 422, { error: 'Repository rule violations found', metadata: { ruleErrors: [{ message: 'Changes must be made through a pull request.' }] } })).toBe(
+      'GitHub could not merge the pull request: Repository rule violations found Changes must be made through a pull request.',
+    );
+    expect(actionErrorText('close', 500, null)).toBe('GitHub could not close the pull request (HTTP 500).');
+  });
+});

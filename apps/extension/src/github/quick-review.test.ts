@@ -272,6 +272,9 @@ describe('the tab bar button', () => {
     expect(sent).toEqual([{ url: '/acme/widgets/pull/7/page_data/submit_review', body: JSON.stringify({ body: '', event: 'approve', headSha: SHA }) }]);
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('Approved');
+    // The new verdict is the reader's standing one now: ✓ pressed, ✗ not.
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    expect(segment('request changes').hasAttribute('data-current')).toBe(false);
   });
 
   it('opens the box with the verdict instead of sending when words wait in it', async () => {
@@ -319,6 +322,157 @@ describe('the tab bar button', () => {
     expect([...(group?.children ?? [])].map((child) => child.getAttribute('data-event'))).toEqual(['comment']);
     segment('comment').click();
     expect(chosen()).toBe('Comment');
+  });
+
+  const mergeBox = (state: string, canClose: boolean, extra: { readonly draft?: boolean; readonly reviews?: readonly unknown[] } = {}): string =>
+    JSON.stringify({
+      pullRequest: { state: 'OPEN', isDraft: extra.draft ?? false, viewerCanMarkReadyForReview: extra.draft ?? false, latestOpinionatedReviews: extra.reviews ?? [], viewerCanClose: canClose, viewerCanAdminBypassMergeRequirements: false, viewerMergeActions: [{ name: 'DIRECT_MERGE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true }] }] },
+      mergeRequirements: { state, conditions: [], commitMessageHeadline: 'Title (#7)', commitMessageBody: '' },
+    });
+
+  it('offers merge and close, in their own group, only where the merge box says the reader may', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
+    expect(actions?.hidden).toBe(false);
+    // Close first, merge last, so a bypass's lock stands on the group's corner.
+    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'merge']);
+    // The merge box opens on GitHub's commit for its default method.
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    expect(document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title')?.value).toBe('Title (#7)');
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(true);
+  });
+
+  it('says a stacked pull request merges the stack below it too', async () => {
+    const stacked = (): string => {
+      const payload = JSON.parse(mergeBox('MERGEABLE', true));
+      payload.mergeRequirements.conditions = [{ type: 'STACK', result: 'PASSED', isStacked: true }];
+      return JSON.stringify(payload);
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(stacked(), { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(false);
+  });
+
+  it('confirms a merge only with the chosen method’s commit, whatever order GitHub answers in', async () => {
+    const held: { [method: string]: (() => void) | undefined } = {};
+    const slow = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = method === 'MERGE' ? 'Merge pull request #7 from acme/topic' : 'Title (#7)';
+        if (slow.has(method)) {
+          await new Promise<void>((resolve) => {
+            held[method] = resolve;
+          });
+        }
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    // Both reads the box makes from here on are slow.
+    slow.add('SQUASH');
+    slow.add('MERGE');
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    const submit = document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .geld-quick-review__submit');
+    if (select === null || title === null || submit === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    expect(submit.disabled).toBe(false);
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    // The squash commit is not this method's: nothing to confirm until the merge commit comes.
+    expect(title.value).toBe('');
+    expect(submit.disabled).toBe(true);
+    held.MERGE?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+    expect(submit.disabled).toBe(false);
+    // The read made as the box opened (the squash commit) lands last and changes nothing.
+    held.SQUASH?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+  });
+
+  it('leaves the commit to the reader when the chosen method’s commit could not be read', async () => {
+    let failMerge = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        if (method === 'MERGE' && failMerge) return new Response('{}', { status: 500 });
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = 'Title (#7)';
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    failMerge = true;
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    for (let i = 0; i < 3; i += 1) await settle();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    if (select === null || title === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    for (let i = 0; i < 3; i += 1) await settle();
+    // The squash commit stays out of a merge commit's fields.
+    expect(title.value).toBe('');
+  });
+
+  it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes('/page_data/merge_box') ? new Response(mergeBox('UNMERGEABLE', true, { draft: true, reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }), { status: 200 }) : new Response('{}', { status: 404 }),
+      ),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const actions = document.querySelector<HTMLElement>('.geld-quick-review__actions-group');
+    expect([...(actions?.children ?? [])].map((child) => child.getAttribute('data-action'))).toEqual(['close', 'ready']);
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    expect(segment('approve').getAttribute('aria-label')).toBe('Approve (your current review)');
+    expect(segment('request changes').hasAttribute('data-current')).toBe(false);
+    // Another pull request in the same tab whose merge box cannot be read: no verdict stands pressed for it.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(false);
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+  });
+
+  it('says "Review" on 💬 whenever it is alone in the review group, merge and close beside it or not', async () => {
+    document.head.innerHTML = '<meta name="user-login" content="bob">';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    expect(document.querySelector('.geld-quick-review')?.hasAttribute('data-alone')).toBe(true);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__actions-group')?.hidden).toBe(false);
+    expect(document.querySelector('.geld-quick-review')?.hasAttribute('data-alone')).toBe(true);
   });
 
   it('turns an open ✓ box into a comment when the page then says the reader is the author', () => {

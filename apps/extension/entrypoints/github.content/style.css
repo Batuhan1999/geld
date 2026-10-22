@@ -769,7 +769,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /*
  * [✓ | ✗ | 💬]: a Primer button group dressed as the Files changed toolbar's own default buttons (Merge status, the
- * settings gear): their surface, border, resting shadow and muted icons, from the same tokens.
+ * settings gear): their surface, border and resting shadow, from the same tokens.
  */
 .geld-quick-review__segment.btn {
   display: inline-flex;
@@ -796,6 +796,31 @@ html[data-geld-quick-review] details.js-reviews-container {
   transition: none;
 }
 
+/* Every glyph wears its hover colour at rest too, so each button says what it does before the pointer reaches it. */
+.geld-quick-review__segment[data-event='approve'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__segment[data-event='request changes'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.geld-quick-review__segment[data-action='merge'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-done, #8250df);
+}
+
+.geld-quick-review__segment[data-action='close'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-closed, #d1242f);
+}
+
+.geld-quick-review__segment[data-action='ready'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-open, #1a7f37);
+}
+
 /* The comment octicon's bubble fills y 1 to 12 of 16, its tail below: centred by its box it reads high beside ✓ and ✗. */
 .geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph {
   transform: translateY(1px);
@@ -818,11 +843,13 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /*
  * ✓ and ✗ under the pointer, and only there, tint that surface with the theme's own success and danger (the muted
- * surface laid over it at 70%, so the grey still shows through) and colour the icon. Theme variables only, no fixed green
+ * surface laid over it at 70%, so the grey still shows through), its border with the muted border of the same colour
+ * (about the grey border's lightness, only tinted) and colour the icon. Theme variables only, no fixed green
  * or red: colour-blind and high-contrast themes redefine these.
  */
 .geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-success-muted);
 }
 
 .geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
@@ -831,10 +858,129 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-danger-muted);
 }
 
 .geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
+}
+
+/*
+ * Merge and close, their own group right of the review group, tinting the same surface and border on hover with GitHub's state
+ * colours, which accessible themes redefine: merged (`done`, purple by default) and closed (red by default).
+ */
+.geld-quick-review__segment.btn[data-action='merge']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-done-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='merge']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-done);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-closed-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-closed);
+}
+
+.geld-quick-review__segment.btn[data-action='ready']:hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-open-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='ready']:hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-open);
+}
+
+/* Primer draws a group's dividers as each next button's left border: a hovered button's right edge is its neighbour's, tinted with it. */
+.geld-quick-review__segment.btn[data-event='approve']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-success-muted);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-danger-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='merge']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-done-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-closed-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='ready']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-open-muted);
+}
+
+/*
+ * The reader's standing verdict: ✓ or ✗ pressed in (Primer's selected surface, an inner shadow) with its glyph in the
+ * verdict's colour. Still a button: pressing it again leaves a new review.
+ */
+.geld-quick-review__segment.btn[data-current] {
+  background: var(--button-default-bgColor-selected, var(--button-default-bgColor-active, #e6eaef));
+  box-shadow: inset 0 1px 2px rgba(31, 35, 40, 0.15);
+}
+
+.geld-quick-review__segment.btn[data-event='approve'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger);
+}
+
+.geld-quick-review__actions-group[hidden] {
+  display: none;
+}
+
+/* Only an admin's bypass would merge it: a lock on the button's corner, as the pending count sits on the review group's. */
+.geld-quick-review__lock {
+  position: absolute;
+  z-index: 2;
+  top: -7px;
+  right: -7px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bgColor-neutral-emphasis, #59636e);
+  box-shadow: 0 0 0 2px var(--bgColor-default, #ffffff);
+  color: var(--fgColor-onEmphasis, #ffffff);
+  pointer-events: none;
+}
+
+.geld-quick-review__segment[data-bypass] .geld-quick-review__lock {
+  display: inline-flex;
+}
+
+/* Over Primer's `.btn .octicon` muted colour. */
+.geld-quick-review__segment .geld-quick-review__lock > svg {
+  width: 10px;
+  height: 10px;
+  color: inherit;
+}
+
+/* 💬 alone in the review group: "Review" before its icon, so beside close and merge it reads as a review, not a plain comment. */
+.geld-quick-review__label {
+  display: none;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.geld-quick-review[data-alone] .geld-quick-review__label {
+  display: inline;
+}
+
+.geld-quick-review[data-alone] .geld-quick-review__segment[data-event='comment'] {
+  gap: 6px;
+  padding: 0 8px;
 }
 
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
@@ -992,6 +1138,73 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__count[hidden] {
   display: none;
+}
+
+/* The merge box: the method, the commit GitHub would write (editable), and GitHub's bypass checkbox when that is the only way. */
+.geld-quick-review__method[hidden],
+.geld-quick-review__commit[hidden],
+.geld-quick-review__bypass[hidden] {
+  display: none;
+}
+
+.geld-quick-review__method {
+  align-self: flex-start;
+}
+
+.geld-quick-review__commit-body {
+  font-size: 12px;
+}
+
+.geld-quick-review__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.geld-quick-review__stack-note {
+  margin: 0;
+  font-size: 12px;
+}
+
+.geld-quick-review__bypass {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.geld-quick-review__bypass > input {
+  margin-top: 2px;
+}
+
+/* The close box is only its buttons (and GitHub's reason after a refusal): as wide as they are. */
+.Overlay.geld-quick-review__panel.geld-quick-review__panel--compact {
+  width: auto;
+  max-width: min(424px, calc(100vw - 32px));
+}
+
+.geld-quick-review__panel--compact .Overlay-body:has(> .geld-quick-review__error[hidden]:only-child) {
+  display: none;
+}
+
+.geld-quick-review__panel--compact .Overlay-footer.geld-quick-review__footer {
+  padding-top: 12px;
+}
+
+/* GitHub's Close pull request and Ready for review: default buttons, the glyph in its state's colour. */
+.geld-quick-review__footer .btn.geld-quick-review__confirm-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.geld-quick-review__confirm-submit[data-action='close'] > svg {
+  color: var(--fgColor-closed, #d1242f);
+}
+
+.geld-quick-review__confirm-submit[data-action='ready'] > svg {
+  color: var(--fgColor-open, #1a7f37);
 }
 
 /* "Pending comments N", as GitHub's dialog lists them under the choices. */
