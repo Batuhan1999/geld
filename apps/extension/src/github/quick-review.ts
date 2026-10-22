@@ -62,7 +62,7 @@ type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
-/** On the group while 💬 is the only action the reader has: it then says "Review" beside its icon. */
+/** On the group while 💬 is alone in the review group (the author's own pull request): it then says "Review" before its icon. */
 const ATTR_ALONE = 'data-alone';
 
 interface EventInfo {
@@ -578,6 +578,8 @@ function showAuthor(state: Mounted): void {
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
   state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
+  // 💬 alone says "Review", or beside close and merge it would read as a plain comment rather than a review.
+  state.root.toggleAttribute(ATTR_ALONE, state.group.childElementCount === 1);
   showActions(state);
 }
 
@@ -623,9 +625,8 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
  * Close (in its closed colour), then merge (in GitHub's merge colour, a
  * lock on the group's corner when only a rules bypass would take it) or,
  * on a draft, "Ready for review" in its place, each only while the reader
- * may do it; the group goes when none applies. 💬 left alone in the whole
- * control says "Review" beside its icon. ✓ or ✗ stands pressed while it is
- * the reader's own standing verdict.
+ * may do it; the group goes when none applies. ✓ or ✗ stands pressed while
+ * it is the reader's own standing verdict.
  */
 function showActions(state: Mounted): void {
   const actions = state.mergeActions;
@@ -639,8 +640,6 @@ function showActions(state: Mounted): void {
   state.mergeButton.toggleAttribute('data-bypass', offer === 'bypass');
   const method = actions?.box.methods[0] ?? 'SQUASH';
   describe(state.mergeButton, offer === 'bypass' ? [METHOD_LABEL[method], 'Bypass rules'] : [METHOD_LABEL[method]]);
-  const alone = actions !== null && shown.length === 0 && state.group.childElementCount === 1;
-  if (state.root.hasAttribute(ATTR_ALONE) !== alone) state.root.toggleAttribute(ATTR_ALONE, alone);
 }
 
 function buttonFor(state: Mounted, opener: Opener): HTMLButtonElement {
