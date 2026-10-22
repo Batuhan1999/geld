@@ -240,11 +240,14 @@ function writeCache(url: string, response: FetchDiffResponse): void {
  */
 const TEXT_CACHE_MAX_ENTRIES = 6;
 const TEXT_CACHE_MAX_BYTES = 24 * 1024 * 1024;
-const textCache = new Map<string, { readonly text: string; readonly at: number }>();
+const textCache = new Map<string, { readonly text: string; readonly at: number; readonly head: string | null }>();
 
-function writeTextCache(url: string, text: string): void {
+/** `head` is the head the text was fetched for, null when the request named none. */
+function writeTextCache(url: string, text: string, head: string | null): void {
+  // An unnamed request never replaces a head's own text: it cannot tell whether it started before that head's push.
+  if (head === null && (textCache.get(url)?.head ?? null) !== null) return;
   textCache.delete(url);
-  textCache.set(url, { text, at: Date.now() });
+  textCache.set(url, { text, at: Date.now(), head });
   let bytes = 0;
   for (const entry of textCache.values()) bytes += entry.text.length;
   while (textCache.size > TEXT_CACHE_MAX_ENTRIES || (bytes > TEXT_CACHE_MAX_BYTES && textCache.size > 1)) {
@@ -255,40 +258,46 @@ function writeTextCache(url: string, text: string): void {
   }
 }
 
-function readTextCache(url: string): string | null {
+/** Text for `head`; text fetched under no head is taken only when `untagged` says the head has not moved since. */
+function readTextCache(url: string, head: string | null, untagged: boolean): string | null {
   const hit = textCache.get(url);
   if (hit === undefined) return null;
   if (Date.now() - hit.at > CACHE_TTL_MS) {
     textCache.delete(url);
     return null;
   }
+  if (head !== null && hit.head !== head && !(hit.head === null && untagged)) return null;
   return hit.text;
 }
 
 /** The head each diff URL's text was last asked for: the URL is the same before and after a push. */
 const textHeads = new Map<string, string>();
 
-/** The page's own diff as text: the text cache first (unless the head moved since), else one `page` fetch (which fills it). */
+/** A request that writes the caches only while it still owns its URL's head, and keeps its own text. */
+interface DiffOwner {
+  readonly head: string | null;
+  owns(): boolean;
+  onText(text: string): void;
+}
+
+/** The page's own diff as text: the text cache first (unless the head moved since), else one `page` fetch. */
 async function fetchDiffText(url: string, headSha: string | null): Promise<FetchDiffTextResponse> {
-  // Text cached for a head nobody named (the header's request before a push) may be the diff before it: fetched again.
-  if (headSha !== null && textHeads.get(url) !== headSha) {
-    textHeads.set(url, headSha);
-    textCache.delete(url);
-  }
-  const cached = readTextCache(url);
+  const unmoved = headSha === null || textHeads.get(url) === headSha;
+  if (headSha !== null) textHeads.set(url, headSha);
+  const cached = readTextCache(url, headSha, unmoved);
   if (cached !== null) return { ok: true, text: cached };
-  // A parsed answer in memory does not help here: it has no text, and the entry would stop the fetch below.
-  cache.delete(url);
-  const result = await fetchDiff(url, 'page');
-  // A push landed while this head's text was on its way: what the fetch cached may be the diff before it, so it goes, and
-  // the newer head's request (or the next pass) fetches its own.
-  if (headSha !== null && textHeads.get(url) !== headSha) {
-    textCache.delete(url);
-    cache.delete(url);
-    return { ok: false, reason: 'queued' };
-  }
+  let text: string | null = null;
+  const owns = (): boolean => headSha === null || textHeads.get(url) === headSha;
+  const result = await fetchDiff(url, 'page', {
+    head: headSha,
+    owns,
+    onText: (fetched) => {
+      text = fetched;
+    },
+  });
+  // A newer head was asked for while this one's text was on its way: that request fetches its own.
+  if (!owns()) return { ok: false, reason: 'queued' };
   if (!result.ok) return { ok: false, reason: result.reason, ...(result.retryAfterMs === undefined ? {} : { retryAfterMs: result.retryAfterMs }) };
-  const text = readTextCache(url);
   return text === null ? { ok: false, reason: 'no-text' } : { ok: true, text };
 }
 
@@ -299,7 +308,7 @@ async function fetchDiffText(url: string, headSha: string | null): Promise<Fetch
  * the extension's host permissions. Cookies are included so private
  * repositories work for signed-in users.
  */
-async function fetchDiff(url: string, priority: DiffPriority): Promise<FetchDiffResponse> {
+async function fetchDiff(url: string, priority: DiffPriority, owner?: DiffOwner): Promise<FetchDiffResponse> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -311,7 +320,8 @@ async function fetchDiff(url: string, priority: DiffPriority): Promise<FetchDiff
   }
 
   const subject = diagnosticSubject(parsed.toString()) ?? undefined;
-  const cached = readCache(parsed.toString());
+  // A parsed answer has no text, so a text request always fetches.
+  const cached = owner === undefined ? readCache(parsed.toString()) : null;
   if (cached !== null) {
     recordDiagnostic({ kind: 'fetch', subject, outcome: cached.ok ? 'memory-hit' : `memory-hit:${cached.reason}` });
     return cached;
@@ -376,7 +386,8 @@ async function fetchDiff(url: string, priority: DiffPriority): Promise<FetchDiff
           result = { ok: false, reason: looksLikeSignInPage(text) ? 'signed-out' : 'not-a-diff' };
         } else {
           result = { ok: true, files: parseUnifiedDiff(text) };
-          writeTextCache(parsed.toString(), text);
+          owner?.onText(text);
+          if (owner === undefined || owner.owns()) writeTextCache(parsed.toString(), text, owner?.head ?? null);
           await recordSuccess();
         }
       }
@@ -400,7 +411,8 @@ async function fetchDiff(url: string, priority: DiffPriority): Promise<FetchDiff
   // is what a private repository answers to a signed-out browser (its diff
   // as much as its pages), so it is not held either: signed in, the next
   // request must succeed at once.
-  if (result.ok || result.reason === 'too-large' || (result.reason.startsWith('http-4') && result.reason !== 'http-404')) {
+  const definitive = result.ok || result.reason === 'too-large' || (result.reason.startsWith('http-4') && result.reason !== 'http-404');
+  if (definitive && (owner === undefined || owner.owns())) {
     writeCache(parsed.toString(), result);
   }
   if (!result.ok && result.reason === 'too-large') await rememberTooLarge(parsed.toString());
