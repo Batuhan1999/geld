@@ -847,21 +847,21 @@ html[data-geld-quick-review] details.js-reviews-container {
  * (about the grey border's lightness, only tinted) and colour the icon. Theme variables only, no fixed green
  * or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review__segment.btn[data-event='approve']:hover {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
   border-color: var(--borderColor-success-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='approve']:hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:hover {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
   border-color: var(--borderColor-danger-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
 }
 
