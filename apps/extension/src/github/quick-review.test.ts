@@ -494,6 +494,27 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__error')?.textContent).toBe('GitHub could not convert the pull request to a draft: Not allowed');
   });
 
+  it('keeps the status pill working where the review group stands aside, and takes it away when switched off', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => mergeBox('MERGEABLE', true));
+    withLabel('Open', 'pullOpened');
+    // Narrow: GitHub hides the counts, so the review group is not placed and GitHub's own button shows.
+    counts().style.display = 'none';
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(document.documentElement.hasAttribute('data-geld-quick-review')).toBe(false);
+    pill()?.click();
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
+    // Focus leaving the menu (Tab) closes it.
+    document.querySelector('.geld-quick-review__status-menu')?.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body }));
+    expect(document.querySelector('.geld-quick-review__status-menu')).toBeNull();
+    applyQuickReview(false, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(pill()).toBeNull();
+    expect(document.querySelector('[data-component="StateLabel"]')?.hasAttribute('data-geld-status-hidden')).toBe(false);
+  });
+
   it('swaps the pill from the first paint where the reader could change the status last time in this repository', async () => {
     window.localStorage.clear();
     resetStatusHints();

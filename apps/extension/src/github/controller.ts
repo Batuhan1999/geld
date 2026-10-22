@@ -408,7 +408,7 @@ export class GeldController {
       // straight back from the in-memory diff states, so no frame lacks them.
       if (chipRemoved(records)) this.applyListChips();
       // The status pill too: a header GitHub (re)rendered shows Geld's pill in its first frame.
-      if (this.settings.quickReview) reassertStatusPills();
+      if (this.settings.quickReview && this.mayDressPage()) reassertStatusPills();
       this.schedule(false);
     });
     this.observer.observe(document.documentElement, {
@@ -1644,6 +1644,13 @@ export class GeldController {
   private readonly onBeforeMatch = (event: Event): void => {
     onReviewBeforeMatch(event, this.settings);
   };
+
+  /** What a pass checks before touching the page, for the work done before paint between passes. */
+  private mayDressPage(): boolean {
+    if (!this.settings.enabled || !extensionAlive() || isSignInInterstitial()) return false;
+    const repo = repoFromPathname(window.location.pathname);
+    return repo === null || decideRepo(this.repoRules, repo).allowed;
+  }
 
   private teardown(): void {
     this.settledHeader = null;

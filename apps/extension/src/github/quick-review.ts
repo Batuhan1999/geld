@@ -323,11 +323,13 @@ function draftFor(pullPath: string): Draft {
 /** Place (or keep) the button before the tab bar's line counts; remove it where it does not belong. */
 export function applyQuickReview(enabled: boolean, context: QuickReviewContext): void {
   const pullPath = pullPathOf(window.location.pathname);
-  const anchor = enabled && context.page.kind.startsWith('pull') && pullPath !== null && viewerLogin() !== '' ? anchorOf(context.groups) : null;
-  if (anchor === null || pullPath === null) {
+  if (!enabled || !context.page.kind.startsWith('pull') || pullPath === null || viewerLogin() === '') {
     removeQuickReview();
     return;
   }
+  // The controls' state lives on the pull request page whether or not the review group has somewhere to stand: the
+  // status pill in the header needs it, and on narrow screens (GitHub hides the counts) the group stands aside alone.
+  const anchor = anchorOf(context.groups);
   if (mounted === null) mounted = createControls(pullPath, context);
   if (mounted.pullPath !== pullPath) {
     closePanel();
@@ -354,6 +356,10 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   showCount(mounted);
   showAuthor(mounted);
   showStatus(mounted);
+  if (anchor === null) {
+    unplace(mounted);
+    return;
+  }
   mounted.anchor = anchor;
   watchSticky(mounted);
   place(mounted);
@@ -437,6 +443,8 @@ function followToolbar(state: Mounted): void {
 
 /** In a stuck header, so it is always to hand while reviewing; otherwise before the tab bar's counts. */
 function place(state: Mounted): void {
+  // Nothing to stand beside (GitHub hides the counts on narrow screens): GitHub's own button is the one shown.
+  if (state.anchor === null) return;
   const sticky = stickyPlace(state);
   if (sticky !== null) {
     if (!sticky.placed(state.root)) sticky.put(state.root);
@@ -451,12 +459,25 @@ function place(state: Mounted): void {
   }
 }
 
+/** The review group out of the page (no counts to stand beside), GitHub's own review button back; the state stays. */
+function unplace(state: Mounted): void {
+  // A box hanging from the group goes with it; one from the status pill stays with the pill.
+  if (state.opener !== null && isReviewEvent(state.opener)) closePanel();
+  hideSnapshot(state);
+  state.anchor = null;
+  state.host?.removeAttribute(ATTR_HOST);
+  state.host = null;
+  if (state.root.isConnected) state.root.remove();
+  if (document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.removeAttribute(ATTR_ACTIVE);
+}
+
 export function removeQuickReview(): void {
   if (document.documentElement.hasAttribute(ATTR_ACTIVE)) document.documentElement.removeAttribute(ATTR_ACTIVE);
+  // Pills the hint put in place before the controls were made go too.
+  removeStatusPills();
   if (mounted === null) return;
   closePanel();
   closeStatusMenu(mounted);
-  removeStatusPills();
   window.clearTimeout(mounted.submittedTimer);
   window.clearTimeout(mounted.mergeTimer);
   window.clearTimeout(mounted.loadingTimer);
@@ -1038,6 +1059,16 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
     },
     { capture: true, signal: keys.signal },
   );
+  // Tabbing out of it closes it, as a click outside does.
+  menu.addEventListener(
+    'focusout',
+    (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && (menu.contains(next) || pill.contains(next))) return;
+      closeStatusMenu(state);
+    },
+    { signal: keys.signal },
+  );
   window.addEventListener('scroll', () => positionStatusMenu(state), { passive: true, signal: keys.signal });
   window.addEventListener('resize', () => positionStatusMenu(state), { signal: keys.signal });
 }
@@ -1132,6 +1163,7 @@ function positionPanel(): void {
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {
   closePanel();
+  closeStatusMenu(state);
   state.panel = panel;
   state.opener = opener;
   buttonFor(state, opener)?.setAttribute('aria-expanded', 'true');
