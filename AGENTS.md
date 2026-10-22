@@ -915,12 +915,14 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   the success response's body was not seen.
   In the tab bar GitHub floats the counts right and drops their line with 12px of top padding;
   a 28px button in that 18px line grew the box to the border (a layout shift, and the button over the tab border), so the box holding both (`[data-geld-quick-review-host]` on GitHub's `rightContentWrapper`) is the tab bar's 40px with no padding and both centred on the tabs, and the button overhangs with `-5px` vertical margins wherever else it lands.
-  Panel rules carry both `.Overlay` and the panel class, and pin `right`/`bottom` to `auto`: Primer's own `.Overlay` comes later in the cascade and won the tie (full width, in flow), and something stretched it to the viewport bottom.- **The tooltip closes when its host leaves the DOM.**
+  Panel rules carry both `.Overlay` and the panel class, and pin `right`/`bottom` to `auto`: Primer's own `.Overlay` comes later in the cascade and won the tie (full width, in flow), and something stretched it to the viewport bottom.
+- **The tooltip closes when its host leaves the DOM.**
   GitHub's React lists re-render rows wholesale (the merge box's stack list when the PR's state changes), removing a hovered chip with no `mouseleave`;
   the fixed tooltip then sat at stale coordinates or snapped to the viewport corner once `follow` measured an empty rect.
   While a tooltip is shown, `ui/tooltip.ts` observes the document (childList + `hidden`/`style`/`class`) and, one frame after a burst, hides the tooltip if the host is disconnected or has no client rects (`hostGone`);
   `position()` checks the same before measuring.
-  The re-added chip gets its own tooltip on the next hover.- **Diff fetch pacing and diagnostics.**
+  The re-added chip gets its own tooltip on the next hover.
+- **Diff fetch pacing and diagnostics.**
   The worker's `fetchDiff` never sleeps inside a message: when the 30/min budget is spent it answers `{ reason: 'queued', retryAfterMs }` and `DiffSource` keeps the row `loading` and re-asks then (with jitter) — a worker sleeping in a timer is idle to Chrome, which stops it after ~30 s and closes every pending port ("message port closed", normalised to `port-closed`).
   Transient failures retry on `TRANSIENT_RETRY_MS` then keep going at its last step up to `TRANSIENT_MAX_ATTEMPTS`.
   The diff endpoint also answers **503** (sometimes 502/504) to a burst — measured headless: a third of a page within seconds, well under the budget — which is GitHub busy, not a block: `recordBusy` pauses everyone 12 s, doubling to 60 s while they keep coming (`cooldownReason: 'busy'`, separate from 429/403 strikes, reset on success), and the page treats `busy` like `queued` for up to `BUSY_MAX_WAITS` pauses before the row says "GitHub busy".

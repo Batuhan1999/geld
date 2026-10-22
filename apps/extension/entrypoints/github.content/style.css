@@ -794,19 +794,19 @@ html[data-geld-quick-review] details.js-reviews-container {
  * ✓ and ✗ under the pointer, and only there, in the theme's own success and danger: the muted surface and the icon. Theme
  * variables only, no fixed green or red: colour-blind and high-contrast themes redefine these.
  */
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true'], [aria-expanded='true']):hover {
   background: var(--bgColor-success-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-disabled='true'], [aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-success);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true'], [aria-expanded='true']):hover {
   background: var(--bgColor-danger-muted);
 }
 
-.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true']):hover .geld-quick-review__glyph > svg {
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-disabled='true'], [aria-expanded='true']):hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-danger);
 }
 
