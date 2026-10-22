@@ -191,7 +191,9 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
   const first = await fetchMergeBox(pullPath, 'SQUASH', false);
   if (first === null) return null;
   const method = first.methods[0] ?? 'SQUASH';
-  const box = method === 'SQUASH' ? first : ((await fetchMergeBox(pullPath, method, false)) ?? first);
+  // The squash box's commit title and message would be sent under another method: no reading is safer than that.
+  const box = method === 'SQUASH' ? first : await fetchMergeBox(pullPath, method, false);
+  if (box === null) return null;
   const asBypass = !box.mergeable && box.canBypass ? await fetchMergeBox(pullPath, method, true) : null;
   return { box, offer: mergeOffer(box, asBypass) };
 }
