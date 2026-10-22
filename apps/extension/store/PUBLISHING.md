@@ -103,7 +103,7 @@ When App Review asks for more information:
 4. Replace title-art screenshots with the physical Safari captures listed in `store/assets/safari/README.md`.
 5. If only information or screenshots changed, Apple permits resubmitting the same build. If the containing app, extension, permissions, or behavior changed, upload and select a new build.
 
-The publish workflow keeps future notes in sync through fastlane’s `app_review_information`. It will not submit Safari until the two review-evidence variables are set.
+The publish workflow keeps future notes in sync through fastlane’s `app_review_information`. It will not submit Safari until the three review-evidence variables are set (`SAFARI_REVIEW_VIDEO_URL`, `SAFARI_REVIEW_VIDEO_VERSION`, `SAFARI_REVIEW_TEST_DEVICE`), and skips it while the recorded version differs from the release.
 
 ## Store listing assets
 
