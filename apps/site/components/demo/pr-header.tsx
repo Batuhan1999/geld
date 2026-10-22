@@ -39,15 +39,15 @@ export function PrHeader({ shown, geld, className }: PrHeaderProps) {
           <Popover>
             <PopoverTrigger
               // A dotted bottom border rather than text-decoration: it follows the theme tokens in every browser.
-              className="rounded-none border-b border-dotted border-muted-foreground/50 px-0.5 font-mono text-[0.8125rem] text-muted-foreground outline-none transition-colors hover:border-foreground/60 hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/40"
+              className="rounded-none border-b border-dotted border-muted-foreground/50 px-0.5 text-xs font-semibold text-muted-foreground outline-none transition-colors hover:border-foreground/60 hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/40"
               aria-label={`${pluralize(geld.hidden.files, geld.noun, geld.nounPlural)} hidden. Show the full breakdown.`}
             >
               {formatCount(geld.hidden.files)} {geld.hidden.files === 1 ? geld.noun : geld.nounPlural}
             </PopoverTrigger>
             <PopoverContent className="p-0">
-              <Breakdown label={`Excluding ${geld.nounPlural}`} totals={shown} />
-              <Breakdown label={`Including ${geld.nounPlural}`} totals={geld.all} />
-              <Breakdown label={`${geld.nounPlural[0]?.toUpperCase() ?? ''}${geld.nounPlural.slice(1)} only`} totals={geld.hidden} />
+              <Breakdown label="Essential" totals={shown} />
+              <Breakdown label={`${geld.nounPlural[0]?.toUpperCase() ?? ''}${geld.nounPlural.slice(1)}`} totals={geld.hidden} />
+              <Breakdown label="Total" totals={geld.all} className="border-t" />
             </PopoverContent>
           </Popover>
         ) : null}
@@ -88,11 +88,12 @@ function Tab({
   );
 }
 
-function Breakdown({ label, totals }: { readonly label: string; readonly totals: ChangeTotals }) {
+/** One row of the same sum the extension's tooltip shows: Essential, what was set aside, then Total. */
+function Breakdown({ label, totals, className }: { readonly label: string; readonly totals: ChangeTotals; readonly className?: string }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-3 py-1.5 text-xs not-last:border-b">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono tabular-nums">
+    <div className={cn('flex items-center justify-between gap-6 px-3 py-1.5 text-xs', className)}>
+      <span className="font-medium text-muted-foreground">{label}</span>
+      <span className="font-semibold tabular-nums">
         {pluralize(totals.files, 'file', 'files')} · {formatDiffstat(totals)}
       </span>
     </div>

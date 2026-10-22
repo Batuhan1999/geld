@@ -12,10 +12,17 @@
  * JSON; `resolveCatalog` prefers a newer fetched list when it carries one.
  */
 
-/** Where the chip is inserted relative to an anchor element. */
-export type ChipPlacement = 'after' | 'append';
+/**
+ * Where the chip is inserted relative to an anchor element: as its next
+ * sibling, as its last child, or as its first child. `prepend` exists for
+ * single-line, ellipsized anchors: floated right from the *start* of the line
+ * the chip stays on that line and shortens it, so the ellipsis falls on the
+ * anchor's own text (a branch name) instead of on the counts; a float that
+ * comes after the text is pushed below a full line instead.
+ */
+export type ChipPlacement = 'after' | 'append' | 'prepend';
 
-export const CHIP_PLACEMENTS: readonly ChipPlacement[] = ['after', 'append'];
+export const CHIP_PLACEMENTS: readonly ChipPlacement[] = ['after', 'append', 'prepend'];
 
 /** Where a row's author login can be read from. */
 export type AuthorSourceKind =
@@ -47,6 +54,8 @@ export interface ListSurfaceSpec {
   readonly description: string;
   /** `closest()` selector from a PR title link to its row. */
   readonly row: string;
+  /** The row belongs to this surface only when it sits inside an element matching this (rows of generic components, found in many menus). */
+  readonly inside?: string;
   /** The row does not belong to this surface when it sits inside an element matching this. */
   readonly notInside?: string;
   /** Tried in order; the first element found anchors the chip. Empty: fall back to the "#N" line, then the title. */
@@ -72,31 +81,65 @@ export const BUNDLED_LIST_SURFACES: readonly ListSurfaceSpec[] = [
   {
     id: 'react-list',
     description:
-      'Primer ListView PR list rolling out to /pulls since 2026-09 (li[id*="-list-view-node-"] rows, a[data-testid="listitem-title-link"] titles, a Description-module__container line: "#N · author opened … · Review required · checks"), and the earlier React issues list (li[role="listitem"]).',
+      'Primer ListView PR list rolling out to /pulls since 2026-09 (li[id*="-list-view-node-"] rows, a[data-testid="listitem-title-link"] titles, a description line — Description-module__container until Oct 2026, container__x description__y since GitHub dropped the module prefix from its class names: "#N · author opened … · Review required · checks"), and the earlier React issues list (li[role="listitem"]).',
     row: 'li[id*="-list-view-node-"], li[role="listitem"]',
-    notInside: '[class*="StackState"]',
-    chipAnchors: [{ selector: '[class*="Description-module__container"], [data-testid="issue-pr-description"]', placement: 'append' }],
+    notInside: '[class*="StackState"], [class*="stackNavList"]',
+    chipAnchors: [{ selector: '[class*="Description-module__container"], [class*="description__"], [data-testid="issue-pr-description"]', placement: 'append' }],
     authors: [
       { selector: 'a[data-testid="author-filter-link"], a[data-testid*="author"]', from: 'label' },
       { selector: 'a[data-testid="author-filter-link"], a[data-testid*="author"]', from: 'href' },
       { selector: 'a[data-testid="author-filter-link"]', from: 'text' },
       { selector: 'a[href*="author%3A"], a[href*="author:"]', from: 'href' },
     ],
-    css: `.geld-pr-stat[data-geld-surface='react-list'] { margin-left: 6px; font-size: 12px; vertical-align: baseline; }`,
+    // --geld-chip-gap (github.content/style.css) spaces both sides of the "•" equally.
+    css: `.geld-pr-stat[data-geld-surface='react-list'] { --geld-chip-gap: 6px; font-size: 12px; vertical-align: baseline; }`,
   },
   {
     id: 'stack-popover',
-    description: 'Stacked pull requests popover: ActionList items inside [class*="StackState"] with a "#N · branch" description. Names no author.',
+    description:
+      'The "Stack N/M" popover on a stacked pull request: ActionList items inside the popover\'s nav ([class*="StackState"] until Oct 2026; a nav.stackNavList__x inside a Primer AnchoredOverlay since), "#N · branch" in an ActionList.Description ellipsized on one line. Names no author.',
     row: 'li[data-component="ActionList.Item"]',
+    // ActionList items appear in many menus; only inside a stack do they count.
+    inside: '[class*="StackState"], [class*="AnchoredOverlay"] [class*="stackNavList"]',
+    // Prepended and floated right: the counts keep their full width on the
+    // right of the line and the branch name is what gets the ellipsis. The
+    // "•" separator is dropped there — the counts sit against the edge, not
+    // after the text, so a bullet would hang in the gap.
+    chipAnchors: [{ selector: '[data-component="ActionList.Description"]', placement: 'prepend' }],
+    authors: [],
+    css: [
+      `.geld-pr-stat[data-geld-surface='stack-popover'] { float: right; margin-left: 12px; font-size: 11px; }`,
+      `.geld-pr-stat[data-geld-surface='stack-popover'] .geld-pr-stat__sep { display: none; }`,
+      `.geld-pr-stat[data-geld-surface='stack-popover'] .geld-pr-stat__sep + * { margin-left: 0; }`,
+    ].join('\n'),
+  },
+  {
+    id: 'stack-list',
+    description:
+      'The merge box\'s "Stacked pull requests list" nav at the bottom of a PR (NavList items inside [class*="StackList"], since Oct 2026 a nav.stackNavList__x carrying that aria-label) and the "Preview stack" dialog that proposes a stack from sequential PRs (the same NavList inside [class*="PreviewStackDialog"], in a Primer portal): "#N · branch" in a block ActionList.Description, a status label ("Ready" / "Not ready") trailing the merge box\'s rows. The counts follow the branch name inline — floated right they would butt against labels of differing widths and never line up.',
+    row: 'li[data-component="ActionList.Item"]',
+    inside: '[class*="StackList"], nav[aria-label="Stacked pull requests list"], [class*="PreviewStackDialog"], [role="region"][aria-label="Proposed stack of pull requests"]',
     chipAnchors: [{ selector: '[data-component="ActionList.Description"]', placement: 'append' }],
     authors: [],
-    css: `.geld-pr-stat[data-geld-surface='stack-popover'] { margin-left: 8px; font-size: 11px; }`,
+    css: `.geld-pr-stat[data-geld-surface='stack-list'] { --geld-chip-gap: 6px; font-size: 11px; }`,
+  },
+  {
+    id: 'pr-hovercard',
+    description:
+      'The pull request hovercard (hovering a "#N" or PR link): .js-hovercard-content whose data-hovercard-target-url is /owner/repo/pull/N/hovercard. Its top box is a .d-flex.flex-column.f4 with the title link and a .d-flex.flex-wrap.gap-2 row of state badges ("Open", "Draft", …); the chip joins that row after the badges, vertically centred on them. Names no author.',
+    row: '.js-hovercard-content[data-hovercard-target-url*="/pull/"]',
+    chipAnchors: [{ selector: '.d-flex.flex-column.f4 > .d-flex.flex-wrap', placement: 'append' }],
+    authors: [],
+    // One flex item in the badge row: nowrap keeps it whole, so when the row
+    // runs out of room the counts wrap under the badge together. No bullet:
+    // it follows a badge, not running text.
+    css: [
+      `.geld-pr-stat[data-geld-surface='pr-hovercard'] { align-self: center; margin: 0; font-size: 12px; line-height: 18px; white-space: nowrap; }`,
+      `.geld-pr-stat[data-geld-surface='pr-hovercard'] .geld-pr-stat__sep { display: none; }`,
+      `.geld-pr-stat[data-geld-surface='pr-hovercard'] .geld-pr-stat__sep + * { margin-left: 4px; }`,
+    ].join('\n'),
   },
 ];
-
-/** The stack popover only counts when the item really is inside a stack. */
-export const STACK_SURFACE_ID = 'stack-popover';
-export const STACK_CONTAINER_SELECTOR = '[class*="StackState"]';
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
@@ -140,6 +183,7 @@ export function parseListSurfaces(value: unknown, path = 'listSurfaces'): readon
     const description = entry.description;
     if (typeof description !== 'string') throw new ListSurfaceError(`${at}.description: expected a string, got ${describe(description)}`);
     const row = requireSelector(entry, 'row', at);
+    const inside = entry.inside === undefined ? undefined : requireSelector(entry, 'inside', at);
     const notInside = entry.notInside === undefined ? undefined : requireSelector(entry, 'notInside', at);
     if (!Array.isArray(entry.chipAnchors)) throw new ListSurfaceError(`${at}.chipAnchors: expected a list, got ${describe(entry.chipAnchors)}`);
     const chipAnchors = entry.chipAnchors.map((anchor: unknown, anchorIndex): ChipAnchorSpec => {
@@ -165,7 +209,12 @@ export function parseListSurfaces(value: unknown, path = 'listSurfaces'): readon
     if (css !== undefined && typeof css !== 'string') throw new ListSurfaceError(`${at}.css: expected a string, got ${describe(css)}`);
     if (typeof css === 'string' && css.length > 20_000) throw new ListSurfaceError(`${at}.css: unreasonably long`);
     const spec: ListSurfaceSpec = { id, description, row, chipAnchors, authors };
-    return { ...spec, ...(notInside === undefined ? {} : { notInside }), ...(css === undefined ? {} : { css }) };
+    return {
+      ...spec,
+      ...(inside === undefined ? {} : { inside }),
+      ...(notInside === undefined ? {} : { notInside }),
+      ...(css === undefined ? {} : { css }),
+    };
   });
 }
 
@@ -268,6 +317,7 @@ export function listSurfaceJson(spec: ListSurfaceSpec): Record<string, unknown> 
     id: spec.id,
     description: spec.description,
     row: spec.row,
+    ...(spec.inside === undefined ? {} : { inside: spec.inside }),
     ...(spec.notInside === undefined ? {} : { notInside: spec.notInside }),
     chipAnchors: spec.chipAnchors.map((anchor) => ({ selector: anchor.selector, placement: anchor.placement })),
     authors: spec.authors.map((source) => ({ selector: source.selector, from: source.from })),

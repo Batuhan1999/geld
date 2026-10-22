@@ -6,6 +6,7 @@ import {
   isCategoryEnabled,
   isGroupEnabled,
   isTestGroupEnabled,
+  normalizeAiBaseUrl,
   normalizeHost,
   normalizeSettings,
   parsePatternList,
@@ -53,6 +54,24 @@ describe('normalizeSettings', () => {
     expect(describeAdvancedSettings(migrated, 'docs')).toBeNull();
   });
 
+  it('drops the retired large category settings and requires the new explicit opt-in', () => {
+    const migrated = normalizeSettings({
+      categories: { tests: false, large: true },
+      groups: { 'large/large': false, 'tests/e2e': false },
+      categoryPatterns: { large: ['vendor/**'], tests: ['*.golden'] },
+    });
+    expect(migrated.categories).toEqual({ tests: false });
+    expect(migrated.groups).toEqual({ 'tests/e2e': false });
+    expect(migrated.categoryPatterns).toEqual({ tests: ['*.golden'] });
+    expect(migrated.hideLargeDiffs).toBe(false);
+    expect(isCategoryEnabled(migrated, 'large')).toBe(false);
+
+    const optedIn = normalizeSettings({ hideLargeDiffs: true, categories: { large: false } });
+    expect(optedIn.categories).toEqual({});
+    expect(optedIn.hideLargeDiffs).toBe(true);
+    expect(isCategoryEnabled(optedIn, 'large')).toBe(true);
+  });
+
   it('reads custom categories, dropping broken or duplicate ones', () => {
     const settings = normalizeSettings({
       customCategories: [
@@ -81,6 +100,31 @@ describe('normalizeSettings', () => {
 
   it('parses textarea lists', () => {
     expect(parsePatternList(' a \n\n# c\n b ')).toEqual(['a', 'b']);
+  });
+
+  it('reads review conversation settings', () => {
+    expect(normalizeSettings({ compactTimeline: 'minimal', prOverview: false, reviewBots: ['acme[bot]'] })).toEqual({
+      ...DEFAULT_SETTINGS,
+      compactTimeline: 'minimal',
+      prOverview: false,
+      reviewBots: ['acme[bot]'],
+    });
+  });
+});
+
+describe('normalizeAiBaseUrl', () => {
+  it('reduces a pasted gateway URL to the base every request builds on', () => {
+    expect(normalizeAiBaseUrl('https://ai-gateway.vercel.sh/v1/')).toBe('https://ai-gateway.vercel.sh');
+    expect(normalizeAiBaseUrl('https://openrouter.ai/api/v1')).toBe('https://openrouter.ai/api');
+    expect(normalizeAiBaseUrl('https://ai-gateway.vercel.sh/typesafe')).toBe('https://ai-gateway.vercel.sh');
+    expect(normalizeAiBaseUrl('  https://api.openai.com  ')).toBe('https://api.openai.com');
+    expect(normalizeAiBaseUrl('https://gw.example.com/v2beta')).toBe('https://gw.example.com/v2beta');
+  });
+
+  it('is what normalizeSettings applies to aiBaseUrl', () => {
+    expect(normalizeSettings({ aiBaseUrl: 'https://ai-gateway.vercel.sh/v1' }).aiBaseUrl).toBe('https://ai-gateway.vercel.sh');
+    expect(normalizeSettings({}).aiEnabled).toBe(false);
+    expect(normalizeSettings({ aiEnabled: true, aiJev: true }).aiJev).toBe(true);
   });
 });
 

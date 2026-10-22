@@ -1,22 +1,38 @@
+import { browser } from 'wxt/browser';
 import { storage } from 'wxt/utils/storage';
 import type { RepoConfig, RepoConfigParse, SettingsIssue } from '@geld/core';
 import { BUNDLED_CATALOG, ORG_CONFIG_PATHS, ORG_CONFIG_REPO, REPO_CONFIG_PATH, generatedConfigFrom, isEmptyRepoConfig, parseRepoConfig } from '@geld/core';
 import type { Catalog } from '@geld/core';
+import { REVIEW_BOTS } from '@geld/review';
+import { persist } from '../lib/context';
 import { looksLikeHtml } from '../lib/http';
+import type { FetchFileRequest } from '../lib/messages';
+import { isFetchFileResponse } from '../lib/messages';
 
 /**
  * Fetches and caches the files a repository uses to configure Geld:
  * `.github/geld.yml` in the repository, the organisation's defaults in its
  * `.github` repository, and `.gitattributes` for `linguist-generated`.
  *
- * Requests go through the page's own origin (`/owner/repo/raw/HEAD/path`),
- * so the session cookie is sent and private repositories work with no extra
- * permission or token: github.com answers with a redirect to
- * raw.githubusercontent.com, which allows any origin to read the file.
+ * Most repositories have none of these, and a `fetch` that ends in 404 is
+ * printed as an error in the console of whichever context made it — so no
+ * request here is allowed to 404 in the page (see {@link RepoConfigSource.readFile}):
+ * the repository's own files are read from the page with the session cookie
+ * (private repositories work with no token) but only after GitHub's
+ * directory listing said they exist; the organisation's `.github` repository,
+ * public by GitHub's own rule for default community files, is read by the
+ * background from raw.githubusercontent.com.
  *
  * Files are cached on disk per `github:{owner}:{repo}:{path}` (a missing file
  * is cached too) and refreshed after {@link TTL_MS}; a network error is
  * retried after a minute and never cached.
+ *
+ * The same directory listings say which review bots have a config file in
+ * the repository (`ReviewBot.configFiles`: `.coderabbit.yaml`, `.cursor/`
+ * `BUGBOT.md`, …), which is how the Request a review menu can offer a bot on
+ * a pull request it has not run on; see {@link RepoConfigSource.botConfigs}.
+ * The root listing is fetched for the config file anyway, so this costs at
+ * most one more request per dotted directory the repository has.
  */
 
 const TTL_MS = 30 * 60 * 1000;
@@ -24,6 +40,7 @@ const RETRY_MS = 60 * 1000;
 const MAX_ENTRIES = 400;
 const MAX_CONCURRENT = 2;
 const MAX_BYTES = 256 * 1024;
+const PUBLIC_RAW_HOST = 'raw.githubusercontent.com';
 
 interface CachedFile {
   /** `null`: the repository has no such file. */
@@ -61,6 +78,18 @@ export interface ResolvedRepoConfig {
   readonly files: readonly RepoConfigFile[];
 }
 
+/** The registry's ids, for validating a config's `reviewBots`. */
+const KNOWN_BOT_IDS: readonly string[] = REVIEW_BOTS.map((bot) => bot.id);
+
+/** Which review bots have a config file in a repository, as far as the listings have answered. */
+export interface BotConfigs {
+  readonly loading: boolean;
+  /** Bot id → the path that was found. */
+  readonly found: ReadonlyMap<string, string>;
+}
+
+const NO_BOT_CONFIGS: BotConfigs = { loading: true, found: new Map() };
+
 /** The valid configs of `resolved`, ready for `applyRepoConfigs`. */
 export function validConfigs(resolved: ResolvedRepoConfig): readonly RepoConfig[] {
   const configs: RepoConfig[] = [];
@@ -95,6 +124,8 @@ export class RepoConfigSource {
   private cacheReady = false;
   /** Parsed results per repository, invalidated whenever a file for it lands. */
   private readonly resolved = new Map<string, ResolvedRepoConfig>();
+  /** Bot config detection per `origin/repo`, for {@link TTL_MS}. */
+  private readonly botConfigsByRepo = new Map<string, { readonly at: number; value: BotConfigs }>();
 
   constructor(
     private readonly onChange: () => void,
@@ -107,7 +138,7 @@ export class RepoConfigSource {
       for (const [key, entry] of Object.entries(value)) if (isCachedFile(entry) && now - entry.at < TTL_MS) clean[key] = entry;
       this.persistent = clean;
       this.cacheReady = true;
-      if (Object.keys(clean).length !== Object.keys(value).length) void cacheItem.setValue(clean);
+      if (Object.keys(clean).length !== Object.keys(value).length) persist(cacheItem.setValue(clean));
       this.onChange();
     });
   }
@@ -141,14 +172,14 @@ export class RepoConfigSource {
           break;
         }
         if (lookup.text !== null) {
-          files.push({ kind: 'org', repo: orgRepo, path, url: fileUrl(origin, orgRepo, path), parse: parseRepoConfig(lookup.text, this.catalog) });
+          files.push({ kind: 'org', repo: orgRepo, path, url: fileUrl(origin, orgRepo, path), parse: parseRepoConfig(lookup.text, this.catalog, KNOWN_BOT_IDS) });
           break;
         }
       }
     }
     const own = this.lookup(origin, repo, REPO_CONFIG_PATH);
     if (own.status === 'loading') loading = true;
-    else if (own.text !== null) files.push({ kind: 'repo', repo, path: REPO_CONFIG_PATH, url: fileUrl(origin, repo, REPO_CONFIG_PATH), parse: parseRepoConfig(own.text, this.catalog) });
+    else if (own.text !== null) files.push({ kind: 'repo', repo, path: REPO_CONFIG_PATH, url: fileUrl(origin, repo, REPO_CONFIG_PATH), parse: parseRepoConfig(own.text, this.catalog, KNOWN_BOT_IDS) });
 
     const attributes = this.lookup(origin, repo, '.gitattributes');
     if (attributes.status === 'loading') loading = true;
@@ -162,6 +193,54 @@ export class RepoConfigSource {
     const result: ResolvedRepoConfig = { repo, loading, files };
     this.resolved.set(repo, result);
     return result;
+  }
+
+  /**
+   * Which registry bots have one of their config files in `repo`. Answered
+   * from memory; the first ask starts the listing reads and `onChange` fires
+   * when they are in. Independent of the `repoConfigs` setting: this reads
+   * what the repository contains, it applies nothing from it.
+   */
+  botConfigs(origin: string, repo: string): BotConfigs {
+    const key = `${origin}/${repo}`;
+    const known = this.botConfigsByRepo.get(key);
+    if (known !== undefined && Date.now() - known.at < TTL_MS) return known.value;
+    const entry = { at: Date.now(), value: NO_BOT_CONFIGS };
+    this.botConfigsByRepo.set(key, entry);
+    void this.detectBotConfigs(origin, repo).then((found) => {
+      entry.value = { loading: false, found };
+      this.onChange();
+    });
+    return entry.value;
+  }
+
+  private async detectBotConfigs(origin: string, repo: string): Promise<ReadonlyMap<string, string>> {
+    const found = new Map<string, string>();
+    await Promise.all(
+      REVIEW_BOTS.map(async (bot) => {
+        for (const path of bot.configFiles) {
+          if (await this.pathExists(origin, repo, path)) {
+            found.set(bot.id, path);
+            return;
+          }
+        }
+      }),
+    );
+    return found;
+  }
+
+  /** Whether `path` (a directory when it ends in `/`) exists at HEAD; an unreadable listing counts as absent. */
+  private async pathExists(origin: string, repo: string, path: string): Promise<boolean> {
+    const segments = path.replace(/\/$/, '').split('/');
+    let directory = '';
+    for (const segment of segments) {
+      const paths = await this.listing(origin, repo, directory);
+      if (paths === null) return false;
+      const next = directory === '' ? segment : `${directory}/${segment}`;
+      if (!paths.has(next)) return false;
+      directory = next;
+    }
+    return true;
   }
 
   private lookup(origin: string, repo: string, path: string): Lookup {
@@ -203,18 +282,7 @@ export class RepoConfigSource {
   private async fetchFile(job: Job): Promise<void> {
     let text: string | null;
     try {
-      const response = await fetch(`${job.origin}/${job.repo}/raw/HEAD/${job.path}`, { credentials: 'same-origin', cache: 'no-store', redirect: 'follow' });
-      if (response.status === 404) {
-        text = null;
-      } else if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      } else {
-        const body = await response.text();
-        // A 200 that is really a GitHub page (SSO interstitial, sign-in wall,
-        // unavailable repository) is not a config file; treat it like a blip.
-        if (looksLikeHtml(response.headers.get('content-type'), body)) throw new Error('HTML page instead of a file');
-        text = body.length > MAX_BYTES ? body.slice(0, MAX_BYTES) : body;
-      }
+      text = await this.readFile(job);
     } catch {
       // Network blip, rate limit, signed-out redirect loop: behave as if there
       // were no file so the page settles, try again in a while, store nothing.
@@ -228,9 +296,61 @@ export class RepoConfigSource {
     this.memory.set(job.key, { status: 'done', text });
     this.persistent[job.key] = { text, at: Date.now() };
     this.trim();
-    void cacheItem.setValue(this.persistent);
+    persist(cacheItem.setValue(this.persistent));
     this.invalidate(job.repo);
     this.onChange();
+  }
+
+  /**
+   * The file's text, `null` when the repository has no such file; throws on
+   * anything transient. Which context reads it is chosen so that an expected
+   * miss never shows up as a 404 in the page's console:
+   *
+   * - The organisation's `.github` repository has to be public (GitHub's rule
+   *   for default community files), so the background reads it — from
+   *   raw.githubusercontent.com without credentials on github.com, where the
+   *   host's `Access-Control-Allow-Origin: *` is accepted; from the server's
+   *   own `raw` path on an Enterprise host. A miss is a 404 in the worker.
+   * - The repository's own files may be private, so they are read from the
+   *   page with the session cookie — but only once GitHub's directory
+   *   listing (a same-origin JSON request, 200 whenever the repository is
+   *   visible) says the file exists. Without a usable listing the file is
+   *   fetched directly, which is the pre-listing behaviour.
+   */
+  private async readFile(job: Job): Promise<string | null> {
+    if (job.repo.endsWith(`/${ORG_CONFIG_REPO}`)) return readViaBackground(job);
+    const exists = await this.exists(job);
+    if (exists === false) return null;
+    return readFromPage(job);
+  }
+
+  /** Whether `job.path` exists according to the directory listings; `null` when a listing could not be read. */
+  private async exists(job: Job): Promise<boolean | null> {
+    let directory = '';
+    for (const segment of job.path.split('/')) {
+      const paths = await this.listing(job.origin, job.repo, directory);
+      if (paths === null) return null;
+      const path = directory === '' ? segment : `${directory}/${segment}`;
+      if (!paths.has(path)) return false;
+      directory = path;
+    }
+    return true;
+  }
+
+  private readonly listings = new Map<string, { readonly at: number; readonly paths: Promise<ReadonlySet<string> | null> }>();
+
+  /**
+   * The paths directly inside `directory` of `repo` at HEAD, from the JSON
+   * GitHub's file browser serves for its tree pages. Memoised per directory
+   * for {@link TTL_MS}, the same lifetime as the files themselves.
+   */
+  private listing(origin: string, repo: string, directory: string): Promise<ReadonlySet<string> | null> {
+    const key = `${origin}/${repo}/${directory}`;
+    const known = this.listings.get(key);
+    if (known !== undefined && Date.now() - known.at < TTL_MS) return known.paths;
+    const paths = readListing(origin, repo, directory);
+    this.listings.set(key, { at: Date.now(), paths });
+    return paths;
   }
 
   /** A file of `repo` changed; every repository that may read it (all of an org's repos for `.github`) is re-resolved. */
@@ -259,4 +379,59 @@ function cacheKey(origin: string, repo: string, path: string): string {
 
 function fileUrl(origin: string, repo: string, path: string): string {
   return `${origin}/${repo}/blob/HEAD/${path}`;
+}
+
+/** `/owner/repo/raw/HEAD/path` on the page's origin: the session cookie decides access; github.com redirects to the CORS-open raw host. */
+async function readFromPage(job: Job): Promise<string | null> {
+  const response = await fetch(`${job.origin}/${job.repo}/raw/HEAD/${job.path}`, { credentials: 'same-origin', cache: 'no-store', redirect: 'follow' });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = await response.text();
+  // A 200 that is really a GitHub page (SSO interstitial, sign-in wall,
+  // unavailable repository) is not a config file; treat it like a blip.
+  if (looksLikeHtml(response.headers.get('content-type'), body)) throw new Error('HTML page instead of a file');
+  return body.length > MAX_BYTES ? body.slice(0, MAX_BYTES) : body;
+}
+
+/** The background reads the file (`geld:fetch-file`); anything but a file or a definite miss is a blip. */
+async function readViaBackground(job: Job): Promise<string | null> {
+  const url =
+    new URL(job.origin).hostname === 'github.com'
+      ? `https://${PUBLIC_RAW_HOST}/${job.repo}/HEAD/${job.path}`
+      : `${job.origin}/${job.repo}/raw/HEAD/${job.path}`;
+  const request: FetchFileRequest = { type: 'geld:fetch-file', url };
+  const response: unknown = await browser.runtime.sendMessage(request);
+  if (!isFetchFileResponse(response) || !response.ok) throw new Error('file unavailable');
+  return response.text;
+}
+
+/**
+ * GitHub's file browser answers `Accept: application/json` on a tree URL with
+ * the page's data, including the directory's entries (`payload.tree.items[]
+ * .path`). `null` when the answer is not that shape (signed-out HTML, a
+ * changed payload, an Enterprise version without this route).
+ */
+async function readListing(origin: string, repo: string, directory: string): Promise<ReadonlySet<string> | null> {
+  try {
+    const url = `${origin}/${repo}/tree/HEAD${directory === '' ? '' : `/${directory}`}?noancestors=1`;
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    if (!isRecord(body) || !isRecord(body.payload) || !isRecord(body.payload.tree) || !Array.isArray(body.payload.tree.items)) return null;
+    const paths = new Set<string>();
+    for (const item of body.payload.tree.items) {
+      if (isRecord(item) && typeof item.path === 'string') paths.add(item.path);
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

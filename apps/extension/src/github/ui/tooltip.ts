@@ -7,14 +7,40 @@ export type { StatsBreakdown } from '../breakdown';
 
 type BreakdownProvider = () => StatsBreakdown | null;
 
-const providers = new WeakMap<HTMLElement, BreakdownProvider>();
+interface TooltipBinding {
+  readonly anchor: HTMLElement;
+  readonly provider: BreakdownProvider;
+  /** `end`: the box's right edge sits on the host's right edge (the PR header's counts end at the page column's edge); default centred on the anchor. */
+  readonly align?: 'end';
+  /**
+   * The box may sit flush on a bar under the host: when a bordered line (the
+   * PR header's tab bar) runs right below the counts, the box's top border
+   * is laid on that line and its top corners are squared, so it hangs from
+   * the bar as a drawer rather than floating a pixel or two beneath it.
+   */
+  readonly flush?: boolean;
+  /** The bar found for `flush`, kept between repositions (scroll, resize) while it is in the document. */
+  bar: HTMLElement | null;
+}
+
+export interface TooltipOptions {
+  readonly align?: 'end';
+  readonly flush?: boolean;
+}
+
+const providers = new WeakMap<HTMLElement, TooltipBinding>();
 let tooltip: HTMLElement | null = null;
 let activeHost: HTMLElement | null = null;
+
+/** One shared tooltip element; the active host points at it with `aria-describedby`. */
+const TOOLTIP_ID = 'geld-line-counts';
+const TOOLTIP_ANCHOR_ATTRIBUTE = 'data-geld-tooltip-anchor';
 
 function ensureTooltip(): HTMLElement {
   if (tooltip !== null && tooltip.isConnected) return tooltip;
   tooltip = createElement('div', {
     class: 'geld-tooltip',
+    id: TOOLTIP_ID,
     role: 'tooltip',
     [OWN_UI_ATTRIBUTE]: '',
     hidden: '',
@@ -23,34 +49,55 @@ function ensureTooltip(): HTMLElement {
   return tooltip;
 }
 
-function row(label: string, totals: ChangeTotals, emphasised: boolean): HTMLElement {
-  return createElement('div', { class: `geld-tooltip__row${emphasised ? ' geld-tooltip__row--strong' : ''}` }, [
+/**
+ * One line of the breakdown. The cells are grid items (the row is
+ * `display: contents`); the whitespace between them creates no grid item —
+ * any other text would — but keeps a screen reader from running
+ * "Excluding test files12 files+42−26" together. "−" is U+2212, read "minus".
+ */
+function row(label: string, totals: ChangeTotals): HTMLElement {
+  // Comment-only lines live inside files that stay visible, so a row of lines
+  // alone has no file count of its own to show.
+  const files = totals.files === 0 && totals.additions + totals.deletions > 0 ? '' : pluralize(totals.files, 'file', 'files');
+  return createElement('div', { class: 'geld-tooltip__row' }, [
     createElement('span', { class: 'geld-tooltip__label' }, [label]),
-    createElement('span', { class: 'geld-tooltip__files' }, [pluralize(totals.files, 'file', 'files')]),
+    ' ',
+    createElement('span', { class: 'geld-tooltip__files' }, [files]),
+    ' ',
     createElement('span', { class: 'geld-tooltip__add' }, [`+${formatCount(totals.additions)}`]),
+    ' ',
     createElement('span', { class: 'geld-tooltip__del' }, [`\u2212${formatCount(totals.deletions)}`]),
+    ' ',
   ]);
 }
 
+/**
+ * The breakdown reads top to bottom as a sum: what is left to review, then
+ * each thing Geld set aside, a rule, and the total GitHub prints.
+ */
 function render(breakdown: StatsBreakdown): void {
   const element = ensureTooltip();
-  const capitalised = `${breakdown.nounPlural[0]?.toUpperCase() ?? ''}${breakdown.nounPlural.slice(1)}`;
+  const hiddenRows = breakdown.categories.map((entry) => row(entry.category.title, entry.totals));
+  if (breakdown.lines.additions + breakdown.lines.deletions > 0) {
+    hiddenRows.push(row('Comments', { files: 0, additions: breakdown.lines.additions, deletions: breakdown.lines.deletions }));
+  }
+  if (breakdown.filtered.files > 0) hiddenRows.push(row('Filtered by GitHub', breakdown.filtered));
+  // Nothing set aside: still say what would have been ("Tests · 0 files").
+  if (hiddenRows.length === 0) hiddenRows.push(row(breakdown.emptyTitle, breakdown.hidden));
   element.replaceChildren(
-    createElement('div', { class: 'geld-tooltip__title' }, ['Line counts']),
-    row(`Excluding ${breakdown.nounPlural}`, breakdown.visible, true),
-    row(`Including ${breakdown.nounPlural}`, breakdown.all, false),
-    row(`${capitalised} only`, breakdown.hidden, false),
-    ...breakdown.categories.map((entry) => row(` ${entry.category.title}`, entry.totals, false)),
+    row('Essential', breakdown.visible),
+    ...hiddenRows,
+    createElement('div', { class: 'geld-tooltip__rule', role: 'separator' }),
+    row('Total', breakdown.all),
   );
 }
 
 /** Distance the tooltip keeps from the edges of the viewport. */
 const VIEWPORT_MARGIN = 8;
-/** Gap between the host and the tooltip; leaves room for the arrow. */
-const HOST_GAP = 6;
-/** The arrow is 12px wide and must stay clear of the rounded corners. */
-const ARROW_INSET = 12;
-
+/** Gap between the host and the tooltip; the bordered caret is 7px tall. */
+const HOST_GAP = 8;
+/** How far the underlined count may end before the host's right edge and still count as sitting at its end (the PR header's "+N −M" follows it). */
+const END_SLACK = 160;
 /**
  * Place the tooltip next to `host`, inside the viewport. The tooltip is
  * `position: fixed`, so the coordinates are viewport coordinates and the box
@@ -60,27 +107,173 @@ const ARROW_INSET = 12;
  * under that scrollbar and give the page a horizontal one. The viewport is
  * measured on `documentElement`, which excludes scrollbars.
  */
+/** A host that left the DOM, or is no longer rendered, has nothing to point a tooltip at. */
+function hostGone(host: HTMLElement): boolean {
+  return !host.isConnected || host.getClientRects().length === 0;
+}
+
+/** Where the pointer was when the tooltip was asked for (viewport y), for an anchor that wraps across lines. */
+let pointerY: number | null = null;
+
+/**
+ * The lines an inline anchor occupies, as one rect per line: a commit
+ * message link that wraps has a client rect per line box (and per inline
+ * child), which `getBoundingClientRect` unions into a box the tooltip would
+ * hang under even when the pointer rests on the first line — under a last
+ * line that may not even reach the pointer's column. Rects sharing a
+ * vertical band are merged into that line.
+ */
+function lineRects(anchor: Element): readonly DOMRect[] {
+  return mergeLineRects([...anchor.getClientRects()]);
+}
+
+/** Client rects folded into one per line: rects whose vertical bands overlap are one line. Exported for its test. */
+export function mergeLineRects(all: readonly DOMRect[]): readonly DOMRect[] {
+  const rects = all.filter((rect) => rect.width > 0 && rect.height > 0).sort((a, b) => a.top - b.top);
+  const lines: DOMRect[] = [];
+  for (const rect of rects) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && rect.top < last.bottom - 1) {
+      const top = Math.min(last.top, rect.top);
+      const bottom = Math.max(last.bottom, rect.bottom);
+      const left = Math.min(last.left, rect.left);
+      const right = Math.max(last.right, rect.right);
+      lines[lines.length - 1] = new DOMRect(left, top, right - left, bottom - top);
+    } else lines.push(rect);
+  }
+  return lines;
+}
+
+/** Which of the anchor's lines the pointer is on: the one under it, else the nearest; the first with no pointer. Exported for its test. */
+export function lineIndex(lines: readonly DOMRect[], y: number | null): number {
+  if (lines.length <= 1 || y === null) return 0;
+  const under = lines.findIndex((line) => y >= line.top && y <= line.bottom);
+  if (under >= 0) return under;
+  let best = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  lines.forEach((line, index) => {
+    const distance = y < line.top ? line.top - y : y - line.bottom;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+  return best;
+}
+
+/** The rect the tooltip hangs under: the anchor's line under the pointer, or its whole box when it is one line. */
+function anchorRectOf(anchor: Element): DOMRect {
+  const lines = lineRects(anchor);
+  if (lines.length <= 1) return anchor.getBoundingClientRect();
+  return lines[lineIndex(lines, pointerY)] ?? anchor.getBoundingClientRect();
+}
+
 function position(host: HTMLElement): void {
+  if (hostGone(host)) {
+    hideTooltip();
+    return;
+  }
   const element = ensureTooltip();
-  const hostRect = host.getBoundingClientRect();
+  const binding = providers.get(host);
+  const boundAnchor = binding?.anchor;
+  const anchor = boundAnchor?.isConnected === true ? boundAnchor : host;
+  const anchorRect = anchorRectOf(anchor);
   const viewportWidth = document.documentElement.clientWidth;
   const viewportHeight = document.documentElement.clientHeight;
   element.hidden = false;
   const tipRect = element.getBoundingClientRect();
-  const hostCentre = hostRect.left + hostRect.width / 2;
-  const maxLeft = Math.max(VIEWPORT_MARGIN, viewportWidth - tipRect.width - VIEWPORT_MARGIN);
-  const left = Math.max(VIEWPORT_MARGIN, Math.min(hostCentre - tipRect.width / 2, maxLeft));
-  let top = hostRect.bottom + HOST_GAP;
+  const anchorCentre = anchorRect.left + anchorRect.width / 2;
+  const bounds = horizontalBounds(host, tipRect.width, viewportWidth);
+  // Centred on the underlined count, or, for a host that ends a line (the PR header's counts), flush with its
+  // right edge so the box hangs under the numbers it explains rather than past them. End alignment is asked for
+  // per host kind, but only holds when the underlined count really sits at the host's end: the classic compare
+  // and commit headers make the whole "Showing 29 changed files with 5 hidden, …" line the host, and aligning to
+  // its right edge put the box at the far side of the page with the caret left behind on the count.
+  const hostRect = host.getBoundingClientRect();
+  const endAligned = binding?.align === 'end' && hostRect.right - anchorRect.right <= END_SLACK;
+  const wanted = endAligned ? hostRect.right - tipRect.width : anchorCentre - tipRect.width / 2;
+  const left = Math.max(bounds.left, Math.min(wanted, bounds.right - tipRect.width));
+  let top = anchorRect.bottom + HOST_GAP;
   let placement = 'below';
   if (top + tipRect.height > viewportHeight - VIEWPORT_MARGIN) {
-    top = hostRect.top - tipRect.height - HOST_GAP;
+    top = anchorRect.top - tipRect.height - HOST_GAP;
     placement = 'above';
   }
-  element.style.left = `${Math.round(left)}px`;
-  element.style.top = `${Math.round(top)}px`;
+  // On a bar: the box's top border is laid exactly over the bar's bottom border (same colour, one line), its top
+  // corners squared. Only below the host, and only while the bar still runs right under it (a narrow layout moves
+  // the counts off the bar, and the box floats as elsewhere).
+  const bar = endAligned && binding?.flush === true && placement === 'below' ? barUnder(binding, host, hostRect) : null;
+  let flush = false;
+  if (bar !== null) {
+    const barRect = bar.getBoundingClientRect();
+    top = barRect.bottom - parseFloat(getComputedStyle(bar).borderBottomWidth);
+    flush = true;
+  }
+  // Flush on the bar the edges are not rounded: the host's own edges are fractional at most zoom levels, and a
+  // rounded box ends up to half a pixel short of the bar's line it is meant to continue.
+  element.style.left = flush ? `${left}px` : `${Math.round(left)}px`;
+  element.style.top = flush ? `${top}px` : `${Math.round(top)}px`;
   element.dataset.placement = placement;
-  const arrowX = Math.max(ARROW_INSET, Math.min(hostCentre - left, tipRect.width - ARROW_INSET));
-  element.style.setProperty('--geld-arrow-x', `${Math.round(arrowX)}px`);
+  element.toggleAttribute('data-flush', flush);
+  // The box may slide to stay on screen; the caret still points at the centre
+  // of the one underlined count rather than the centre of the whole host.
+  element.style.setProperty('--geld-arrow-x', `${Math.round(anchorCentre - left)}px`);
+}
+
+/** How far below the host's bottom a bar's bottom border may lie to count as the line the counts sit on. */
+const BAR_REACH = 24;
+
+/**
+ * The bordered line the host sits on, if any: an element whose bottom border
+ * runs just under the host (within `BAR_REACH`) and spans at least the host's
+ * width, found among the host's ancestors, their children and grandchildren
+ * (the PR header's tab bar sits in a wrapper beside the counts' wrapper, not
+ * above it). The answer
+ * is kept on the binding while the element stays in the document; its
+ * geometry is re-checked every time, since layout decides whether the counts
+ * are still above it.
+ */
+function barUnder(binding: TooltipBinding, host: HTMLElement, hostRect: DOMRect): HTMLElement | null {
+  const onBar = (candidate: HTMLElement): boolean => {
+    if (parseFloat(getComputedStyle(candidate).borderBottomWidth) <= 0) return false;
+    const rect = candidate.getBoundingClientRect();
+    return rect.bottom > hostRect.bottom && rect.bottom - hostRect.bottom <= BAR_REACH && rect.right >= hostRect.right - 1 && rect.left <= hostRect.left && rect.width > hostRect.width;
+  };
+  if (binding.bar !== null) {
+    if (binding.bar.isConnected && onBar(binding.bar)) return binding.bar;
+    binding.bar = null;
+  }
+  let depth = 0;
+  for (let ancestor = host.parentElement; ancestor !== null && ancestor !== document.body && depth < 8; ancestor = ancestor.parentElement, depth += 1) {
+    // The ancestor, its children and their children: the tab bar sits in a flex wrapper beside the counts' wrapper.
+    const candidates = [ancestor, ...ancestor.children, ...[...ancestor.children].flatMap((child) => [...child.children])];
+    for (const candidate of candidates) {
+      if (candidate instanceof HTMLElement && candidate !== host && onBar(candidate)) {
+        binding.bar = candidate;
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The horizontal extent the tooltip stays within: the host's content column
+ * rather than the viewport, so it never hangs past the edge of the content
+ * around it. That column is the widest ancestor that is still inset from the
+ * viewport on both sides — GitHub's centred, max-width page container, or the
+ * diff column beside the file tree — and wide enough to hold the tooltip;
+ * full-bleed wrappers do not qualify. The viewport, with a margin, otherwise.
+ */
+function horizontalBounds(host: HTMLElement, tipWidth: number, viewportWidth: number): { readonly left: number; readonly right: number } {
+  let column: DOMRect | null = null;
+  for (let element = host.parentElement; element !== null && element !== document.body; element = element.parentElement) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width < tipWidth || rect.left < VIEWPORT_MARGIN || rect.right > viewportWidth - VIEWPORT_MARGIN) continue;
+    if (column === null || rect.width > column.width) column = rect;
+  }
+  if (column !== null) return { left: column.left, right: column.right };
+  return { left: VIEWPORT_MARGIN, right: Math.max(VIEWPORT_MARGIN + tipWidth, viewportWidth - VIEWPORT_MARGIN) };
 }
 
 /** Keep a fixed tooltip glued to its host while the page scrolls or resizes. */
@@ -88,34 +281,200 @@ function follow(): void {
   if (activeHost !== null) position(activeHost);
 }
 
-function show(host: HTMLElement): void {
-  const breakdown = providers.get(host)?.() ?? null;
-  if (breakdown === null) return;
+/**
+ * GitHub's React lists re-render rows wholesale (the merge box's stack list
+ * does when the PR's state changes), removing the hovered host from under the
+ * open tooltip: `mouseleave` never fires for a removed element and the
+ * `position: fixed` box would sit at its last coordinates, or snap to the
+ * viewport's corner once `follow` measured an empty rect. While a tooltip is
+ * up, the document is watched and the tooltip closes the moment its host is
+ * detached or hidden; a replacement host gets its own tooltip on hover.
+ */
+let hostWatcher: MutationObserver | null = null;
+let hostCheck: number | null = null;
+
+function checkHost(): void {
+  hostCheck = null;
+  if (activeHost !== null && hostGone(activeHost)) hideTooltip();
+}
+
+function watchHost(): void {
+  hostWatcher ??= new MutationObserver(() => {
+    // Coalesce a burst of mutations into one check, after React has finished the commit.
+    hostCheck ??= requestAnimationFrame(checkHost);
+  });
+  hostWatcher.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'style', 'class'] });
+}
+
+function unwatchHost(): void {
+  hostWatcher?.disconnect();
+  if (hostCheck !== null) cancelAnimationFrame(hostCheck);
+  hostCheck = null;
+}
+
+/** Escape dismisses the tooltip without moving the pointer or focus (WCAG 1.4.13). */
+function onKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') hideTooltip();
+}
+
+/** A hidden tab has no pointer over anything: close, which also stops the host watcher. */
+function onVisibilityChange(): void {
+  if (document.hidden) hideTooltip();
+}
+
+/** A single line in place of the breakdown when the counts cannot be had. */
+function renderMessage(message: string): void {
+  ensureTooltip().replaceChildren(createElement('div', { class: 'geld-tooltip__message' }, [message]));
+}
+
+/**
+ * What the breakdown will look like before the diff is in: the rows whose
+ * labels are already known, with Primer-style skeleton bars for the numbers.
+ * A commit rarely touches more than one hidden category, so the shape is at
+ * most Essential + one hidden row + Total, however many categories are on;
+ * with nothing filtered it is a single row of counts.
+ */
+export interface LoadingShape {
+  /** Whether any category is active, i.e. whether there is a hidden row and a total at all. */
+  readonly hasHidden: boolean;
+  /** The hidden row's title when only one category is on; otherwise it is a bar too. */
+  readonly hiddenTitle: string | null;
+}
+
+function skeleton(cell: string, width: string): HTMLElement {
+  return createElement('span', { class: `geld-tooltip__${cell}` }, [createElement('span', { class: `geld-tooltip__skeleton geld-tooltip__skeleton--${width}` })]);
+}
+
+function skeletonRow(label: string | null): HTMLElement {
+  return createElement('div', { class: 'geld-tooltip__row' }, [
+    label === null ? skeleton('label', 'label') : createElement('span', { class: 'geld-tooltip__label' }, [label]),
+    ' ',
+    skeleton('files', 'files'),
+    ' ',
+    skeleton('add', 'add'),
+    ' ',
+    skeleton('del', 'del'),
+    ' ',
+  ]);
+}
+
+function renderLoading(shape: LoadingShape): void {
+  const rows = shape.hasHidden
+    ? [skeletonRow('Essential'), skeletonRow(shape.hiddenTitle), createElement('div', { class: 'geld-tooltip__rule', role: 'separator' }), skeletonRow('Total')]
+    : [skeletonRow('Essential')];
+  ensureTooltip().replaceChildren(...rows, createElement('span', { class: 'geld-sr-only' }, ['Counting']));
+}
+
+type TooltipContent = StatsBreakdown | { readonly message: string } | { readonly loading: LoadingShape };
+
+/** Where the pointer rests, for a host whose anchor wraps across lines: the tooltip hangs under that line. */
+export interface TooltipPoint {
+  readonly y: number;
+}
+
+function present(host: HTMLElement, content: TooltipContent, at?: TooltipPoint): void {
+  // A new point replaces the old; a re-presentation of the same host (the diff arrived) keeps where the pointer
+  // was; another host starts with no point (focus, or a hover that said nothing).
+  if (at !== undefined) pointerY = at.y;
+  else if (activeHost !== host) pointerY = null;
   if (activeHost === null) {
     window.addEventListener('scroll', follow, { capture: true, passive: true });
     window.addEventListener('resize', follow, { passive: true });
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    watchHost();
   }
+  if (activeHost !== null && activeHost !== host) describe(activeHost, false);
   activeHost = host;
-  render(breakdown);
+  if ('loading' in content) renderLoading(content.loading);
+  else if ('message' in content) renderMessage(content.message);
+  else render(content);
   position(host);
+  // A host that vanished between the hover and now closed the tooltip in position().
+  if (activeHost === host) describe(host, true);
+}
+
+function show(host: HTMLElement, at?: TooltipPoint): void {
+  const breakdown = providers.get(host)?.provider() ?? null;
+  if (breakdown === null) return;
+  present(host, breakdown, at);
+}
+
+/**
+ * The pointer moved within the host's anchor: when it is on another line of
+ * a wrapped anchor now, the tooltip moves under that line. Nothing else
+ * follows the pointer.
+ */
+export function moveTooltipPointer(host: HTMLElement, y: number): void {
+  if (activeHost !== host || tooltip === null || tooltip.hidden) return;
+  const binding = providers.get(host);
+  const anchor = binding?.anchor.isConnected === true ? binding.anchor : host;
+  const lines = lineRects(anchor);
+  if (lines.length <= 1) return;
+  const before = lineIndex(lines, pointerY);
+  pointerY = y;
+  if (lineIndex(lines, y) !== before) position(host);
+}
+
+/**
+ * Show the tooltip for `host` right now, without binding hover listeners —
+ * for hosts whose hovering is decided elsewhere (commit links, which wait for
+ * hover intent and for the diff to arrive). `hideTooltip` closes it.
+ */
+export function showBreakdownTooltip(host: HTMLElement, breakdown: StatsBreakdown, at?: TooltipPoint): void {
+  present(host, breakdown, at);
+}
+
+export function showTooltipMessage(host: HTMLElement, message: string, at?: TooltipPoint): void {
+  present(host, { message }, at);
+}
+
+/** Skeleton rows in the breakdown's shape while a commit's diff is on its way. */
+export function showTooltipLoading(host: HTMLElement, shape: LoadingShape, at?: TooltipPoint): void {
+  present(host, { loading: shape }, at);
+}
+
+/** The element the tooltip is currently shown for, if any. */
+export function tooltipHost(): HTMLElement | null {
+  return activeHost;
 }
 
 export function hideTooltip(): void {
   if (activeHost !== null) {
     window.removeEventListener('scroll', follow, { capture: true });
     window.removeEventListener('resize', follow);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    unwatchHost();
+    describe(activeHost, false);
   }
   activeHost = null;
+  pointerY = null;
   if (tooltip !== null) tooltip.hidden = true;
+}
+
+/**
+ * Point the host's `aria-describedby` at the tooltip while it is shown for
+ * that host (the element is shared, so its text is only this host's then),
+ * keeping any ids GitHub already lists there.
+ */
+function describe(host: HTMLElement, on: boolean): void {
+  const ids = (host.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id !== '' && id !== TOOLTIP_ID);
+  if (on) ids.push(TOOLTIP_ID);
+  if (ids.length === 0) host.removeAttribute('aria-describedby');
+  else host.setAttribute('aria-describedby', ids.join(' '));
 }
 
 /**
  * Show a breakdown tooltip while hovering or focusing `host`. Calling this
  * again for the same host simply swaps the data provider.
  */
-export function attachBreakdownTooltip(host: HTMLElement, provider: BreakdownProvider): void {
-  const alreadyBound = providers.has(host);
-  providers.set(host, provider);
+export function attachBreakdownTooltip(host: HTMLElement, anchor: HTMLElement, provider: BreakdownProvider, options: TooltipOptions = {}): void {
+  const previous = providers.get(host);
+  const alreadyBound = previous !== undefined;
+  if (previous?.anchor !== anchor) previous?.anchor.removeAttribute(TOOLTIP_ANCHOR_ATTRIBUTE);
+  providers.set(host, { anchor, provider, ...(options.align === undefined ? {} : { align: options.align }), ...(options.flush === true ? { flush: true } : {}), bar: previous?.bar ?? null });
+  anchor.setAttribute(TOOLTIP_ANCHOR_ATTRIBUTE, '');
   if (alreadyBound) {
     if (activeHost === host) show(host);
     return;
@@ -125,7 +484,7 @@ export function attachBreakdownTooltip(host: HTMLElement, provider: BreakdownPro
     host.setAttribute('tabindex', '0');
     host.setAttribute('data-geld-added-tabindex', '');
   }
-  host.addEventListener('mouseenter', () => show(host));
+  host.addEventListener('mouseenter', (event) => show(host, { y: event.clientY }));
   host.addEventListener('mouseleave', hideTooltip);
   host.addEventListener('focus', () => show(host));
   host.addEventListener('blur', hideTooltip);
@@ -133,6 +492,7 @@ export function attachBreakdownTooltip(host: HTMLElement, provider: BreakdownPro
 
 export function detachBreakdownTooltip(host: HTMLElement): void {
   // Listeners stay bound but become inert once the provider is gone.
+  providers.get(host)?.anchor.removeAttribute(TOOLTIP_ANCHOR_ATTRIBUTE);
   providers.delete(host);
   host.removeAttribute('data-geld-stat-host');
   if (host.hasAttribute('data-geld-added-tabindex')) {

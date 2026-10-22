@@ -51,6 +51,10 @@ export function findRows(surfaces: readonly ListSurface[]): ListRow[] {
     if (url.origin !== window.location.origin) continue;
     const match = PULL_PATH.exec(url.pathname);
     if (match === null) continue;
+    // The merge box's checks list names each check with a link to
+    // `/pull/N/checks?check_run_id=…`: a row per check, all of them the page's
+    // own PR, so a chip there repeats the header on every line.
+    if (url.searchParams.has('check_run_id')) continue;
     // Only title links: they carry visible text and live in a list row.
     if ((link.textContent ?? '').trim() === '') continue;
     const owner = surfaceOf(surfaces, link);
@@ -74,25 +78,36 @@ export function findRows(surfaces: readonly ListSurface[]): ListRow[] {
 }
 
 function ensureChip(row: ListRow): HTMLElement {
-  const existing = row.row.querySelector<HTMLElement>(`.${PR_STAT_CLASS}`);
+  let existing = row.row.querySelector<HTMLElement>(`.${PR_STAT_CLASS}`);
   if (existing !== null) {
-    if (existing.dataset.geldPr === row.key) return existing;
-    existing.remove();
+    if (existing.dataset.geldPr !== row.key) {
+      existing.remove();
+      existing = null;
+    }
   }
-  const chip = createElement('span', {
-    class: PR_STAT_CLASS,
-    [OWN_UI_ATTRIBUTE]: '',
-    'data-geld-pr': row.key,
-    [ATTR_SURFACE]: row.surface.id,
-    'aria-label': 'Lines changed excluding test files',
-  });
+
+  const chip =
+    existing ??
+    createElement('span', {
+      class: PR_STAT_CLASS,
+      [OWN_UI_ATTRIBUTE]: '',
+      'data-geld-pr': row.key,
+      'aria-label': 'Lines changed excluding test files',
+    });
+  chip.setAttribute(ATTR_SURFACE, row.surface.id);
+
   const anchor = row.surface.chipAnchor(row.row, row.number);
+  chip.classList.toggle(`${PR_STAT_CLASS}--inline`, anchor === null);
   if (anchor === null) {
-    row.titleLink.insertAdjacentElement('afterend', chip);
-    chip.classList.add(`${PR_STAT_CLASS}--inline`);
+    if (row.titleLink.nextElementSibling !== chip) row.titleLink.insertAdjacentElement('afterend', chip);
   } else if (anchor.placement === 'append') {
-    anchor.element.append(chip);
-  } else {
+    // GitHub can stream or replace children after Geld inserts the chip. On a
+    // later pass, restore the requested edge without touching an
+    // already-correct node (which would create another mutation indefinitely).
+    if (anchor.element.lastChild !== chip) anchor.element.append(chip);
+  } else if (anchor.placement === 'prepend') {
+    if (anchor.element.firstChild !== chip) anchor.element.prepend(chip);
+  } else if (anchor.element.nextElementSibling !== chip) {
     anchor.element.insertAdjacentElement('afterend', chip);
   }
   return chip;
@@ -156,12 +171,18 @@ export function applyPrListStats(options: PrListOptions): void {
       continue;
     }
     const state = options.diffSource.request(row.diffUrl);
+    if (state.status === 'failed') {
+      renderFailure(row, state.reason);
+      continue;
+    }
     if (state.status !== 'ready') continue;
 
     const matcher = options.matcherFor(row.repo);
     const chip = ensureChip(row);
+    delete chip.dataset.failed;
+    chip.removeAttribute('title');
     const { all, hidden } = breakdownFromFiles(state.files, matcher, options.hideCommentLines);
-    const breakdown = statsBreakdown(all, hidden, hiddenNounPlural(matcher.activeCategories, hidden));
+    const breakdown = statsBreakdown(all, hidden, hiddenNounPlural(matcher.activeCategories, hidden), matcher.activeCategories);
     // With nothing that could be hidden the chip is plain line counts: "0 hidden" would be noise.
     const label = matcher.activeCategories.length === 0 ? null : hiddenLabel(hidden, matcher.activeCategories);
     const text = `${label ?? ''} +${formatCount(breakdown.visible.additions)} \u2212${formatCount(breakdown.visible.deletions)}`;
@@ -178,13 +199,46 @@ export function applyPrListStats(options: PrListOptions): void {
     }
 
     if (hidden.totals.files > 0) {
-      attachBreakdownTooltip(chip, () => breakdown);
+      const tooltipAnchor = chip.querySelector<HTMLElement>(`.${PR_STAT_CLASS}__tests`) ?? chip;
+      attachBreakdownTooltip(chip, tooltipAnchor, () => breakdown);
       chip.dataset.hasTests = '';
     } else {
       detachBreakdownTooltip(chip);
       delete chip.dataset.hasTests;
     }
   }
+}
+
+/** What to say in a row whose diff could not be had, by the background's reason. */
+export function failureCopy(reason: string): { readonly text: string; readonly title: string } {
+  if (reason === 'signed-out') return { text: 'sign in to count', title: 'GitHub answered with its sign-in page: sign in (or renew your SSO session) and reload to see the counts.' };
+  if (reason === 'rate-limited') return { text: 'counts paused', title: 'GitHub is rate limiting diff downloads; Geld retries shortly.' };
+  if (reason === 'too-large') return { text: 'diff too large', title: 'This diff is over 20 MB; Geld does not count it.' };
+  if (reason === 'busy') return { text: 'GitHub busy', title: 'GitHub kept answering 5xx for this diff. Geld paused and retried several times; reload later.' };
+  if (reason === 'port-closed') return { text: 'counts unavailable', title: 'The extension restarted mid-request; Geld keeps retrying. Reload if this stays.' };
+  if (reason === 'http-404') return { text: 'counts unavailable', title: 'GitHub answered 404 for this diff. For a private repository that means you are signed out: sign in and reload.' };
+  return { text: 'counts unavailable', title: `The diff could not be fetched (${reason}). Open the pull request to see whether GitHub serves it, then reload.` };
+}
+
+/**
+ * A row whose diff failed says so instead of showing nothing: a blank row
+ * reads as "not counted yet", while "sign in to count" points at the fix.
+ * Rendered with the chip's own class so it sits where the counts would.
+ */
+function renderFailure(row: ListRow, reason: string): void {
+  const chip = ensureChip(row);
+  const { text, title } = failureCopy(reason);
+  if (chip.dataset.rendered !== `!${reason}`) {
+    chip.dataset.rendered = `!${reason}`;
+    chip.replaceChildren(
+      createElement('span', { class: `${PR_STAT_CLASS}__sep`, 'aria-hidden': 'true' }, ['\u2022']),
+      createElement('span', { class: `${PR_STAT_CLASS}__failure` }, [text]),
+    );
+  }
+  chip.dataset.failed = '';
+  chip.title = title;
+  detachBreakdownTooltip(chip);
+  delete chip.dataset.hasTests;
 }
 
 export function removePrListStats(): void {

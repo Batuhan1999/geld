@@ -41,6 +41,12 @@
         <p class="geld-help options__catalog-note" id="catalog-note" hidden></p>
       </section>
 
+      <section class="options__card" data-section="large-diffs">
+        <h2 class="options__title">Large diffs</h2>
+        <p class="geld-help options__intro"></p>
+        <div id="large-diffs-rows"></div>
+      </section>
+
       <section class="options__card" data-section="custom-categories">
         <h2 class="options__title">Your categories</h2>
         <p class="geld-help options__intro"></p>
@@ -93,6 +99,12 @@ big-corp
           <span class="geld-status" id="authors-status" aria-live="polite"></span>
           <button id="save-authors" class="geld-button geld-button--primary" type="button">Save authors</button>
         </div>
+      </section>
+
+      <section class="options__card" data-section="experiments" id="experiments">
+        <h2 class="options__title">Experiments</h2>
+        <p class="geld-help options__intro"></p>
+        <div class="options__stack" id="review-stack"></div>
       </section>
 
       <section class="options__card" data-section="enterprise">
@@ -167,7 +179,8 @@ big-corp
       </section>
 
       <footer class="options__footer geld-muted">
-        Geld · <a href="https://github.com/brandonmcconnell/geld" target="_blank" rel="noreferrer">Source on GitHub</a>
+        Geld · <a id="feedback-link" href="https://www.geld.sh/feedback" target="_blank" rel="noreferrer">Feedback</a> ·
+        <a href="https://github.com/brandonmcconnell/geld" target="_blank" rel="noreferrer">Source on GitHub</a>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

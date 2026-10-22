@@ -3,8 +3,9 @@ import type { ChangeTotals } from '@geld/core';
 import { formatCount, parseCount } from '@geld/core';
 import type { HiddenBreakdown } from './breakdown';
 import { hidesAnything } from './breakdown';
+import type { StatsBreakdown } from './breakdown';
 import { hiddenLabel, hiddenNounPlural, statsBreakdown } from './breakdown';
-import { originalText, parseLineStats, queryAll, restoreManagedText, setManagedText } from './dom';
+import { createElement, OWN_UI_ATTRIBUTE, originalText, parseLineStats, queryAll, restoreManagedText, setManagedText } from './dom';
 import { attachBreakdownTooltip, detachBreakdownTooltip } from './ui/tooltip';
 
 /** A "+93 −53" pair somewhere in the page header, plus the element to hang a tooltip on. */
@@ -21,6 +22,33 @@ export interface HeaderStatGroup {
 }
 
 const FILE_COUNT_TEXT = /^\s*\(?\d[\d,]*\)?\s*$|\bfiles?\b/i;
+
+const HEADER_HOST_SELECTOR = '#diffstat, .toc-diff-stats';
+const SR_ONLY_SELECTOR = 'span.sr-only, span[class*="VisuallyHidden"]';
+const LINES_CHANGED = /^\s*Lines changed:/i;
+
+/**
+ * Does `node`, just inserted, hold a header stat group? Decided as tightly as
+ * `findHeaderStatGroups` would: a diffstat host, or a "Lines changed:" reader
+ * sentence outside any diff entry. A streamed diff file is full of screen-
+ * reader spans, and a looser test used to send every such batch through a
+ * page-wide header scan, synchronously, before paint.
+ */
+export function holdsHeaderStats(node: Element): boolean {
+  if (isInsideDiffEntry(node)) return false;
+  if (node.matches(HEADER_HOST_SELECTOR) || node.querySelector(HEADER_HOST_SELECTOR) !== null) return true;
+  if (node instanceof HTMLElement && node.matches(SR_ONLY_SELECTOR)) return LINES_CHANGED.test(originalText(node));
+  for (const span of node.querySelectorAll<HTMLElement>(SR_ONLY_SELECTOR)) {
+    if (LINES_CHANGED.test(originalText(span)) && !isInsideDiffEntry(span)) return true;
+  }
+  return false;
+}
+
+/** A text change inside a screen-reader span: GitHub may fill "Lines changed: …" into a span it inserted empty. */
+export function isSrOnlyText(node: Node): boolean {
+  const parent = node.parentElement;
+  return parent !== null && parent.matches(SR_ONLY_SELECTOR) && !isInsideDiffEntry(parent);
+}
 
 function isInsideDiffEntry(element: Element): boolean {
   return (
@@ -104,8 +132,8 @@ function findCompareGroup(): HeaderStatGroup | null {
  */
 function findReactGroups(): HeaderStatGroup[] {
   const groups: HeaderStatGroup[] = [];
-  for (const srOnly of queryAll<HTMLElement>('span.sr-only, span[class*="VisuallyHidden"]')) {
-    if (!/^\s*Lines changed:/i.test(originalText(srOnly))) continue;
+  for (const srOnly of queryAll<HTMLElement>(SR_ONLY_SELECTOR)) {
+    if (!LINES_CHANGED.test(originalText(srOnly))) continue;
     if (isInsideDiffEntry(srOnly)) continue;
     const host = srOnly.parentElement;
     if (host === null) continue;
@@ -203,14 +231,17 @@ export const TESTS_COUNT_CLASS = 'geld-tests-count';
  * "0 tests") so it is obvious the numbers have been checked; underlined only
  * when there is a breakdown to show on hover.
  */
-function renderTestsLabel(group: HeaderStatGroup, text: string, count: number): void {
+function renderTestsLabel(group: HeaderStatGroup, text: string, count: number): HTMLElement {
   let label = group.host.querySelector<HTMLElement>(`.${TESTS_COUNT_CLASS}`);
+  // The first count GitHub renders. A deletions-only change has no "+N" span
+  // at all (not "+0"), so the "−M" span is the neighbour then.
+  const neighbour = group.additions ?? group.deletions;
   if (label === null) {
     label = document.createElement('span');
     label.className = TESTS_COUNT_CLASS;
     label.setAttribute('data-geld-ui', '');
-    if (group.additions !== null) {
-      group.additions.insertAdjacentElement('beforebegin', label);
+    if (neighbour !== null) {
+      neighbour.insertAdjacentElement('beforebegin', label);
       // GitHub separates "+N" and "−M" with either a flex gap or a literal
       // space; a space after the label reproduces whichever is in use.
       if (!group.sentence) label.after(document.createTextNode(' '));
@@ -218,9 +249,12 @@ function renderTestsLabel(group: HeaderStatGroup, text: string, count: number): 
       group.host.prepend(label);
     }
   }
-  if (group.additions !== null) {
+  if (neighbour !== null && label.style.font === '') {
     // Match the neighbouring count exactly (GitHub styles those spans directly).
-    const reference = getComputedStyle(group.additions);
+    // Once, when the label is made: reading a computed style forces a style
+    // recalculation of whatever the page has dirtied, and this runs on every
+    // pass while a diff streams in.
+    const reference = getComputedStyle(neighbour);
     label.style.font = reference.font;
     label.style.letterSpacing = reference.letterSpacing;
   }
@@ -228,6 +262,7 @@ function renderTestsLabel(group: HeaderStatGroup, text: string, count: number): 
   const rendered = group.sentence ? `${text}, ` : text;
   if (label.textContent !== rendered) label.textContent = rendered;
   label.toggleAttribute('data-has-tests', count > 0);
+  return label;
 }
 
 /** Rewrite one header group so it shows totals without the hidden files. */
@@ -235,6 +270,8 @@ export function applyHeaderStats(
   group: HeaderStatGroup,
   hidden: HiddenBreakdown,
   activeCategories: readonly HiddenCategory[],
+  /** The diff's file count, when the header's own numbers carry none (a pull request header: lines only). */
+  files = 0,
 ): void {
   // Nothing that could be hidden: GitHub's own numbers are right, so leave the header alone (no "0 hidden").
   if (group.original === null || activeCategories.length === 0) {
@@ -242,13 +279,14 @@ export function applyHeaderStats(
     return;
   }
   const nounPlural = hiddenNounPlural(activeCategories, hidden);
-  renderTestsLabel(group, hiddenLabel(hidden, activeCategories), hidden.totals.files);
+  const tooltipAnchor = renderTestsLabel(group, hiddenLabel(hidden, activeCategories), hidden.totals.files);
   if (!hidesAnything(hidden)) {
     restoreNumbers(group);
+    syncNarrowMirror(group, hiddenLabel(hidden, activeCategories), false, group.original, null);
     return;
   }
-  const all = group.original;
-  const breakdown = statsBreakdown(all, hidden, nounPlural);
+  const all = group.original.files === 0 && files > 0 ? { ...group.original, files } : group.original;
+  const breakdown = statsBreakdown(all, hidden, nounPlural, activeCategories);
   const { visible } = breakdown;
 
   if (group.additions !== null) {
@@ -275,10 +313,60 @@ export function applyHeaderStats(
     }
   }
 
-  attachBreakdownTooltip(group.host, () => breakdown);
+  // The header's counts end the line at the page column's edge, right above the tab bar: the box hangs flush with
+  // that edge and from that bar (its top border on the bar's, top corners square), as a drawer out of the header.
+  attachBreakdownTooltip(group.host, tooltipAnchor, () => breakdown, { align: 'end', flush: true });
+  syncNarrowMirror(group, hiddenLabel(hidden, activeCategories), hidden.totals.files > 0, visible, () => breakdown);
+}
+
+const MIRROR_CLASS = 'geld-header-mirror';
+
+/**
+ * GitHub drops the header diffstat on narrow screens (its wrapper is
+ * `hideWhenVeryNarrowContainer`), and the tab bar has no room for it. A copy
+ * of the counts then goes beside the state label ("Open"), after the stack
+ * button when there is one, and is shown exactly while the original is not
+ * (checked on every apply; the controller re-applies on resize).
+ */
+function syncNarrowMirror(group: HeaderStatGroup, label: string, hasTests: boolean, visible: ChangeTotals, provider: (() => StatsBreakdown) | null): void {
+  const header = group.host.closest<HTMLElement>('[data-component="PageHeader"]');
+  const stateRow = header?.querySelector<HTMLElement>('[data-component="StateLabel"]')?.parentElement ?? null;
+  if (stateRow === null || stateRow.contains(group.host)) return;
+  let mirror = stateRow.querySelector<HTMLElement>(`.${MIRROR_CLASS}`);
+  if (mirror === null) {
+    mirror = createElement('span', { class: MIRROR_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [
+      createElement('span', { class: `${MIRROR_CLASS}__tests ${TESTS_COUNT_CLASS}` }),
+      createElement('span', { class: `${MIRROR_CLASS}__add` }),
+      createElement('span', { class: `${MIRROR_CLASS}__del` }),
+    ]);
+    stateRow.append(mirror);
+  } else if (stateRow.lastElementChild !== mirror) {
+    stateRow.append(mirror);
+  }
+  const [tests, add, del] = mirror.children;
+  if (tests instanceof HTMLElement) {
+    if (tests.textContent !== label) tests.textContent = label;
+    tests.toggleAttribute('data-has-tests', hasTests);
+  }
+  const addText = `+${formatCount(visible.additions)}`;
+  const delText = `\u2212${formatCount(visible.deletions)}`;
+  if (add instanceof HTMLElement && add.textContent !== addText) add.textContent = addText;
+  if (del instanceof HTMLElement && del.textContent !== delText) del.textContent = delText;
+  mirror.hidden = group.host.getClientRects().length > 0;
+  if (provider === null) detachBreakdownTooltip(mirror);
+  else attachBreakdownTooltip(mirror, tests instanceof HTMLElement ? tests : mirror, provider, { align: 'end' });
+}
+
+function removeNarrowMirror(group: HeaderStatGroup): void {
+  const header = group.host.closest<HTMLElement>('[data-component="PageHeader"]');
+  for (const mirror of header?.querySelectorAll<HTMLElement>(`.${MIRROR_CLASS}`) ?? []) {
+    detachBreakdownTooltip(mirror);
+    mirror.remove();
+  }
 }
 
 export function restoreHeaderStats(group: HeaderStatGroup): void {
+  removeNarrowMirror(group);
   restoreNumbers(group);
   for (const label of group.host.querySelectorAll(`.${TESTS_COUNT_CLASS}`)) {
     const spacer = label.nextSibling;

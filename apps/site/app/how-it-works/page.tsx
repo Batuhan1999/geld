@@ -19,7 +19,7 @@ import { KEYBOARD_SHORTCUT } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'How it works',
-  description: 'What Geld changes on GitHub: hidden files, honest header counts, a file-tree accordion, PR list stats, categories, repository rules and custom patterns.',
+  description: 'What Geld changes on GitHub: hidden files, honest header counts, a file-tree accordion, PR list stats, a conversation-tab review digest, categories, repository rules and custom patterns.',
   alternates: { canonical: '/how-it-works' },
 };
 
@@ -42,6 +42,7 @@ const STEPS: readonly Step[] = [
   { id: 'repo-config', title: 'Repository configs', short: 'Repository configs' },
   { id: 'whitespace', title: 'Hide whitespace', short: 'Hide whitespace' },
   { id: 'shortcut', title: 'Keyboard shortcut', short: 'Keyboard shortcut' },
+  { id: 'summary', title: 'A review digest on the conversation tab', short: 'Review digest' },
   { id: 'enterprise', title: 'GitHub Enterprise Server', short: 'Enterprise Server' },
 ];
 
@@ -56,7 +57,7 @@ export default function HowItWorksPage() {
       <PageIntro
         eyebrow="How it works"
         title="Everything Geld changes on GitHub, and nothing it doesn't."
-        description="Geld only ever inspects file paths. It never reads file contents, never moves GitHub's DOM around, and can be switched off per repository or organisation."
+        description="On diffs Geld only inspects file paths, never file contents. It never moves GitHub's DOM around, and can be switched off per repository or organisation."
       />
 
       <div className="container-site grid gap-12 pt-4 pb-32 lg:grid-cols-[220px_1fr] lg:gap-20">
@@ -114,7 +115,7 @@ export default function HowItWorksPage() {
             <div className="grid gap-10 md:grid-cols-[1fr_260px] md:items-start">
               <Prose>
                 <p>
-                  GitHub&apos;s file tree becomes a full-height accordion. The original tree is the <strong>Changes</strong> panel, and every hidden
+                  GitHub&apos;s file tree becomes a full-height accordion. The original tree is the <strong>Essential</strong> panel (what is left to review), and every hidden
                   category gets a panel of its own (<em>Tests</em>, <em>Generated</em>, <em>Docs</em>, …) with a descriptive icon. One panel is open at a
                   time and fills the sidebar with its own scrollbar, so every heading stays visible.
                 </p>
@@ -154,6 +155,11 @@ export default function HowItWorksPage() {
                 files, with the same hover breakdown. Because list pages contain no diffs, the counts come from the same <code>.diff</code> file GitHub
                 serves when you append <code>.diff</code> to a pull request URL. Rows are fetched a few at a time, only when scrolled near the viewport,
                 and cached by the pull request&apos;s head commit. It can be switched off in the options.
+              </p>
+              <p>
+                Commits get the same breakdown without a chip: rest the pointer on a commit link for a moment — in a pull request&apos;s timeline, on
+                its Commits tab, in a branch&apos;s history — and the tooltip shows what that one commit changed. Nothing is fetched until you do, so a
+                pull request with hundreds of commits costs nothing to scroll.
               </p>
               <p>
                 Lists can also hide pull requests by author: add logins under <strong>Hidden authors</strong> (<code>*[bot]</code> covers every GitHub
@@ -217,7 +223,7 @@ export default function HowItWorksPage() {
             </ol>
             <Prose>
               <p>
-                With one category on, labels read <code>6 tests</code>; with several, <code>9 hidden</code> with the per-category split in the tooltip,
+                With one category on, labels read <code>6 tests</code>; with several, <code>9 hidden</code> with one tooltip row per category,
                 chips in the bottom row (<code>6 tests · 2 generated · 1 doc</code>) and one panel per category in the file tree. Every pattern is
                 listed on the <Link href="/patterns">patterns page</Link>, rendered from the same source the extension uses.
               </p>
@@ -284,14 +290,18 @@ sandbox/
               <p>
                 A repository can carry its own Geld config for everyone who reviews it: commit <code>.github/geld.yml</code> to the default branch.
                 It is versioned and reviewed like any other file, and whoever may merge there decides what it says; Geld stores nothing. An
-                organisation puts its defaults in <code>geld.yml</code> at the root of its <code>.github</code> repository (
-                <code>acme/.github</code>), and a repository&apos;s own file is layered on top.
+                organisation puts its defaults in <code>geld.yml</code> at the root of its public <code>.github</code> repository (
+                <code>acme/.github</code>, the same place GitHub reads default community files from), and a repository&apos;s own file is
+                layered on top.
               </p>
               <p>
                 The file uses the same keys as the settings document: <code>categories</code> switches categories on or off, <code>groups</code>{' '}
                 built-in pattern groups, <code>categoryPatterns</code> adds patterns to a built-in category and <code>customCategories</code> defines
-                new ones. Personal settings (<code>enabled</code>, <code>repoRules</code>, layout) are rejected. Repositories that mark files{' '}
-                <code>linguist-generated</code> in <code>.gitattributes</code> feed the Generated category the same way, for free.
+                new ones. One key is the repository&apos;s own: <code>reviewBots</code> names the review bots installed on it, so the panel&apos;s
+                Request a review menu offers them on a pull request none has run on yet. Personal settings (<code>enabled</code>,{' '}
+                <code>repoRules</code>, layout) are rejected. Repositories that mark files <code>linguist-generated</code> in{' '}
+                <code>.gitattributes</code> feed the Generated category the same way, for free. Every key and every valid value is on the{' '}
+                <Link href="/repo-config">Repository config</Link> page.
               </p>
               <pre>
                 <code>{`# .github/geld.yml
@@ -307,7 +317,9 @@ customCategories:
     title: Fixtures
     icon: package
     patterns:
-      - fixtures/**`}</code>
+      - fixtures/**
+reviewBots:                     # offered in Request a review on every PR
+  - coderabbit`}</code>
               </pre>
               <p>
                 Because hiding is the whole point, a repository config is treated with care. Files it hides are counted and listed exactly like the
@@ -345,7 +357,27 @@ customCategories:
             </Prose>
           </Step>
 
-          <Step id="enterprise" index={11} title={STEPS[10]?.title ?? ''}>
+          <Step id="summary" index={11} title={STEPS[10]?.title ?? ''}>
+            <Prose>
+              <p>
+                On a pull request&apos;s conversation tab Geld pins a <strong>review digest</strong> under the description: open findings, bot
+                verdicts (Bugbot, Greptile, Copilot, …) and who has approved. The digest is one comment maintained by the{' '}
+                <Link href="https://github.com/brandonmcconnell/geld/blob/main/apps/action/examples/geld.yml">Geld GitHub Action</Link> — it edits
+                that comment, never posts a second — so the numbers are ready before anyone opens the page. Copy{' '}
+                <code>apps/action/examples/geld.yml</code> into <code>.github/workflows/geld.yml</code>. The workflow uses{' '}
+                <code>pull_request_target</code> and never checks out pull request code.
+              </p>
+              <p>
+                Without the Action the extension builds the same panel from the timeline. With it, a collapsed <code>geld</code> code block in the
+                comment is the machine payload (HTML comments are stripped from GitHub&apos;s rendered page, so they cannot carry data the content
+                script can read). Compact mode folds bot reviews and noisy events into accordion rows you can reopen; Minimal also folds human
+                comments that belong to finished items. Task-list checkboxes on the digest are a feedback channel: ticking one marks that finding
+                done without the extension.
+              </p>
+            </Prose>
+          </Step>
+
+          <Step id="enterprise" index={12} title={STEPS[11]?.title ?? ''}>
             <Prose>
               <p>
                 Add your server&apos;s hostname in the options. The browser asks you to allow Geld on that host, and the content script is registered
