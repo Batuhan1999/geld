@@ -596,6 +596,8 @@ function showAuthor(state: Mounted): void {
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
   state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
+  // The header said "author" only after a box opened on ✓ or ✗: the box takes Comment, the one verdict left.
+  if (isAuthor && state.retarget !== null && (state.opener === 'approve' || state.opener === 'request changes')) state.retarget('comment');
   // 💬 alone says "Review", or beside close and merge it would read as a plain comment rather than a review.
   state.root.toggleAttribute(ATTR_ALONE, state.group.childElementCount === 1);
   showActions(state);
@@ -723,10 +725,10 @@ function isAuthorViewing(): boolean {
   return authorLogin()?.toLowerCase() === viewerLogin().toLowerCase();
 }
 
-/** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
 /** Bumped by every read of the pending comments and by a discard: only the latest read's answer is kept. */
 let pendingRead = 0;
 
+/** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
 async function loadPending(state: Mounted): Promise<readonly PendingComment[] | null> {
   const pullPath = state.pullPath;
   state.pendingFor = pullPath;
