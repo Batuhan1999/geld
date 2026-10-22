@@ -282,7 +282,7 @@ describe('the tab bar button', () => {
     expect(words instanceof HTMLTextAreaElement ? words.value : null).toBe('Needs a test.');
     if (words instanceof HTMLTextAreaElement) {
       words.value = '';
-      words.dispatchEvent(new Event('input'));
+      words.dispatchEvent(new Event('input', { bubbles: true }));
     }
     segment('comment').click();
   });
