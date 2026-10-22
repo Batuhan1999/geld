@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # Labelled and unlabelled too, so the `no-release` check below follows the label as it changes.
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   # Run inside the merge queue too, so every job here can be a required check.
   merge_group:
 
