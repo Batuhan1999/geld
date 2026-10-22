@@ -224,6 +224,10 @@ describe('the tab bar button', () => {
     expect(chosen()).toBe('Comment');
     expect(submitButton()?.classList.contains('btn-primary')).toBe(false);
     segment('request changes').click();
+    if (words instanceof HTMLTextAreaElement) {
+      words.value = '';
+      words.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     // The same segment again closes it.
     segment('request changes').click();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
@@ -277,15 +281,31 @@ describe('the tab bar button', () => {
     // The new verdict is the reader's standing one now: ✓ pressed, ✗ not.
     expect(segment('approve').hasAttribute('data-current')).toBe(true);
     expect(segment('request changes').hasAttribute('data-current')).toBe(false);
-    // The words left in the box earlier went with nothing: they wait for the next box.
+  });
+
+  it('opens the box with the verdict instead of sending when words wait in it', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      sent.push(String(input));
+      return new Response('{}', { status: 200 });
+    }));
+    mount();
     segment('comment').click();
-    const words = document.querySelector('.geld-quick-review__panel textarea');
-    expect(words instanceof HTMLTextAreaElement ? words.value : null).toBe('Needs a test.');
-    if (words instanceof HTMLTextAreaElement) {
-      words.value = '';
+    const typed = (value: string): void => {
+      const words = document.querySelector('.geld-quick-review__panel textarea');
+      if (!(words instanceof HTMLTextAreaElement)) return;
+      words.value = value;
       words.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    };
+    typed('Looks right.');
     segment('comment').click();
+    segment('approve').dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(sent.filter((url) => url.endsWith('/submit_review'))).toEqual([]);
+    expect(chosen()).toBe('Approve');
+    expect(document.querySelector<HTMLTextAreaElement>('.geld-quick-review__panel textarea')?.value).toBe('Looks right.');
+    typed('');
+    segment('approve').click();
   });
 
   it('asks for words with GitHub’s reason when it refuses an instant verdict', async () => {
@@ -397,6 +417,42 @@ describe('the tab bar button', () => {
     held.SQUASH?.();
     for (let i = 0; i < 3; i += 1) await settle();
     expect(title.value).toBe('Merge pull request #7 from acme/topic');
+  });
+
+  it('leaves the commit to the reader when the chosen method’s commit could not be read', async () => {
+    let failMerge = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        if (method === 'MERGE' && failMerge) return new Response('{}', { status: 500 });
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = 'Title (#7)';
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    failMerge = true;
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
+    for (let i = 0; i < 3; i += 1) await settle();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    if (select === null || title === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    for (let i = 0; i < 3; i += 1) await settle();
+    // The squash commit stays out of a merge commit's fields.
+    expect(title.value).toBe('');
   });
 
   it('turns the header’s status pill into a menu of the statuses the reader may switch to, closed last', async () => {
