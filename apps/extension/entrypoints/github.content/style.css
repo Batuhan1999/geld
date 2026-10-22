@@ -964,6 +964,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   min-width: 200px;
   max-width: 320px;
   padding: 6px;
+  overflow-y: auto;
   border: 1px solid var(--borderColor-default, #d1d9e0);
   border-radius: 12px;
   background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
@@ -1043,6 +1044,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 /* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */
 .Overlay.geld-quick-review__panel {
   position: absolute;
+  display: flex;
+  flex-direction: column;
   right: auto;
   bottom: auto;
   z-index: 100;
@@ -1056,7 +1059,9 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   padding: 12px 12px 0;
+  overflow-y: auto;
 }
 
 .geld-quick-review__body {

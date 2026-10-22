@@ -24,5 +24,8 @@ describe('review tally', () => {
     ]);
     expect(standing.map((entry) => `${entry.login}:${entry.state}`)).toEqual(['Copilot:commented', 'aeschli:approved', 'connor4312:approved']);
     expect(tallyOf(standing)).toEqual({ approved: 2, changesRequested: 0, commented: 1 });
+    // Asked to review again, an approver reads "awaiting" in the sidebar and still counts; one only awaited does not.
+    const asked = standingReviewers([{ login: 'ann', avatarSrc: null, state: 'awaiting', bot: false }, { login: 'bo', avatarSrc: null, state: 'awaiting', bot: false }], [{ login: 'ann', state: 'APPROVED', id: 3 }]);
+    expect(asked.map((entry) => `${entry.login}:${entry.state}`)).toEqual(['ann:approved']);
   });
 });

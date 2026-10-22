@@ -25,16 +25,18 @@ export function reviewersPartialUrl(pullPath: string): string | null {
 
 /**
  * The sidebar names a reviewer by their latest review, so an approval
- * followed by a comment reads "commented" there. GitHub's merge box (and
+ * followed by a comment reads "commented" there, and one asked to review
+ * again reads "awaiting". GitHub's merge box (and
  * the digest) keep the approval standing: its verdict for the same login
  * wins. Dismissed verdicts are already gone from the merge box.
  */
 export function standingReviewers(sidebar: readonly SidebarReviewer[], verdicts: readonly ReviewVerdict[]): SidebarReviewer[] {
-  return sidebar.map((reviewer) => {
+  return sidebar.flatMap((reviewer) => {
     const verdict = verdicts.find((entry) => entry.login.toLowerCase() === reviewer.login.toLowerCase());
-    if (verdict === undefined) return reviewer;
+    // A reviewer only awaited (asked, with no verdict standing) has no review to count or show.
+    if (verdict === undefined) return reviewer.state === 'awaiting' ? [] : [reviewer];
     const state = verdict.state === 'APPROVED' ? 'approved' : 'changes_requested';
-    return reviewer.state === state ? reviewer : { ...reviewer, state };
+    return [reviewer.state === state ? reviewer : { ...reviewer, state }];
   });
 }
 
@@ -68,7 +70,8 @@ export async function fetchReviewers(pullPath: string): Promise<readonly Sidebar
     const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html', 'X-Requested-With': 'XMLHttpRequest' } });
     if (!response.ok) return null;
     const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-    return crawlSidebarReviewers(doc).filter((reviewer) => reviewer.state !== 'awaiting');
+    // Awaiting reviewers stay in: one asked again keeps the verdict the merge box still counts (`standingReviewers`).
+    return crawlSidebarReviewers(doc);
   } catch {
     return null;
   }
