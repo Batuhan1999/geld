@@ -354,13 +354,10 @@ async function writeStory(settings: GeldSettings, step: ReviewStep, then: Review
   if (visit !== current) return;
   current.storiesInFlight.delete(step.id);
   const now = new Date().toISOString();
-  if (current.record !== null) {
-    if (!result.ok) current.record = recordWithError(current.record, result.reason, now);
-    else {
-      const parsed = parseStoryOutput(result.text);
-      if (parsed.ok) current.record = recordWithError(recordWithStory(current.record, step.id, step.fingerprint, parsed.value, result.model, now), null, now);
-      else current.record = recordWithError(current.record, 'The model answered in a shape Geld could not read.', now);
-    }
+  // A story that could not be written leaves the step its gist: `record.error` is the plan's, and its Try again replans.
+  const parsed = result.ok ? parseStoryOutput(result.text) : null;
+  if (current.record !== null && result.ok && parsed !== null && parsed.ok) {
+    current.record = recordWithStory(current.record, step.id, step.fingerprint, parsed.value, result.model, now);
     await savePlanRecord(current.key, current.record);
   }
   onChange();
