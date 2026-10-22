@@ -603,9 +603,11 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending) return;
-      // The instant key wins over the open box: the arrow and the tooltip promised a send.
-      const instant = isInstantClick(event, click, MAC, pendingCount(state) > 0);
-      if (!instant && state.panel !== null && state.opener === event) {
+      // The instant key wins over the open box: the arrow and the tooltip promised a send. Words waiting in the box are
+      // the exception: an empty send would leave them out (and a reload after it would drop them), so the box takes the verdict.
+      const wanted = isInstantClick(event, click, MAC, pendingCount(state) > 0);
+      const instant = wanted && (drafts.get(state.pullPath)?.body ?? '').trim() === '';
+      if (!wanted && state.panel !== null && state.opener === event) {
         closePanel(true);
         return;
       }
@@ -1467,6 +1469,8 @@ function openMergeBox(state: Mounted): void {
   let box: MergeBox = known.box;
   // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
   let boxFor: MergeMethod = method;
+  // False after a failed read: `box` then holds another method's commit, which must not fill the fields.
+  let commitFresh = true;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -1489,8 +1493,8 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = boxFor === method ? box.commitTitle : '';
-      message.value = boxFor === method ? box.commitMessage : '';
+      title.value = boxFor === method && commitFresh ? box.commitTitle : '';
+      message.value = boxFor === method && commitFresh ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
@@ -1504,6 +1508,7 @@ function openMergeBox(state: Mounted): void {
   const load = (asked: MergeMethod): void => {
     void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
       if (state.panel !== panel || method !== asked) return;
+      commitFresh = fresh !== null;
       if (fresh !== null) box = fresh;
       boxFor = asked;
       fill();
