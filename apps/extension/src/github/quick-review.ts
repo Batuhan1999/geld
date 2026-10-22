@@ -633,11 +633,15 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   window.clearTimeout(state.mergeTimer);
   state.mergeRead += 1;
   const read = state.mergeRead;
-  const [actions, tally] = await Promise.all([readMergeActions(pullPath), fetchReviewTally(pullPath)]);
-  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
+  const current = (): boolean => mounted === state && state.pullPath === pullPath && state.mergeRead === read;
+  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close.
+  void fetchReviewTally(pullPath).then((tally) => {
+    if (tally !== null && current()) showTally(state, tally);
+  });
+  const actions = await readMergeActions(pullPath);
+  if (!current()) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
-  if (tally !== null) showTally(state, tally);
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
