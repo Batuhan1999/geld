@@ -769,7 +769,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /*
  * [✓ | ✗ | 💬]: a Primer button group dressed as the Files changed toolbar's own default buttons (Merge status, the
- * settings gear): their surface, border, resting shadow and muted icons, from the same tokens.
+ * settings gear): their surface, border and resting shadow, from the same tokens.
  */
 .geld-quick-review__segment.btn {
   display: inline-flex;
@@ -794,6 +794,31 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: block;
   color: var(--fgColor-muted, #59636e);
   transition: none;
+}
+
+/* Every glyph wears its hover colour at rest too, so each button says what it does before the pointer reaches it. */
+.geld-quick-review__segment[data-event='approve'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__segment[data-event='request changes'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.geld-quick-review__segment[data-action='merge'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-done, #8250df);
+}
+
+.geld-quick-review__segment[data-action='close'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-closed, #d1242f);
+}
+
+.geld-quick-review__segment[data-action='ready'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-open, #1a7f37);
 }
 
 /* The comment octicon's bubble fills y 1 to 12 of 16, its tail below: centred by its box it reads high beside ✓ and ✗. */
