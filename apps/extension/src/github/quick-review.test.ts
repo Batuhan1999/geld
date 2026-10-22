@@ -538,6 +538,26 @@ describe('the tab bar button', () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  it('reads GitHub again before a 1-click merge, and merges nothing when the approval was dismissed meanwhile', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    let approved = true;
+    const sent = stubBox(() => mergeBox('MERGEABLE', true, { reviews: approved ? [{ author: { login: 'ann' }, state: 'APPROVED' }] : [] }));
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(true);
+    // Dismissed since the last read, which still showed the approval.
+    approved = false;
+    pill()?.dispatchEvent(new MouseEvent('click', instant));
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(sent).toEqual([]);
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' }));
+  });
+
   it('has no 1-click merge without an approval: ⌘-click opens the menu', async () => {
     window.localStorage.clear();
     resetStatusHints();

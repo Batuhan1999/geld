@@ -1005,12 +1005,23 @@ function showInstantMerge(state: Mounted): void {
  * GitHub's reason.
  */
 async function instantMerge(state: Mounted, pill: HTMLButtonElement): Promise<void> {
-  const actions = state.mergeActions;
-  if (actions === null) return;
   closeStatusMenu(state);
   closePanel();
   state.statusOpener = pill;
-  const box = actions.box;
+  const pullPath = state.pullPath;
+  // What was read may be a minute old: an approval dismissed or changes requested since must not merge in one click.
+  for (const each of state.pills) each.setAttribute('aria-busy', 'true');
+  const fresh = await readMergeActions(pullPath);
+  for (const each of state.pills) each.removeAttribute('aria-busy');
+  if (mounted !== state || state.pullPath !== pullPath) return;
+  if (fresh !== null) state.mergeActions = fresh;
+  showStatus(state);
+  if (fresh === null || !instantMergeReady(state)) {
+    // No longer an approved pull request GitHub would merge (or GitHub could not say): the reader chooses from the menu.
+    if (pill.isConnected) openStatusMenu(state, pill);
+    return;
+  }
+  const box = fresh.box;
   const method = box.methods[0] ?? 'SQUASH';
   const request = mergeRequest(state.pullPath, { method, commitTitle: box.commitTitle, commitMessage: box.commitMessage, authorEmail: box.authorEmail, bypass: false, stacked: box.stacked }, fetchNonce());
   const failed = await sendAction(state, 'merge', request, () => showMergedPills(state.pills));
