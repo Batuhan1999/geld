@@ -871,7 +871,7 @@ describe('the tab bar button', () => {
     expect(stand.isConnected).toBe(false);
     // The next box has the writer at once, from the same fetch.
     document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .btn-invisible:not(.geld-quick-review__discard)')?.click();
-    document.querySelector('.geld-quick-review')?.dispatchEvent(new Event('pointerenter'));
+    document.querySelector('.geld-quick-review__group[aria-label="Submit review"]')?.dispatchEvent(new Event('pointerenter'));
     segment('comment').click();
     expect(document.querySelector('.geld-quick-review__panel .js-previewable-comment-form textarea')).not.toBeNull();
     expect(asked.filter((url) => url === '/acme/widgets/pull/11')).toHaveLength(1);
