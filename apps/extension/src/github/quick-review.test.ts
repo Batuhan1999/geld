@@ -277,6 +277,15 @@ describe('the tab bar button', () => {
     // The new verdict is the reader's standing one now: ✓ pressed, ✗ not.
     expect(segment('approve').hasAttribute('data-current')).toBe(true);
     expect(segment('request changes').hasAttribute('data-current')).toBe(false);
+    // The words left in the box earlier went with nothing: they wait for the next box.
+    segment('comment').click();
+    const words = document.querySelector('.geld-quick-review__panel textarea');
+    expect(words instanceof HTMLTextAreaElement ? words.value : null).toBe('Needs a test.');
+    if (words instanceof HTMLTextAreaElement) {
+      words.value = '';
+      words.dispatchEvent(new Event('input'));
+    }
+    segment('comment').click();
   });
 
   it('asks for words with GitHub’s reason when it refuses an instant verdict', async () => {
