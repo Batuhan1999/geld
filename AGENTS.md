@@ -877,6 +877,27 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   `syncNarrowMirror` (header-stats.ts) keeps a copy, `.geld-header-mirror` (label + `+N −M`, same tooltip provider), appended to the state-label row (`[data-component="StateLabel"]`'s parent in the same `[data-component="PageHeader"]`, so after the stack button) and toggles its `hidden` on every apply from whether the original host has client rects;
   the controller re-applies on `resize`.
   Removed with `restoreHeaderStats`.
+- **Submit review from any tab** (`quick-review.ts`, experiment `quickReview`, on by default): Geld's own "Submit review ▾" (`btn btn-sm btn-primary`, the 28px green of GitHub's) stands just left of the line counts in the pull request's tab bar on every tab, placed every pass (`placeQuickReview`) and again in the pre-paint header path when GitHub remounts its header.
+  GitHub's button exists only on the React Files changed tab (`[class*="ReviewMenuButton"]`, React's), so it is not moved: while Geld's is mounted `html[data-geld-quick-review]` hides it and the classic `details.js-reviews-container`, so the action shows once.
+  The popover is a Primer `Overlay` under the button with GitHub's own words ("Finish your review", "Leave a comment", Comment / Approve / Request changes and their notes;
+  the author gets GitHub's "Pull request authors can't approve their own pull requests" with those two disabled), Ctrl/Cmd+Enter to send, Escape to close, the draft kept per pull request for the visit.
+  It sends what GitHub's dialog sends (captured Oct 2026 with the request stubbed): `PUT /owner/repo/pull/N/page_data/submit_review`, JSON `{ body, event: 'comment' | 'approve' | 'request changes', headSha }`, `GitHub-Verified-Fetch: true`, `X-Requested-With`, the page's `X-Fetch-Nonce`, same-origin cookies, no form token, so it works from any tab.
+  **Pending comments are GitHub's dialog's too** (`pending-review.ts`): the button carries the count ("Submit review 1", Primer's `Counter`, the aria-label saying it), read live from GitHub's hidden Files changed button (`[class*="ReviewMenuButton"] [data-component="ButtonCounter"]`) where there is one and otherwise from `page_data/thread_previews` (read once per visit and again when the box opens), where a pending comment is `state: "pending"` with `viewerDidAuthor`;
+  `page_data/pending_review` answers 404 whether or not one exists (Oct 2026) and says nothing.
+  The box lists them under "Pending comments N" (folding, open) one line each, as the digest lists threads, to keep the box small: the comment's first sentence (`firstSentence`, through `inlineText` so its code and emphasis stay), then the file's name and line in muted type (the whole path in the tooltip) and an Outdated label, the line a link to the comment on the Files changed tab (`currentDiffResourcePath`, `/pull/N/files#r<id>`, which GitHub answers on `/changes` with the file selected and the comment in view);
+  the list scrolls past six rows.
+  Pending comments go out with the review, so a comment or change request may then be sent without words.
+  **Discard review** (footer left, `btn-danger`, only with pending comments) asks GitHub's own native confirm ("Are you sure you want to cancel?
+  You will lose all your pending comments.") and sends GitHub's `DELETE page_data/abandon_review` (no body), then reloads Files changed (which still draws the discarded comments) or clears the count.
+  Verified for real on geld#68 with a pending comment made for the test and discarded through Geld's button.
+  The two notes read as GitHub's dialog has them now: "Submit feedback and approve merging these changes.", "Submit feedback suggesting changes."
+  On success the Files changed tab (or any tab with pending comments) reloads, since GitHub's view still shows the published comments as pending;
+  elsewhere the button reads "Review submitted" for three seconds.
+  Verified on brandonmcconnell/geld#68 with the harness answering the request itself (`block` command), so nothing was posted;
+  the success response's body was not seen.
+  In the tab bar GitHub floats the counts right and drops their line with 12px of top padding;
+  a 28px button in that 18px line grew the box to the border (a layout shift, and the button over the tab border), so the box holding both (`[data-geld-quick-review-host]` on GitHub's `rightContentWrapper`) is the tab bar's 40px with no padding and both centred on the tabs, and the button overhangs with `-5px` vertical margins wherever else it lands.
+  Panel rules carry both `.Overlay` and the panel class, and pin `right`/`bottom` to `auto`: Primer's own `.Overlay` comes later in the cascade and won the tie (full width, in flow), and something stretched it to the viewport bottom.
 - **The tooltip closes when its host leaves the DOM.**
   GitHub's React lists re-render rows wholesale (the merge box's stack list when the PR's state changes), removing a hovered chip with no `mouseleave`;
   the fixed tooltip then sat at stale coordinates or snapped to the viewport corner once `follow` measured an empty rect.
