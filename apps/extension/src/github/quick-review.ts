@@ -309,10 +309,11 @@ interface Mounted {
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
 
-/** A sent box's words go; the Comment / Review choice is the reader's for the visit and stays. */
-function clearDraft(pullPath: string): void {
-  const kind = drafts.get(pullPath)?.kind ?? null;
-  drafts.set(pullPath, { body: '', event: 'comment', kind });
+/** A sent box's words go, unless the reader has written others since; the Comment / Review choice is the reader's for the visit and stays. */
+function clearDraft(pullPath: string, sent: string): void {
+  const draft = drafts.get(pullPath);
+  if (draft !== undefined && draft.body !== sent) return;
+  drafts.set(pullPath, { body: '', event: 'comment', kind: draft?.kind ?? null });
 }
 
 function draftFor(pullPath: string): Draft {
@@ -1330,7 +1331,8 @@ function pendingCount(state: Mounted): number {
 function showCount(state: Mounted): void {
   const count = pendingCount(state);
   const text = count > 0 ? String(count) : '';
-  if (state.counter.textContent !== text) state.counter.textContent = text;
+  const changed = state.counter.textContent !== text;
+  if (changed) state.counter.textContent = text;
   if (state.counter.hidden !== (count === 0)) state.counter.hidden = count === 0;
   const label = KIND_INFO[commentKindOf(state)].label;
   const name = count > 0 ? `${label}, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : label;
@@ -1341,6 +1343,8 @@ function showCount(state: Mounted): void {
     describeSegments(state);
   }
   showCommentKind(state);
+  // An open box defaults its Comment / Review on the count, and its button must name what a click sends.
+  if (changed) state.panelRefresh?.();
 }
 
 /** What 💬's box would post now: the reader's choice for this pull request, else a review while comments are pending and a comment otherwise. */
@@ -1385,7 +1389,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       return reviewErrorText(response.status, payload);
     }
     // An instant send leaves words saved in the box out on purpose: they stay for the next box.
-    if (body !== '') clearDraft(pullPath);
+    if (body !== '') clearDraft(pullPath, body);
     // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
     // The controls may still name it while the browser already shows the next one (the controller's route pass is debounced).
     if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
@@ -1429,7 +1433,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       const said = messageOf(payload);
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
-    clearDraft(pullPath);
+    clearDraft(pullPath, text);
     if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
@@ -1645,7 +1649,10 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   });
 
   showPanel(state, panel, initial);
-  state.panelRefresh = refresh;
+  state.panelRefresh = () => {
+    showVerdict();
+    refresh();
+  };
   state.panelCleanup = closeKindMenu;
   state.retarget = (event) => {
     draft.event = allowed(event);
