@@ -194,6 +194,9 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   for (const group of groups) {
     const host = group.host;
     if (!host.isConnected || host.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    // GitHub hides the header's counts on narrow screens: placed there, the button would be hidden with them while
+    // GitHub's own was hidden for it, leaving no way to review. A style read, not a layout one.
+    if (!host.checkVisibility()) continue;
     if (host.id === 'diffstat' || host.closest('[data-component="PageHeader"], .gh-header, #partial-discussion-header') !== null) return host;
   }
   return null;
@@ -228,6 +231,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** Each read of the merge box takes the next number: an answer from a read a newer one replaced is dropped, whatever order they land in. */
+  mergeRead: number;
   mergeTimer: number;
   isAuthor: boolean | null;
   pullPath: string;
@@ -278,6 +283,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pullPath !== pullPath) {
     closePanel();
     mounted.pullPath = pullPath;
+    // The last pull request's pending comments are not this one's: none until this one's are read.
+    mounted.pending = null;
     // Another pull request's counts never stand in for this one's: nothing until its reviews are read.
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
   }
@@ -484,6 +491,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     tally,
     mergeActions: null,
     mergeFor: null,
+    mergeRead: 0,
     mergeTimer: 0,
     isAuthor: null,
     pullPath,
@@ -619,8 +627,10 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   const pullPath = state.pullPath;
   state.mergeFor = pullPath;
   window.clearTimeout(state.mergeTimer);
+  state.mergeRead += 1;
+  const read = state.mergeRead;
   const [actions, tally] = await Promise.all([readMergeActions(pullPath), fetchReviewTally(pullPath)]);
-  if (mounted !== state || state.pullPath !== pullPath) return null;
+  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
   if (tally !== null) showTally(state, tally);
@@ -712,6 +722,9 @@ function positionPanel(): void {
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {
@@ -960,6 +973,8 @@ function openMergeBox(state: Mounted): void {
   const bypass = known.offer === 'bypass';
   let method: MergeMethod = known.box.methods[0] ?? 'SQUASH';
   let box: MergeBox = known.box;
+  // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
+  let boxFor: MergeMethod = method;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -982,15 +997,26 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = box.commitTitle;
-      message.value = box.commitMessage;
+      title.value = boxFor === method ? box.commitTitle : '';
+      message.value = boxFor === method ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
     const past = bypass && consent.checked;
     submit.className = `btn btn-sm geld-quick-review__submit ${past ? 'geld-quick-review__submit--danger' : 'btn-primary'}`;
     if (!state.sending) submit.textContent = past ? 'Bypass rules and merge' : METHOD_CONFIRM[method];
-    submit.disabled = state.sending || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+    submit.disabled = state.sending || boxFor !== method || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+  };
+  // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
+  // An answer for a method no longer chosen is dropped; a failed one leaves the fields to the reader.
+  const load = (asked: MergeMethod): void => {
+    void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
+      if (state.panel !== panel || method !== asked) return;
+      if (fresh !== null) box = fresh;
+      boxFor = asked;
+      fill();
+      refresh();
+    });
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
@@ -1011,13 +1037,7 @@ function openMergeBox(state: Mounted): void {
     method = chosen;
     fill();
     refresh();
-    // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
-    void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-      if (fresh === null || state.panel !== panel || method !== chosen) return;
-      box = fresh;
-      fill();
-      refresh();
-    });
+    load(chosen);
   });
   for (const field of [title, message]) {
     field.addEventListener('input', () => {
@@ -1042,12 +1062,7 @@ function openMergeBox(state: Mounted): void {
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
-  void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-    if (fresh === null || state.panel !== panel) return;
-    box = fresh;
-    fill();
-    refresh();
-  });
+  load(method);
 }
 
 /**
