@@ -531,9 +531,11 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending) return;
-      // The instant key wins over the open box: the arrow and the tooltip promised a send.
-      const instant = isInstantClick(event, click, MAC);
-      if (!instant && state.panel !== null && state.opener === event) {
+      // The instant key wins over the open box: the arrow and the tooltip promised a send. Words waiting in the box are
+      // the exception: an empty send would leave them out (and a reload after it would drop them), so the box takes the verdict.
+      const wanted = isInstantClick(event, click, MAC);
+      const instant = wanted && (drafts.get(state.pullPath)?.body ?? '').trim() === '';
+      if (!wanted && state.panel !== null && state.opener === event) {
         closePanel(true);
         return;
       }
