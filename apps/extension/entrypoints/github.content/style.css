@@ -967,29 +967,16 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: inherit;
 }
 
-/* 💬 alone in the review group: "Review" before its icon, so beside close and merge it reads as a review, not a plain comment. */
-.geld-quick-review__label {
-  display: none;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.geld-quick-review[data-alone] .geld-quick-review__label {
-  display: inline;
-}
-
-.geld-quick-review[data-alone] .geld-quick-review__segment[data-event='comment'] {
-  gap: 6px;
-  padding: 0 8px;
-}
-
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
 .geld-quick-review__glyph--instant,
-.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([data-event='comment']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant),
+.geld-quick-review[data-instant][data-pending] .geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
   display: none;
 }
 
-.geld-quick-review[data-instant] .geld-quick-review__segment .geld-quick-review__glyph--instant {
+/* 💬 sends at once only with comments pending (it submits them): its arrow shows only then. */
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([data-event='comment']) .geld-quick-review__glyph--instant,
+.geld-quick-review[data-instant][data-pending] .geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph--instant {
   display: flex;
 }
 
@@ -1002,7 +989,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__tally {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   color: var(--fgColor-muted, #59636e);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1178,6 +1165,92 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__count[hidden] {
   display: none;
+}
+
+/* 💬's box posts a comment or a review: a split submit button, the choice in a small menu over its caret. */
+.geld-quick-review__submit-group {
+  display: inline-flex;
+}
+
+.geld-quick-review__footer .btn.geld-quick-review__kind-toggle {
+  padding: 0 6px;
+}
+
+.geld-quick-review__kind-toggle > svg {
+  margin: 0;
+}
+
+.geld-quick-review__menu {
+  position: fixed;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 12px;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+  box-shadow: var(--shadow-floating-small, 0 1px 1px rgba(31, 35, 40, 0.06), 0 6px 12px rgba(31, 35, 40, 0.12));
+}
+
+.geld-quick-review__menu[hidden] {
+  display: none;
+}
+
+.geld-quick-review__menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-quick-review__menu-item:is(:hover, :focus-visible) {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  outline: none;
+}
+
+.geld-quick-review__menu-visual,
+.geld-quick-review__menu-check {
+  display: flex;
+  flex: 0 0 auto;
+  padding-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.geld-quick-review__menu-check {
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.geld-quick-review__menu-item[aria-checked='true'] .geld-quick-review__menu-check {
+  visibility: visible;
+}
+
+.geld-quick-review__menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.geld-quick-review__menu-label {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.geld-quick-review__menu-note {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 /* The merge box: the method, the commit GitHub would write (editable), and GitHub's bypass checkbox when that is the only way. */

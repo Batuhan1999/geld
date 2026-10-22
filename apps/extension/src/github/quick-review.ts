@@ -10,7 +10,7 @@ import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCoun
 import { inlineText } from './review/inline-text';
 import type { ReviewTally } from './review-tally';
 import { fetchReviewTally, tallyWords } from './review-tally';
-import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -64,8 +64,10 @@ type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
-/** On the group while 💬 is alone in the review group (the author's own pull request): it then says "Review" before its icon. */
-const ATTR_ALONE = 'data-alone';
+/** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
+const ATTR_PENDING = 'data-pending';
+/** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
+const ATTR_KIND = 'data-kind';
 
 interface EventInfo {
   readonly value: ReviewEvent;
@@ -83,7 +85,7 @@ interface EventInfo {
 }
 
 const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
-  comment: { value: 'comment', label: 'Comment', authorMay: true, icon: ICON_COMMENT, instantIcon: null, submitClass: '', done: 'Review submitted' },
+  comment: { value: 'comment', label: 'Comment', authorMay: true, icon: ICON_COMMENT, instantIcon: ICON_COMMENT_SEND, submitClass: '', done: 'Review submitted' },
   approve: {
     value: 'approve',
     label: 'Approve',
@@ -107,9 +109,9 @@ const EVENT_INFO: { readonly [E in ReviewEvent]: EventInfo } = {
 /** The segments, left to right: the verdicts first, the comment last (it carries the pending count). */
 const SEGMENT_ORDER: readonly ReviewEvent[] = ['approve', 'request changes', 'comment'];
 
-/** Whether a click asked to send at once, without the box: ⌘ on a Mac, Ctrl elsewhere, on ✓ or ✗ only. */
-export function isInstantClick(event: ReviewEvent, click: Pick<MouseEvent, 'metaKey' | 'ctrlKey'>, mac: boolean): boolean {
-  return event !== 'comment' && (mac ? click.metaKey : click.ctrlKey);
+/** Whether a click asked to send at once, without the box: ⌘ on a Mac, Ctrl elsewhere, on ✓ or ✗, and on 💬 while comments are pending (it then submits them). */
+export function isInstantClick(event: ReviewEvent, click: Pick<MouseEvent, 'metaKey' | 'ctrlKey'>, mac: boolean, pending = false): boolean {
+  return (event !== 'comment' || pending) && (mac ? click.metaKey : click.ctrlKey);
 }
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -119,9 +121,13 @@ const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
  * A segment's tooltip, one entry per line: its verdict and the key for a
  * 1-click review, or what a click does while that key is held.
  */
-export function segmentHint(event: ReviewEvent, instantKey: string, held = false): readonly string[] {
+export function segmentHint(event: ReviewEvent, instantKey: string, held = false, pending = false, kind: CommentKind = 'comment'): readonly string[] {
   const info = EVENT_INFO[event];
-  if (info.instantIcon === null) return [info.label];
+  if (event === 'comment') {
+    const label = kind === 'review' ? 'Review' : info.label;
+    if (!pending) return [label];
+    return held ? ['Submit pending comments'] : [label, `${instantKey} 1-click review`];
+  }
   if (held) return [`${info.label} without comments`];
   return [info.label, `${instantKey} 1-click review`];
 }
@@ -144,6 +150,13 @@ export function submitReviewRequest(pullPath: string, submission: ReviewSubmissi
     url: `${pullPath}/page_data/submit_review`,
     init: { method: 'PUT', credentials: 'same-origin', headers, body: JSON.stringify({ body: submission.body, event: submission.event, headSha: submission.headSha }) },
   };
+}
+
+/** What GitHub's conversation composer sends to post a comment on the pull request (`create_timeline_comment`, its `text`; verified Oct 2026). */
+export function timelineCommentRequest(pullPath: string, text: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' };
+  if (nonce !== '') headers['X-Fetch-Nonce'] = nonce;
+  return { url: `${pullPath}/page_data/create_timeline_comment`, init: { method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify({ text }) } };
 }
 
 /** An approval needs no words; a comment or a request for changes needs them, unless pending comments go with it. */
@@ -202,9 +215,14 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   return null;
 }
 
+/** What 💬's box posts: a comment on the conversation, or a review (which carries the pending comments). */
+export type CommentKind = 'comment' | 'review';
+
 interface Draft {
   body: string;
   event: ReviewEvent;
+  /** The reader's choice for 💬's box; null until they make one, when pending comments decide (a review with them, a comment without). */
+  kind: CommentKind | null;
 }
 
 interface Mounted {
@@ -241,6 +259,10 @@ interface Mounted {
   panel: HTMLElement | null;
   /** Gives the open box another verdict, keeping its words. */
   retarget: ((event: ReviewEvent) => void) | null;
+  /** The open box's own refresh: a send finishing for another box (one closed meanwhile) re-enables this one. */
+  panelRefresh: (() => void) | null;
+  /** What the open box set up outside itself (the kind menu's window listeners), undone when the box closes. */
+  panelCleanup: (() => void) | null;
   /** A review on its way: the controls and the box wait for it. */
   sending: boolean;
   submittedTimer: number;
@@ -262,10 +284,17 @@ interface Mounted {
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
 
+/** A sent box's words go, unless the reader has written others since; the Comment / Review choice is the reader's for the visit and stays. */
+function clearDraft(pullPath: string, sent: string): void {
+  const draft = drafts.get(pullPath);
+  if (draft !== undefined && draft.body !== sent) return;
+  drafts.set(pullPath, { body: '', event: 'comment', kind: draft?.kind ?? null });
+}
+
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
   if (draft === undefined) {
-    draft = { body: '', event: 'comment' };
+    draft = { body: '', event: 'comment', kind: null };
     drafts.set(pullPath, draft);
   }
   return draft;
@@ -448,7 +477,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       'button',
       { type: 'button', id: `geld-quick-review-${tipIds}`, class: 'btn btn-sm BtnGroup-item geld-quick-review__segment', 'data-event': event, 'aria-label': info.label, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
       [
-        ...(event === 'comment' ? [createElement('span', { class: 'geld-quick-review__label', 'aria-hidden': 'true' }, ['Review'])] : []),
         createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
         ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
       ],
@@ -503,6 +531,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     context,
     panel: null,
     retarget: null,
+    panelRefresh: null,
+    panelCleanup: null,
     sending: false,
     submittedTimer: 0,
     pending: null,
@@ -546,7 +576,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       if (state.sending) return;
       // The instant key wins over the open box: the arrow and the tooltip promised a send. Words waiting in the box are
       // the exception: an empty send would leave them out (and a reload after it would drop them), so the box takes the verdict.
-      const wanted = isInstantClick(event, click, MAC);
+      const wanted = isInstantClick(event, click, MAC, pendingCount(state) > 0);
       const instant = wanted && (drafts.get(state.pullPath)?.body ?? '').trim() === '';
       if (!wanted && state.panel !== null && state.opener === event) {
         closePanel(true);
@@ -563,7 +593,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       void sendReview(state, event, '').then((failure) => {
         // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason,
         // unless the reader has moved on (another pull request, or no controls): that box would review the wrong one.
-        if (failure !== null && mounted === state && state.pullPath === sentFrom) openComposer(state, event, failure);
+        // A refused 💬 was a review of the pending comments: its box opens as a review, whatever the reader's usual choice.
+        if (failure !== null && mounted === state && state.pullPath === sentFrom) openComposer(state, event, failure, event === 'comment' ? 'review' : null);
       });
     });
   }
@@ -592,7 +623,9 @@ function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () =
 
 function describeSegments(state: Mounted): void {
   const held = state.root.hasAttribute(ATTR_INSTANT);
-  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held));
+  const pending = pendingCount(state) > 0;
+  const kind = commentKindOf(state);
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held, pending, kind));
 }
 
 /**
@@ -607,8 +640,6 @@ function showAuthor(state: Mounted): void {
   state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
   // The header said "author" only after a box opened on ✓ or ✗: the box takes Comment, the one verdict left.
   if (isAuthor && state.retarget !== null && (state.opener === 'approve' || state.opener === 'request changes')) state.retarget('comment');
-  // 💬 alone says "Review", or beside close and merge it would read as a plain comment rather than a review.
-  state.root.toggleAttribute(ATTR_ALONE, state.group.childElementCount === 1);
   showActions(state);
 }
 
@@ -707,9 +738,12 @@ function buttonFor(state: Mounted, opener: Opener): HTMLButtonElement {
 
 function closePanel(restoreFocus = false): void {
   if (mounted === null || mounted.panel === null) return;
+  mounted.panelCleanup?.();
+  mounted.panelCleanup = null;
   mounted.panel.remove();
   mounted.panel = null;
   mounted.retarget = null;
+  mounted.panelRefresh = null;
   const opener = mounted.opener === null ? null : buttonFor(mounted, mounted.opener);
   mounted.opener = null;
   opener?.setAttribute('aria-expanded', 'false');
@@ -783,10 +817,40 @@ function pendingCount(state: Mounted): number {
 function showCount(state: Mounted): void {
   const count = pendingCount(state);
   const text = count > 0 ? String(count) : '';
-  if (state.counter.textContent !== text) state.counter.textContent = text;
+  const changed = state.counter.textContent !== text;
+  if (changed) state.counter.textContent = text;
   if (state.counter.hidden !== (count === 0)) state.counter.hidden = count === 0;
-  const name = count > 0 ? `Comment, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : 'Comment';
+  const label = KIND_INFO[commentKindOf(state)].label;
+  const name = count > 0 ? `${label}, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : label;
   if (state.segments.comment.getAttribute('aria-label') !== name) state.segments.comment.setAttribute('aria-label', name);
+  // With comments pending, 💬 has a 1-click review too: its sending glyph and tooltip follow the count.
+  if (state.root.hasAttribute(ATTR_PENDING) !== count > 0) {
+    state.root.toggleAttribute(ATTR_PENDING, count > 0);
+    describeSegments(state);
+  }
+  showCommentKind(state);
+  // An open box defaults its Comment / Review on the count, and its button must name what a click sends.
+  if (changed) state.panelRefresh?.();
+}
+
+/** What 💬's box would post now: the reader's choice for this pull request, else a review while comments are pending and a comment otherwise. */
+function commentKindOf(state: Mounted): CommentKind {
+  return drafts.get(state.pullPath)?.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+}
+
+/** 💬 wears the kind its box will post: the comment glyph, or `code-review`'s bubble with brackets for a review. */
+function showCommentKind(state: Mounted): void {
+  const kind = commentKindOf(state);
+  const button = state.segments.comment;
+  if (button.getAttribute(ATTR_KIND) === kind) return;
+  button.setAttribute(ATTR_KIND, kind);
+  const [plain, instant] = button.querySelectorAll('.geld-quick-review__glyph');
+  plain?.replaceChildren(svgFromString(kind === 'review' ? ICON_CODE_REVIEW : ICON_COMMENT));
+  instant?.replaceChildren(svgFromString(kind === 'review' ? ICON_CODE_REVIEW_SEND : ICON_COMMENT_SEND));
+  const label = KIND_INFO[kind].label;
+  const count = pendingCount(state);
+  button.setAttribute('aria-label', count > 0 ? `${label}, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : label);
+  describeSegments(state);
 }
 
 /**
@@ -811,7 +875,11 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       return reviewErrorText(response.status, payload);
     }
     // An instant send leaves words saved in the box out on purpose: they stay for the next box.
-    if (body !== '') drafts.delete(pullPath);
+    if (body !== '') clearDraft(pullPath, body);
+    // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
+    // The controls may still name it while the browser already shows the next one (the controller's route pass is debounced).
+    if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
+    showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
       return null;
@@ -826,10 +894,56 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     return 'GitHub could not submit the review.';
   } finally {
     state.sending = false;
+    state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
     if (state.status.textContent === 'Submitting…') state.status.textContent = '';
   }
 }
+
+/**
+ * Post a plain comment on the pull request. Pending review comments stay
+ * pending. On the conversation the page reloads to show it; elsewhere the
+ * controls say it went through for a moment.
+ */
+async function sendComment(state: Mounted, text: string): Promise<string | null> {
+  const pullPath = state.pullPath;
+  const { url, init } = timelineCommentRequest(pullPath, text, fetchNonce());
+  state.sending = true;
+  state.root.setAttribute('aria-busy', 'true');
+  window.clearTimeout(state.submittedTimer);
+  state.status.textContent = 'Posting…';
+  try {
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      const said = messageOf(payload);
+      return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
+    }
+    clearDraft(pullPath, text);
+    if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
+    showCommentKind(state);
+    if (state.context.page.kind === 'pull-conversation') {
+      window.location.reload();
+      return null;
+    }
+    showDone(state, 'Commented');
+    return null;
+  } catch {
+    return 'GitHub could not post the comment.';
+  } finally {
+    state.sending = false;
+    state.panelRefresh?.();
+    state.root.removeAttribute('aria-busy');
+    if (state.status.textContent === 'Posting…') state.status.textContent = '';
+  }
+}
+
+const COMMENT_KINDS: readonly CommentKind[] = ['comment', 'review'];
+
+const KIND_INFO: { readonly [K in CommentKind]: { readonly label: string; readonly note: string; readonly icon: string } } = {
+  comment: { label: 'Comment', note: 'Add to the conversation', icon: ICON_COMMENT },
+  review: { label: 'Review', note: 'Submit as a review', icon: ICON_CODE_REVIEW },
+};
 
 /**
  * The comment box: the words, the pending comments and Cancel beside a
@@ -838,7 +952,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
  * segment that opened it chose the verdict, and another segment changes it
  * in place. After a refused send, GitHub's reason above the buttons.
  */
-function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null, kindNow: CommentKind | null = null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
@@ -855,23 +969,81 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const discard = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible geld-quick-review__discard', hidden: '' }, [svgFromString(ICON_TRASH), 'Discard review']);
   const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-sm' });
+  // 💬's box posts a plain comment or a review: a split button, the choice behind its caret.
+  const kindToggle = createElement('button', { type: 'button', class: 'btn btn-sm BtnGroup-item geld-quick-review__kind-toggle', 'aria-label': 'Comment or review', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, [svgFromString(ICON_TRIANGLE_DOWN)]);
+  const submitGroup = createElement('div', { class: 'geld-quick-review__submit-group' }, [submit]);
+  const kindMenu = createElement('div', { class: 'geld-quick-review__menu', role: 'menu', 'aria-label': 'Comment or review', hidden: '' });
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
     createElement('div', { class: 'Overlay-body' }, [body, pendingSection, error]),
-    createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]),
+    createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submitGroup])]),
+    kindMenu,
   ]);
 
   let pendingOpen = false;
+  // This box's kind when it was opened for one (a refused review of pending comments), else the reader's choice.
+  let opened: CommentKind | null = kindNow;
+  const kind = (): CommentKind => opened ?? draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+  const posting = (): boolean => draft.event === 'comment' && kind() === 'comment';
   const showVerdict = (): void => {
     const info = EVENT_INFO[draft.event];
-    submit.className = `btn btn-sm geld-quick-review__submit ${info.submitClass}`.trim();
-    if (!state.sending) submit.textContent = info.label;
-    panel.setAttribute('aria-label', info.label);
+    const split = draft.event === 'comment';
+    submit.className = `btn btn-sm geld-quick-review__submit ${info.submitClass}${split ? ' BtnGroup-item' : ''}`.trim();
+    if (!state.sending) submit.textContent = split ? KIND_INFO[kind()].label : info.label;
+    submitGroup.classList.toggle('BtnGroup', split);
+    if ((submitGroup.lastElementChild === kindToggle) !== split) {
+      if (split) submitGroup.append(kindToggle);
+      else kindToggle.remove();
+    }
+    if (!split) closeKindMenu();
+    panel.setAttribute('aria-label', split ? KIND_INFO[kind()].label : info.label);
+  };
+  let menuKeys: AbortController | null = null;
+  const closeKindMenu = (): void => {
+    kindMenu.hidden = true;
+    kindToggle.setAttribute('aria-expanded', 'false');
+    menuKeys?.abort();
+    menuKeys = null;
+  };
+  const openKindMenu = (): void => {
+    kindMenu.replaceChildren(
+      ...COMMENT_KINDS.map((option) => {
+        const info = KIND_INFO[option];
+        const item = createElement('button', { type: 'button', class: 'geld-quick-review__menu-item', role: 'menuitemradio', 'aria-checked': String(kind() === option) }, [
+          createElement('span', { class: 'geld-quick-review__menu-visual' }, [svgFromString(info.icon)]),
+          createElement('span', { class: 'geld-quick-review__menu-text' }, [createElement('span', { class: 'geld-quick-review__menu-label' }, [info.label]), createElement('span', { class: 'geld-quick-review__menu-note' }, [info.note])]),
+          createElement('span', { class: 'geld-quick-review__menu-check', 'aria-hidden': 'true' }, [svgFromString(ICON_CHECK)]),
+        ]);
+        item.addEventListener('click', () => {
+          draft.kind = option;
+          opened = null;
+          showCommentKind(state);
+          closeKindMenu();
+          showVerdict();
+          refresh();
+          submit.focus({ preventScroll: true });
+        });
+        return item;
+      }),
+    );
+    kindMenu.hidden = false;
+    kindToggle.setAttribute('aria-expanded', 'true');
+    // Above the caret, its right edge on the caret's: the box's footer is its last row, and the page may end below it.
+    const toggle = kindToggle.getBoundingClientRect();
+    kindMenu.style.left = `${Math.round(Math.max(8, toggle.right - kindMenu.offsetWidth))}px`;
+    kindMenu.style.top = `${Math.round(Math.max(8, toggle.top - kindMenu.offsetHeight - 4))}px`;
+    kindMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+    // Fixed where the caret was: when the box moves (the page scrolls, the window changes) it closes rather than stay behind.
+    menuKeys = new AbortController();
+    window.addEventListener('scroll', closeKindMenu, { passive: true, once: true, signal: menuKeys.signal });
+    window.addEventListener('resize', closeKindMenu, { once: true, signal: menuKeys.signal });
   };
   // The list is rebuilt only when what it shows changed, not on every keystroke (which would also reset its scroll).
   let shown: { readonly comments: readonly PendingComment[] | null; readonly count: number; readonly open: boolean } | null = null;
   const refresh = (): void => {
     const pending = pendingCount(state);
-    submit.disabled = state.sending || !canSubmit(draft.event, body.value, pending > 0);
+    // A plain comment needs words; pending comments do not go with it.
+    submit.disabled = state.sending || (posting() ? body.value.trim() === '' : !canSubmit(draft.event, body.value, pending > 0));
+    kindToggle.disabled = state.sending;
     discard.hidden = pending === 0;
     discard.disabled = state.sending;
     if (shown !== null && shown.comments === state.pending && shown.count === pending && shown.open === pendingOpen) return;
@@ -884,8 +1056,8 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
     error.hidden = true;
-    submit.textContent = 'Submitting…';
-    const pending = sendReview(state, draft.event, body.value);
+    submit.textContent = posting() ? 'Posting…' : 'Submitting…';
+    const pending = posting() ? sendComment(state, body.value) : sendReview(state, draft.event, body.value);
     refresh();
     const failed = await pending;
     showVerdict();
@@ -905,14 +1077,30 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   panel.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      closePanel(true);
+      if (!kindMenu.hidden) {
+        closeKindMenu();
+        kindToggle.focus({ preventScroll: true });
+      } else closePanel(true);
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void send();
+    } else if (!kindMenu.hidden && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault();
+      const items = [...kindMenu.querySelectorAll<HTMLElement>('.geld-quick-review__menu-item')];
+      const at = items.findIndex((item) => item === document.activeElement);
+      items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus({ preventScroll: true });
     }
+  });
+  panel.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    if (!kindMenu.hidden && target instanceof Node && !kindMenu.contains(target) && !kindToggle.contains(target)) closeKindMenu();
   });
   cancel.addEventListener('click', () => closePanel(true));
   submit.addEventListener('click', () => void send());
+  kindToggle.addEventListener('click', () => {
+    if (kindMenu.hidden) openKindMenu();
+    else closeKindMenu();
+  });
   discard.addEventListener('click', () => {
     // GitHub's own words and its own (native) confirmation, as its Discard review asks.
     if (!window.confirm('Are you sure you want to cancel? You will lose all your pending comments.')) return;
@@ -920,6 +1108,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     refresh();
     void discardPendingReview(pullPath).then((done) => {
       state.sending = false;
+      state.panelRefresh?.();
       if (!done) {
         error.textContent = 'GitHub could not discard the review.';
         error.hidden = false;
@@ -940,6 +1129,11 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   });
 
   showPanel(state, panel, initial);
+  state.panelRefresh = () => {
+    showVerdict();
+    refresh();
+  };
+  state.panelCleanup = closeKindMenu;
   state.retarget = (event) => {
     draft.event = allowed(event);
     if (state.opener !== null) buttonFor(state, state.opener).setAttribute('aria-expanded', 'false');
@@ -955,7 +1149,10 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   body.focus({ preventScroll: true });
   // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
   void loadPending(state).then(() => {
-    if (state.panel === panel) refresh();
+    if (state.panel !== panel) return;
+    // Pending comments arriving make a review the default for 💬, unless the reader chose already.
+    showVerdict();
+    refresh();
   });
 }
 
@@ -983,6 +1180,7 @@ async function sendAction(state: Mounted, kind: 'merge' | 'close' | 'ready', req
     return actionErrorText(kind, 0, null);
   } finally {
     state.sending = false;
+    state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
     if (state.status.textContent === ACTION_STATUS[kind]) state.status.textContent = '';
   }
@@ -1094,6 +1292,7 @@ function openMergeBox(state: Mounted): void {
   submit.addEventListener('click', () => void send());
 
   showPanel(state, panel, 'merge');
+  state.panelRefresh = refresh;
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
