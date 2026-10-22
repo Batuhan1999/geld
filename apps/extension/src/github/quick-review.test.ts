@@ -539,6 +539,54 @@ describe('the tab bar button', () => {
     await settle();
     await settle();
     expect(sent[1]).toEqual({ url: '/acme/widgets/pull/9/page_data/submit_review', body: JSON.stringify({ body: 'As a review.', event: 'comment', headSha: SHA }) });
+    // The box's words went with it; the choice of a review stays for the visit.
+    segment('comment').click();
+    const third = document.querySelector('.geld-quick-review__panel');
+    expect(third?.querySelector('textarea')?.value).toBe('');
+    expect(third?.querySelector('.geld-quick-review__submit')?.textContent).toBe('Review');
+    // The choice menu is fixed where its caret was: scrolling the page closes it rather than leave it behind.
+    third?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    expect(third?.querySelector<HTMLElement>('.geld-quick-review__menu')?.hidden).toBe(false);
+    window.dispatchEvent(new Event('scroll'));
+    expect(third?.querySelector<HTMLElement>('.geld-quick-review__menu')?.hidden).toBe(true);
+  });
+
+  it('opens a refused ⌘-click on 💬 as a review of the pending comments, whatever the usual choice', async () => {
+    const pending = {
+      id: '1',
+      path: 'src/a.ts',
+      line: 3,
+      isOutdated: false,
+      subject: { diffLines: [] },
+      commentsData: { comments: [{ id: 'c1', state: 'pending', viewerDidAuthor: true, body: 'Typo.', currentDiffResourcePath: '/acme/widgets/pull/12/files#r1' }] },
+    };
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/thread_previews')) return new Response(JSON.stringify([pending]), { status: 200 });
+      if (init?.method === 'PUT' || init?.method === 'POST') {
+        sent.push(url.replace(/^.*\/page_data\//, ''));
+        return new Response('{"error":"Try again"}', { status: 422 });
+      }
+      return new Response('{}', { status: 404 });
+    }));
+    window.history.replaceState(null, '', '/acme/widgets/pull/12/commits');
+    const page12 = { kind: 'pull-other' as const, diffUrl: null, stateKey: '/acme/widgets/pull/12' };
+    applyQuickReview(true, { page: page12, groups: [groupAt(counts())], headSha: () => SHA });
+    await settle();
+    applyQuickReview(true, { page: page12, groups: [groupAt(counts())], headSha: () => SHA });
+    // The reader's usual choice is a plain comment.
+    segment('comment').click();
+    const box = document.querySelector('.geld-quick-review__panel');
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    [...(box?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])].find((item) => item.textContent?.startsWith('Comment'))?.click();
+    segment('comment').click();
+    expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
+    segment('comment').dispatchEvent(new MouseEvent('click', instant));
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(sent).toEqual(['submit_review']);
+    const refused = document.querySelector('.geld-quick-review__panel');
+    expect(refused?.querySelector('.geld-quick-review__submit')?.textContent).toBe('Review');
   });
 
   it('writes a comment as GitHub’s conversation composer does', () => {

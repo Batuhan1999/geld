@@ -280,6 +280,12 @@ interface Mounted {
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
 
+/** A sent box's words go; the Comment / Review choice is the reader's for the visit and stays. */
+function clearDraft(pullPath: string): void {
+  const kind = drafts.get(pullPath)?.kind ?? null;
+  drafts.set(pullPath, { body: '', event: 'comment', kind });
+}
+
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
   if (draft === undefined) {
@@ -569,7 +575,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       closePanel();
       void sendReview(state, event, '').then((failure) => {
         // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason.
-        if (failure !== null) openComposer(state, event, failure);
+        // A refused 💬 was a review of the pending comments: its box opens as a review, whatever the reader's usual choice.
+        if (failure !== null) openComposer(state, event, failure, event === 'comment' ? 'review' : null);
       });
     });
   }
@@ -832,7 +839,9 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       const payload: unknown = await response.json().catch(() => null);
       return reviewErrorText(response.status, payload);
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
@@ -872,7 +881,8 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       const said = messageOf(payload);
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
       window.location.reload();
@@ -903,7 +913,7 @@ const KIND_INFO: { readonly [K in CommentKind]: { readonly label: string; readon
  * segment that opened it chose the verdict, and another segment changes it
  * in place. After a refused send, GitHub's reason above the buttons.
  */
-function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null, kindNow: CommentKind | null = null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
@@ -931,7 +941,9 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   ]);
 
   let pendingOpen = false;
-  const kind = (): CommentKind => draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+  // This box's kind when it was opened for one (a refused review of pending comments), else the reader's choice.
+  let opened: CommentKind | null = kindNow;
+  const kind = (): CommentKind => opened ?? draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
   const posting = (): boolean => draft.event === 'comment' && kind() === 'comment';
   const showVerdict = (): void => {
     const info = EVENT_INFO[draft.event];
@@ -946,9 +958,12 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     if (!split) closeKindMenu();
     panel.setAttribute('aria-label', split ? KIND_INFO[kind()].label : info.label);
   };
+  let menuKeys: AbortController | null = null;
   const closeKindMenu = (): void => {
     kindMenu.hidden = true;
     kindToggle.setAttribute('aria-expanded', 'false');
+    menuKeys?.abort();
+    menuKeys = null;
   };
   const openKindMenu = (): void => {
     kindMenu.replaceChildren(
@@ -961,6 +976,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
         ]);
         item.addEventListener('click', () => {
           draft.kind = option;
+          opened = null;
           showCommentKind(state);
           closeKindMenu();
           showVerdict();
@@ -977,6 +993,10 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     kindMenu.style.left = `${Math.round(Math.max(8, toggle.right - kindMenu.offsetWidth))}px`;
     kindMenu.style.top = `${Math.round(Math.max(8, toggle.top - kindMenu.offsetHeight - 4))}px`;
     kindMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+    // Fixed where the caret was: when the box moves (the page scrolls, the window changes) it closes rather than stay behind.
+    menuKeys = new AbortController();
+    window.addEventListener('scroll', closeKindMenu, { passive: true, once: true, signal: menuKeys.signal });
+    window.addEventListener('resize', closeKindMenu, { once: true, signal: menuKeys.signal });
   };
   const refresh = (): void => {
     const pending = pendingCount(state);
