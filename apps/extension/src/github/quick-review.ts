@@ -296,6 +296,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pullPath !== pullPath) {
     closePanel();
     mounted.pullPath = pullPath;
+    // Another pull request's counts never stand in for this one's: nothing until its reviews are read.
+    showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
   }
   mounted.context = context;
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
