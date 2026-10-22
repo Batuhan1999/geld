@@ -40,6 +40,7 @@ import type { Batch, BotLine, ReviewEntry, ReviewEntryState, ReviewThreadRef } f
 import { hideHoverCard, setHoverProvider, setReportProvider, setWhoProvider } from './hovercard';
 import type { HoverPreview, ReportCard, WhoCard } from './hovercard';
 import { knownMarkShape } from './mark-shape';
+import { showLogins } from './login';
 import { allResolved, checkCountsFrom, checksSummary, digestMarkdown, isCurrent, itemMarkdown, newerSummaryAnchor, requiredReviewsFrom, standingReviewers } from './panel-model';
 import type { MarkdownSubject, RequiredReviews } from './panel-model';
 import { fixVisible } from '@geld/review';
@@ -3294,6 +3295,8 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
       fitChips(mounted.root);
       // Commit rows on loan get their dates once those land (the slot itself is not rebuilt for that).
       timeCommitRows(mounted.root, reapplySoon);
+      // GitHub's names on loan read as logins, as the panel's own rows do.
+      showLogins(mounted.root);
     });
   }
   setHoverProvider((row) => hoverPreviewFor(row, meta, groups, panelHandlers));

@@ -477,6 +477,11 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   With the tab visible the hydration of the fresh markup soon ran another pass that rebuilt the panel and dropped it;
   with the tab hidden the one catch-up pass was all there was, and the chat stayed stale or went blank until a reload (mint#12803).
   Dropped before the crawl, the pass sees the fresh item, the open chat re-renders when its thread's fragment lands, and the reply is there.
+- **People are named by their login everywhere in the digest, and every name opens their hover card.**
+  Where the reader's GitHub shows full names (an account setting, some organisations' default), its links read "Connor Peet (connor4312)", and the crawl took that text as the login: rows read from the timeline showed full names while rows read from the sidebar showed logins, and one reviewer counted as two people ("3 approved" where GitHub counted one, microsoft/vscode#343264).
+  `loginOfLink` (`review/login.ts`) reads a person from where the link leads (the profile path, the `/users/<login>/hovercard` URL, else the parenthesis after the name), for `authorOf` and the events headline's actor;
+  Apps keep their own rule (`…[bot]`).
+  The panel's name spans carry `whoAttributes` as its avatars do (GitHub's user hovercard, Geld's identity card for an App), and GitHub's own links on loan to the panel (an events list, a comment's author line) show the login too (`showLogins` in the dress phase: a text node "Name (login)" inside a link to that person becomes "login", put back by `onRestore`), so a loaned node still reads the same to the crawl.
 - **Comment text keeps its inline formatting, everywhere it is shortened to a line.**
   The crawler's `blockText` writes GitHub's rendered `<code>`, `<strong>`/`<b>`, `<em>`/`<i>` and `<del>` back as Markdown marks (never inside `<pre>`), `firstSentence` (`@geld/review/cluster.ts`) keeps them and ends a sentence only outside a code span, and `@geld/review/inline-markdown.ts` (`parseInlineMarkdown`, `stripInlineMarkdown`) is the one reader of that inline subset — code, bold, italic, strikethrough;
   nothing block-level.

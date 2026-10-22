@@ -753,13 +753,13 @@ function foldRowEl(fold: FoldRow, model: PanelModel, handlers: PanelHandlers): H
   const mainChildren: Node[] =
     fold.closure !== undefined
       ? [
-          createElement('span', { class: `${PANEL_CLASS}__name` }, [fold.author ?? '']),
+          createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(fold.author ?? '', false) }, [fold.author ?? '']),
           createElement('span', { class: 'geld-sr-only' }, [` ${fold.closure.kind} this `]),
           ...(fold.closure.preview === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(fold.closure.preview))]),
         ]
       : headline !== undefined
         ? [
-            ...(headline.actor === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__name` }, [headline.actor])]),
+            ...(headline.actor === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(headline.actor, false) }, [headline.actor])]),
             createElement('span', { class: `${PANEL_CLASS}__preview ${PANEL_CLASS}__preview--verdict` }, [headlineText(headline)]),
             createElement('span', { class: `${PANEL_CLASS}__preview ${PANEL_CLASS}__preview--count` }, [fold.label]),
           ]
@@ -2111,7 +2111,7 @@ function botLine(line: BotLine, model: PanelModel, handlers: PanelHandlers, rese
     else if (firstThread !== null) handlers.onOpenAnchor(firstThread);
   };
   const mainChildren: Node[] = [
-    createElement('span', { class: `${PANEL_CLASS}__name` }, [botTitle(bot.id, bot.login)]),
+    createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(bot.login, true) }, [botTitle(bot.id, bot.login)]),
     createElement('span', { class: `${PANEL_CLASS}__bot-detail ${PANEL_CLASS}__bot-line-detail` }, [botDetail(bot)]),
   ];
   if (line.preview !== '') mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(line.preview)));
@@ -2303,7 +2303,7 @@ function entryRow(entry: ReviewEntry, model: PanelModel, handlers: PanelHandlers
     else if (goes && firstThread !== null) handlers.onOpenAnchor(firstThread);
     else handlers.onToggleSub(entry.anchor);
   };
-  const mainChildren: Node[] = [createElement('span', { class: `${PANEL_CLASS}__name` }, [bot ? botTitle(resolveBotId(entry.author) ?? `custom:${entry.author}`, entry.author) : entry.author])];
+  const mainChildren: Node[] = [createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(entry.author, bot) }, [bot ? botTitle(resolveBotId(entry.author) ?? `custom:${entry.author}`, entry.author) : entry.author])];
   // A verdict without words shows only the name: the glyph already says approved / requested changes.
   if (entry.preview !== '') mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(entry.preview)));
   else if (entry.state === 'awaiting') mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__preview ${PANEL_CLASS}__preview--verdict` }, ['awaiting review']));
