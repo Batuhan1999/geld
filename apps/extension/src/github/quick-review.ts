@@ -192,6 +192,9 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   for (const group of groups) {
     const host = group.host;
     if (!host.isConnected || host.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    // GitHub hides the header's counts on narrow screens: placed there, the button would be hidden with them while
+    // GitHub's own was hidden for it, leaving no way to review. A style read, not a layout one.
+    if (!host.checkVisibility()) continue;
     if (host.id === 'diffstat' || host.closest('[data-component="PageHeader"], .gh-header, #partial-discussion-header') !== null) return host;
   }
   return null;
@@ -274,6 +277,8 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
   if (mounted.pullPath !== pullPath) {
     closePanel();
     mounted.pullPath = pullPath;
+    // The last pull request's pending comments are not this one's: none until this one's are read.
+    mounted.pending = null;
   }
   mounted.context = context;
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
@@ -683,6 +688,9 @@ function positionPanel(): void {
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {

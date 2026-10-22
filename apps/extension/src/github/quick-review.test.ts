@@ -105,6 +105,12 @@ describe('the tab bar button', () => {
     // A pass while stuck keeps it there, without measuring.
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     expect(own?.previousElementSibling).toBe(group);
+    // Its box is fixed under the toolbar, and keeps to the room left in the window so its buttons stay in view.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]')?.click();
+    const box = document.querySelector<HTMLElement>('.geld-quick-review__panel');
+    expect(box?.style.position).toBe('fixed');
+    expect(box?.style.maxHeight).toMatch(/^\d+px$/);
+    box?.querySelector<HTMLButtonElement>('.btn-invisible:not(.geld-quick-review__discard)')?.click();
     top = 262;
     window.dispatchEvent(new Event('scroll'));
     expect(counts().previousElementSibling).toBe(group);
@@ -146,6 +152,13 @@ describe('the tab bar button', () => {
     document.head.innerHTML = '';
     applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/7' }, groups: [groupAt(counts())], headSha: () => SHA });
     expect(document.querySelector('.geld-quick-review')).toBeNull();
+  });
+
+  it('stays out of the way where GitHub hides the header’s counts, so its own review button shows', () => {
+    counts().style.display = 'none';
+    applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/7' }, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(document.documentElement.hasAttribute('data-geld-quick-review')).toBe(false);
   });
 
   const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
@@ -354,6 +367,14 @@ describe('the tab bar button', () => {
     expect(badge?.textContent).toBe('1');
     expect(button?.querySelector('.geld-quick-review__count')).toBeNull();
     expect(button?.getAttribute('aria-label')).toBe('Comment, 1 pending comment');
+    // Another pull request in the same tab: none of this one's comments until its own are read.
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__badged > .geld-quick-review__count')?.hidden).toBe(true);
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     button?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
