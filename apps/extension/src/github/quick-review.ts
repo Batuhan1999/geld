@@ -267,6 +267,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** Each read of the merge box takes the next number: an answer from a read a newer one replaced is dropped, whatever order they land in. */
+  mergeRead: number;
   /** The header's state label when the merge box was last read for it: a draft converted or marked ready, a merge or close in place, changes it. */
   stateWords: string | null;
   mergeTimer: number;
@@ -323,6 +325,9 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     mounted.mergeActions = null;
     mounted.stateWords = null;
+    // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
+    mounted.reviewers = [];
+    showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
     holdUntilReady(mounted);
   }
   mounted.context = context;
@@ -527,6 +532,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
+    mergeRead: 0,
     stateWords: null,
     mergeTimer: 0,
     isAuthor: null,
@@ -669,8 +675,10 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   const pullPath = state.pullPath;
   state.mergeFor = pullPath;
   window.clearTimeout(state.mergeTimer);
+  state.mergeRead += 1;
+  const read = state.mergeRead;
   const [actions, reviewers] = await Promise.all([readMergeActions(pullPath), fetchReviewers(pullPath)]);
-  if (mounted !== state || state.pullPath !== pullPath) return null;
+  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
   if (actions !== null) state.mergeActions = actions;
   showStatus(state);
   if (reviewers !== null) {

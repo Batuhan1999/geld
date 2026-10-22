@@ -535,6 +535,39 @@ describe('the tab bar button', () => {
     expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
   });
 
+  it('keeps the newest reading when an older read of the merge box answers last', async () => {
+    let draft = true;
+    const gate: { release: (() => void) | null } = { release: null };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const answer = new Response(mergeBox(draft ? 'UNMERGEABLE' : 'MERGEABLE', true, { draft }), { status: 200 });
+        // The first read (still a draft) is slow, and answers only after the second.
+        if (gate.release === null && draft) {
+          await new Promise<void>((resolve) => {
+            gate.release = resolve;
+          });
+        }
+        return answer;
+      }),
+    );
+    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
+    const label = document.querySelector('[data-component="StateLabel"]');
+    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    mount();
+    await settle();
+    draft = false;
+    label?.setAttribute('title', 'Status: Open');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(actionsNow()).toEqual(['close', 'merge']);
+    if (gate.release === null) throw new Error('the first read was not held');
+    gate.release();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(actionsNow()).toEqual(['close', 'merge']);
+  });
+
   it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
     const row = (login: string, words: string): string => `<p><span data-assignee-name="${login}"><img src="/a.png"></span><span class="reviewers-status-icon" aria-label="${words}"></span></p>`;
     const partial = `<form id="pull-request-reviewers-form-1">${row('ann', 'ann approved these changes')}${row('ben', 'ben approved these changes')}${row('cy', 'cy requested changes')}${row('dee', 'dee left review comments')}</form>`;
@@ -547,6 +580,12 @@ describe('the tab bar button', () => {
     expect(tally?.getAttribute('aria-label')).toBe('2 approvals, 1 request for changes, 1 reviewer commented');
     // Left of the group.
     expect(tally?.nextElementSibling?.classList.contains('geld-quick-review__status')).toBe(true);
+    // Another pull request in the same tab whose reviews cannot be read shows no counts, not the last one's.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__tally')?.hidden).toBe(true);
   });
 
   it('wears the kind of comment its box will post: a review while comments are pending or once chosen, a plain comment otherwise', async () => {
