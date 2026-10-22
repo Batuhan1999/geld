@@ -530,6 +530,8 @@ function showAuthor(state: Mounted): void {
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
   state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
+  // The header said "author" only after a box opened on ✓ or ✗: the box takes Comment, the one verdict left.
+  if (isAuthor && state.retarget !== null && state.opener !== null && !EVENT_INFO[state.opener].authorMay) state.retarget('comment');
 }
 
 function closePanel(restoreFocus = false): void {
