@@ -1502,11 +1502,14 @@ function openMergeBox(state: Mounted): void {
   // GitHub's words for the checkbox in its merge box.
   const bypassRow = createElement('label', { class: 'geld-quick-review__bypass' }, [consent, createElement('span', {}, ['Merge without waiting for requirements to be met (bypass rules)'])]);
   bypassRow.hidden = !bypass;
+  // A stacked pull request merges with GitHub's stack merge, which takes every pull request below it too.
+  const stackNote = createElement('p', { class: 'geld-quick-review__stack-note color-fg-muted' }, ['Merges every pull request in the stack up to and including this one.']);
+  stackNote.hidden = !known.box.stacked;
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
   const cancel = createElement('button', { type: 'button', class: 'btn btn-sm btn-invisible' }, ['Cancel']);
   const submit = createElement('button', { type: 'button', class: 'btn btn-sm geld-quick-review__submit' });
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog', 'aria-label': 'Merge pull request' }, [
-    createElement('div', { class: 'Overlay-body' }, [select, commit, bypassRow, error]),
+    createElement('div', { class: 'Overlay-body' }, [select, commit, stackNote, bypassRow, error]),
     boxFooter([], cancel, submit),
   ]);
 
