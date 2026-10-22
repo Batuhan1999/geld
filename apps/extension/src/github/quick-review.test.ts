@@ -109,6 +109,12 @@ describe('the tab bar button', () => {
     // A pass while stuck keeps it there, without measuring.
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     expect(own?.previousElementSibling).toBe(group);
+    // Its box is fixed under the toolbar, and keeps to the room left in the window so its buttons stay in view.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]')?.click();
+    const box = document.querySelector<HTMLElement>('.geld-quick-review__panel');
+    expect(box?.style.position).toBe('fixed');
+    expect(box?.style.maxHeight).toMatch(/^\d+px$/);
+    box?.querySelector<HTMLButtonElement>('.btn-invisible:not(.geld-quick-review__discard)')?.click();
     top = 262;
     window.dispatchEvent(new Event('scroll'));
     expect(counts().previousElementSibling).toBe(group);
@@ -150,6 +156,13 @@ describe('the tab bar button', () => {
     document.head.innerHTML = '';
     applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/7' }, groups: [groupAt(counts())], headSha: () => SHA });
     expect(document.querySelector('.geld-quick-review')).toBeNull();
+  });
+
+  it('stays out of the way where GitHub hides the header’s counts, so its own review button shows', () => {
+    counts().style.display = 'none';
+    applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/7' }, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(document.documentElement.hasAttribute('data-geld-quick-review')).toBe(false);
   });
 
   const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
@@ -307,6 +320,56 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
   });
 
+  it('confirms a merge only with the chosen method’s commit, whatever order GitHub answers in', async () => {
+    const held: { [method: string]: (() => void) | undefined } = {};
+    const slow = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = method === 'MERGE' ? 'Merge pull request #7 from acme/topic' : 'Title (#7)';
+        if (slow.has(method)) {
+          await new Promise<void>((resolve) => {
+            held[method] = resolve;
+          });
+        }
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    // Both reads the box makes from here on are slow.
+    slow.add('SQUASH');
+    slow.add('MERGE');
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    const submit = document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .geld-quick-review__submit');
+    if (select === null || title === null || submit === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    expect(submit.disabled).toBe(false);
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    // The squash commit is not this method's: nothing to confirm until the merge commit comes.
+    expect(title.value).toBe('');
+    expect(submit.disabled).toBe(true);
+    held.MERGE?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+    expect(submit.disabled).toBe(false);
+    // The read made as the box opened (the squash commit) lands last and changes nothing.
+    held.SQUASH?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+  });
+
   it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
     vi.stubGlobal(
       'fetch',
@@ -392,6 +455,14 @@ describe('the tab bar button', () => {
     // With a comment pending 💬's box submits a review by default, and the button says so.
     expect(button?.getAttribute('aria-label')).toBe('Review, 1 pending comment');
     expect(button?.getAttribute('data-kind')).toBe('review');
+    // Another pull request in the same tab: none of this one's comments until its own are read.
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__badged > .geld-quick-review__count')?.hidden).toBe(true);
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     button?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const box = document.querySelector('.geld-quick-review__panel');
