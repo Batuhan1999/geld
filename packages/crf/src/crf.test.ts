@@ -58,6 +58,10 @@ describe('carrier', () => {
     // The real block after an example is still read, and an example after it does not take its place.
     expect(parseBlock(`\`\`\`\n${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\`\n\n${example}`)?.kind).toBe('summary');
     expect(parseBlock(`${example}\n\n\`\`\`\n${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\``)?.kind).toBe('summary');
+    // A fence inside a list item or a quote closes where it does, and the block after it is still read.
+    expect(parseBlock(`- An example:\n  \`\`\`json\n  ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n  \`\`\`\n\n${example}`)?.kind).toBe('summary');
+    expect(parseBlock(`- \`\`\`json\n  ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n  \`\`\`\n\n${example}`)?.kind).toBe('summary');
+    expect(parseBlock(`> \`\`\`\n> ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n> \`\`\`\n\n${example}`)?.kind).toBe('summary');
   });
 
   it('keeps the fields a bot adds of its own when it writes the block', () => {

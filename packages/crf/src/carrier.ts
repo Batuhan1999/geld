@@ -18,13 +18,16 @@ function outsideFences(markdown: string): string {
   return markdown
     .split('\n')
     .map((line) => {
-      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      // A fence may stand inside a list item or a quote (`- ```json`, `  ````, `> ````): their markers come first.
+      const found = /^[\s>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[\s>]*(`{3,}|~{3,})(.*)$/.exec(line);
+      const marker = found?.[1];
+      const tail = found?.[2] ?? '';
       if (fence === null) {
-        if (marker === undefined || (marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) return line;
+        if (marker === undefined || (marker[0] === '`' && tail.includes('`'))) return line;
         fence = { char: marker[0] ?? '`', length: marker.length };
         return '';
       }
-      if (marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && line.trim() === marker) fence = null;
+      if (marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && tail.trim() === '') fence = null;
       return '';
     })
     .join('\n');
