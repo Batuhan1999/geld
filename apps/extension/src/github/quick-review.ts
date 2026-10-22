@@ -6,6 +6,7 @@ import { detectHeadSha } from './head-sha';
 import type { MergeActions, MergeBox, MergeMethod } from './merge-actions';
 import { actionErrorText, closeRequest, fetchMergeBox, METHOD_CONFIRM, METHOD_LABEL, mergeRequest, readMergeActions, readyRequest, viewerVerdict } from './merge-actions';
 import type { PageInfo } from './page';
+import { pullRequestStateWords } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
@@ -257,6 +258,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** The header's state label when the merge box was last read for it: a draft converted or marked ready, a merge or close in place, changes it. */
+  stateWords: string | null;
   mergeTimer: number;
   isAuthor: boolean | null;
   pullPath: string;
@@ -310,12 +313,17 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.pullPath = pullPath;
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     mounted.mergeActions = null;
+    mounted.stateWords = null;
     holdUntilReady(mounted);
   }
   mounted.context = context;
   followReviewHash(context.page.kind);
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
-  if (mounted.mergeFor !== pullPath) void loadMergeActions(mounted);
+  // GitHub turns a draft ready (and back), merges and closes in place: what the reader may do changes with the label.
+  const stateWords = pullRequestStateWords();
+  const stateChanged = stateWords !== '' && mounted.stateWords !== null && mounted.stateWords !== stateWords;
+  if (stateWords !== '') mounted.stateWords = stateWords;
+  if (mounted.mergeFor !== pullPath || stateChanged) void loadMergeActions(mounted);
   showCount(mounted);
   showAuthor(mounted);
   mounted.anchor = anchor;
@@ -522,6 +530,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
+    stateWords: null,
     mergeTimer: 0,
     isAuthor: null,
     pullPath,
