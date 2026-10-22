@@ -552,20 +552,27 @@ describe('the tab bar button', () => {
         return answer;
       }),
     );
-    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
-    const label = document.querySelector('[data-component="StateLabel"]');
-    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    window.localStorage.clear();
+    resetStatusHints();
+    const label = withLabel('Draft', 'draft');
+    const statuses = (): string[] => {
+      pill()?.click();
+      const rows = menuRows().map((row) => row[0] ?? '');
+      pill()?.click();
+      return rows;
+    };
     mount();
     await settle();
     draft = false;
-    label?.setAttribute('title', 'Status: Open');
+    label.setAttribute('data-status', 'pullOpened');
+    label.lastChild?.replaceWith('Open');
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(actionsNow()).toEqual(['close', 'merge']);
+    expect(statuses()).toEqual(['open', 'merged', 'closed']);
     if (gate.release === null) throw new Error('the first read was not held');
     gate.release();
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(actionsNow()).toEqual(['close', 'merge']);
+    expect(statuses()).toEqual(['open', 'merged', 'closed']);
   });
 
   it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
