@@ -227,6 +227,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** Each read of the merge box takes the next number: an answer from a read a newer one replaced is dropped, whatever order they land in. */
+  mergeRead: number;
   mergeTimer: number;
   isAuthor: boolean | null;
   pullPath: string;
@@ -481,6 +483,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     readyButton,
     mergeActions: null,
     mergeFor: null,
+    mergeRead: 0,
     mergeTimer: 0,
     isAuthor: null,
     pullPath,
@@ -616,8 +619,10 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   const pullPath = state.pullPath;
   state.mergeFor = pullPath;
   window.clearTimeout(state.mergeTimer);
+  state.mergeRead += 1;
+  const read = state.mergeRead;
   const actions = await readMergeActions(pullPath);
-  if (mounted !== state || state.pullPath !== pullPath) return null;
+  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
   state.mergeTimer = window.setTimeout(() => {
@@ -939,6 +944,8 @@ function openMergeBox(state: Mounted): void {
   const bypass = known.offer === 'bypass';
   let method: MergeMethod = known.box.methods[0] ?? 'SQUASH';
   let box: MergeBox = known.box;
+  // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
+  let boxFor: MergeMethod = method;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -961,15 +968,26 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = box.commitTitle;
-      message.value = box.commitMessage;
+      title.value = boxFor === method ? box.commitTitle : '';
+      message.value = boxFor === method ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
     const past = bypass && consent.checked;
     submit.className = `btn btn-sm geld-quick-review__submit ${past ? 'geld-quick-review__submit--danger' : 'btn-primary'}`;
     if (!state.sending) submit.textContent = past ? 'Bypass rules and merge' : METHOD_CONFIRM[method];
-    submit.disabled = state.sending || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+    submit.disabled = state.sending || boxFor !== method || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+  };
+  // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
+  // An answer for a method no longer chosen is dropped; a failed one leaves the fields to the reader.
+  const load = (asked: MergeMethod): void => {
+    void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
+      if (state.panel !== panel || method !== asked) return;
+      if (fresh !== null) box = fresh;
+      boxFor = asked;
+      fill();
+      refresh();
+    });
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
@@ -990,13 +1008,7 @@ function openMergeBox(state: Mounted): void {
     method = chosen;
     fill();
     refresh();
-    // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
-    void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-      if (fresh === null || state.panel !== panel || method !== chosen) return;
-      box = fresh;
-      fill();
-      refresh();
-    });
+    load(chosen);
   });
   for (const field of [title, message]) {
     field.addEventListener('input', () => {
@@ -1021,12 +1033,7 @@ function openMergeBox(state: Mounted): void {
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
-  void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-    if (fresh === null || state.panel !== panel) return;
-    box = fresh;
-    fill();
-    refresh();
-  });
+  load(method);
 }
 
 /**

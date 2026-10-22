@@ -315,6 +315,56 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent).toBe('Confirm squash and merge');
   });
 
+  it('confirms a merge only with the chosen method’s commit, whatever order GitHub answers in', async () => {
+    const held: { [method: string]: (() => void) | undefined } = {};
+    const slow = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = method === 'MERGE' ? 'Merge pull request #7 from acme/topic' : 'Title (#7)';
+        if (slow.has(method)) {
+          await new Promise<void>((resolve) => {
+            held[method] = resolve;
+          });
+        }
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    // Both reads the box makes from here on are slow.
+    slow.add('SQUASH');
+    slow.add('MERGE');
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    const submit = document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .geld-quick-review__submit');
+    if (select === null || title === null || submit === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    expect(submit.disabled).toBe(false);
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    // The squash commit is not this method's: nothing to confirm until the merge commit comes.
+    expect(title.value).toBe('');
+    expect(submit.disabled).toBe(true);
+    held.MERGE?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+    expect(submit.disabled).toBe(false);
+    // The read made as the box opened (the squash commit) lands last and changes nothing.
+    held.SQUASH?.();
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(title.value).toBe('Merge pull request #7 from acme/topic');
+  });
+
   it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
     vi.stubGlobal(
       'fetch',
