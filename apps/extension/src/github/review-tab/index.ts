@@ -705,7 +705,8 @@ function markViewedIfWhole(current: Visit, context: ReviewTabContext, step: Revi
   if (state.plan === null) return;
   const entries = entriesOf(current, context.view);
   const progress = state.progress;
-  const accepted = new Set(state.plan.steps.filter((candidate) => candidate.id === step.id || progress?.steps[candidate.id]?.state === 'accepted').map((candidate) => candidate.id));
+  // A step accepted before a push changed it is pending re-review, not accepted: its file is not done.
+  const accepted = new Set(state.plan.steps.filter((candidate) => candidate.id === step.id || stepDisplayState(candidate, progress) === 'accepted').map((candidate) => candidate.id));
   for (const path of new Set([...step.touches, ...step.supporting].map((ref) => ref.path))) {
     const owners = state.plan.steps.filter((candidate) => [...candidate.touches, ...candidate.supporting].some((ref) => ref.path === path));
     if (!owners.every((owner) => accepted.has(owner.id))) continue;
@@ -794,8 +795,10 @@ async function openGitHubReview(current: Visit, event: 'approve' | 'comment' | '
     }
   }
   // React: press GitHub's "Review changes" button (it renders its form in a portal) and fill what appears.
-  const area = current.area ?? document.body;
-  const trigger = [...area.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => /^review changes$/i.test(candidate.textContent?.trim() ?? ''));
+  // The toolbar holding it may be borrowed into the Review root, outside the files area.
+  const trigger = [current.root, current.area ?? document.body]
+    .flatMap((scope) => (scope === null ? [] : [...scope.querySelectorAll<HTMLButtonElement>('button')]))
+    .find((candidate) => /^review changes$/i.test(candidate.textContent?.trim() ?? ''));
   if (trigger !== undefined) {
     const before = new Set(queryAll<HTMLTextAreaElement>('textarea'));
     activateControl(trigger);

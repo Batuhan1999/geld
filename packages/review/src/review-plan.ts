@@ -855,8 +855,11 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
   // Oversized steps are split by file ("Title · file"), and a file still over the cap by runs of its hunks
   // ("Title · file · 2 of 3"); each part reads after the one before it, and the supporting changes stay with the first.
   const sized: Draft[] = [];
+  // A proposal split into parts: what depended on it reads after its last part.
+  const lastPart = new Map<string, string>();
   const sizeOf = (refs: readonly HunkRef[]): number => refs.reduce((sum, ref) => sum + refSize(files, ref), 0);
   const chain = (parts: readonly HunkRef[][], base: Draft, name: (index: number) => string): void => {
+    lastPart.set(base.key, `${base.key}/${parts.length - 1}`);
     parts.forEach((touches, index) => {
       sized.push({
         ...base,
@@ -907,7 +910,7 @@ export function normalizePlan(input: PlanInput, proposals: readonly StepProposal
     );
   }
 
-  const ordered = topologicalOrder(sized);
+  const ordered = topologicalOrder(sized.map((draft) => ({ ...draft, dependsOn: draft.dependsOn.map((dep) => lastPart.get(dep) ?? dep) })));
   // Stable ids: the first hunk's signature (first in file order, then hunk order); a collision takes a suffix.
   const idByKey = new Map<string, string>();
   const used = new Set<string>();
@@ -1047,13 +1050,39 @@ export function stepDisplayState(step: ReviewStep, progress: ReviewProgress | nu
   return mark.state;
 }
 
-/** Progress for `next`, keeping every mark whose step still exists; the plan id follows the new plan. */
-export function carryProgress(progress: ReviewProgress | null, next: ReviewPlan): ReviewProgress {
+/**
+ * Progress for `next`, keeping every mark whose step still exists; the plan id follows the new plan. With the plan the
+ * progress was kept for, a step whose id changed (an edit to its first hunk) hands its mark, note and reading to the new
+ * step sharing most of its hunks; the mark keeps its fingerprint, so the step reads `changed`, not unmarked.
+ */
+export function carryProgress(progress: ReviewProgress | null, next: ReviewPlan, previous: ReviewPlan | null = null): ReviewProgress {
   if (progress === null) return { planId: next.id, steps: {}, current: null };
   const ids = new Set(next.steps.map((step) => step.id));
-  const steps = Object.fromEntries(Object.entries(progress.steps).filter(([id]) => ids.has(id)));
-  const reading = Object.fromEntries(Object.entries(progress.reading ?? {}).filter(([id]) => ids.has(id)));
-  return { planId: next.id, steps, current: progress.current !== null && ids.has(progress.current) ? progress.current : null, ...(Object.keys(reading).length === 0 ? {} : { reading }) };
+  const steps: Record<string, StepProgress> = Object.fromEntries(Object.entries(progress.steps).filter(([id]) => ids.has(id)));
+  const reading: Record<string, number> = Object.fromEntries(Object.entries(progress.reading ?? {}).filter(([id]) => ids.has(id)));
+  let current = progress.current !== null && ids.has(progress.current) ? progress.current : null;
+  if (previous !== null && previous.id === progress.planId) {
+    const nextSignatures = next.steps.map((step) => ({ step, signatures: new Set(step.signatures) }));
+    for (const old of previous.steps) {
+      if (ids.has(old.id)) continue;
+      const mark = progress.steps[old.id];
+      let successor: ReviewStep | null = null;
+      let shared = 0;
+      for (const candidate of nextSignatures) {
+        const count = old.signatures.filter((signature) => candidate.signatures.has(signature)).length;
+        if (count > shared) {
+          successor = candidate.step;
+          shared = count;
+        }
+      }
+      if (successor === null) continue;
+      if (mark !== undefined && steps[successor.id] === undefined) steps[successor.id] = mark;
+      const ms = progress.reading?.[old.id] ?? 0;
+      if (ms > 0) reading[successor.id] = (reading[successor.id] ?? 0) + ms;
+      if (current === null && progress.current === old.id) current = successor.id;
+    }
+  }
+  return { planId: next.id, steps, current, ...(Object.keys(reading).length === 0 ? {} : { reading }) };
 }
 
 /** The first step that is neither accepted nor flagged (a changed step counts as pending), after `after` when given. */
@@ -1154,7 +1183,8 @@ export function touchesSummary(step: ReviewStep): readonly { readonly path: stri
 
 /** The review body Geld prefills at the finish: flagged steps and their notes under one line the reader may delete. */
 export function finishBody(plan: ReviewPlan, progress: ReviewProgress | null): string {
-  const flagged = plan.steps.filter((step) => progress?.steps[step.id]?.state === 'flagged');
+  // A flagged step that changed since is pending re-review: its note was about hunks that are no longer there.
+  const flagged = plan.steps.filter((step) => stepDisplayState(step, progress) === 'flagged');
   const lines: string[] = [`Reviewed in ${plan.steps.length} ${plan.steps.length === 1 ? 'step' : 'steps'} with Geld.`];
   if (flagged.length > 0) {
     lines.push('');

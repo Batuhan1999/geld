@@ -33,6 +33,8 @@ export type FetchDiffResponse =
 export interface FetchDiffTextRequest {
   readonly type: 'geld:fetch-diff-text';
   readonly url: string;
+  /** The head the page shows: text cached for another head is the diff before a push, and is fetched again. */
+  readonly headSha: string | null;
 }
 
 export type FetchDiffTextResponse =
@@ -216,7 +218,7 @@ export function isFetchDiffResponse(value: unknown): value is FetchDiffResponse 
 }
 
 export function isFetchDiffTextRequest(value: unknown): value is FetchDiffTextRequest {
-  return isRecord(value) && value.type === 'geld:fetch-diff-text' && typeof value.url === 'string';
+  return isRecord(value) && value.type === 'geld:fetch-diff-text' && typeof value.url === 'string' && (value.headSha === null || typeof value.headSha === 'string');
 }
 
 export function isFetchDiffTextResponse(value: unknown): value is FetchDiffTextResponse {

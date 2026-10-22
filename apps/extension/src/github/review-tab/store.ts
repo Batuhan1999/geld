@@ -23,20 +23,33 @@ function capped<T extends { readonly savedAt: string }>(records: Readonly<Record
   return copy;
 }
 
+let writes: Promise<unknown> = Promise.resolve();
+
+/** Whole-map read-modify-writes one after another: an older write finishing last would undo a newer one. */
+function serially(write: () => Promise<void>): Promise<void> {
+  const next = writes.then(write, write);
+  writes = next.catch(() => undefined);
+  return next;
+}
+
 export async function loadPlanRecord(key: string): Promise<ReviewPlanRecord | null> {
   return (await reviewPlansItem.getValue())[key] ?? null;
 }
 
-export async function savePlanRecord(key: string, record: ReviewPlanRecord): Promise<void> {
-  const all = { ...(await reviewPlansItem.getValue()) };
-  all[key] = record;
-  await reviewPlansItem.setValue(capped(all));
+export function savePlanRecord(key: string, record: ReviewPlanRecord): Promise<void> {
+  return serially(async () => {
+    const all = { ...(await reviewPlansItem.getValue()) };
+    all[key] = record;
+    await reviewPlansItem.setValue(capped(all));
+  });
 }
 
-export async function clearPlanRecord(key: string): Promise<void> {
-  const all = { ...(await reviewPlansItem.getValue()) };
-  delete all[key];
-  await reviewPlansItem.setValue(all);
+export function clearPlanRecord(key: string): Promise<void> {
+  return serially(async () => {
+    const all = { ...(await reviewPlansItem.getValue()) };
+    delete all[key];
+    await reviewPlansItem.setValue(all);
+  });
 }
 
 /** A record with a new plan: the current one becomes `previous`, stories for steps that still exist are kept. */
@@ -58,17 +71,22 @@ export function recordWithError(record: ReviewPlanRecord, error: string | null, 
 
 export async function loadProgress(key: string): Promise<ReviewProgress | null> {
   const stored = (await reviewProgressItem.getValue())[key];
-  return stored === undefined ? null : { planId: stored.planId, steps: stored.steps, current: stored.current };
+  return stored === undefined ? null : { planId: stored.planId, steps: stored.steps, current: stored.current, ...(stored.reading === undefined ? {} : { reading: stored.reading }) };
 }
 
-export async function saveProgress(key: string, progress: ReviewProgress): Promise<void> {
-  const all = { ...(await reviewProgressItem.getValue()) };
-  all[key] = { ...progress, savedAt: new Date().toISOString() };
-  await reviewProgressItem.setValue(capped(all));
+export function saveProgress(key: string, progress: ReviewProgress): Promise<void> {
+  const savedAt = new Date().toISOString();
+  return serially(async () => {
+    const all = { ...(await reviewProgressItem.getValue()) };
+    all[key] = { ...progress, savedAt };
+    await reviewProgressItem.setValue(capped(all));
+  });
 }
 
-export async function clearProgress(key: string): Promise<void> {
-  const all = { ...(await reviewProgressItem.getValue()) };
-  delete all[key];
-  await reviewProgressItem.setValue(all);
+export function clearProgress(key: string): Promise<void> {
+  return serially(async () => {
+    const all = { ...(await reviewProgressItem.getValue()) };
+    delete all[key];
+    await reviewProgressItem.setValue(all);
+  });
 }

@@ -265,8 +265,16 @@ function readTextCache(url: string): string | null {
   return hit.text;
 }
 
-/** The page's own diff as text: the text cache first, else one `page` fetch (which fills it). */
-async function fetchDiffText(url: string): Promise<FetchDiffTextResponse> {
+/** The head each diff URL's text was last asked for: the URL is the same before and after a push. */
+const textHeads = new Map<string, string>();
+
+/** The page's own diff as text: the text cache first (unless the head moved since), else one `page` fetch (which fills it). */
+async function fetchDiffText(url: string, headSha: string | null): Promise<FetchDiffTextResponse> {
+  if (headSha !== null) {
+    const known = textHeads.get(url);
+    textHeads.set(url, headSha);
+    if (known !== undefined && known !== headSha) textCache.delete(url);
+  }
   const cached = readTextCache(url);
   if (cached !== null) return { ok: true, text: cached };
   // A parsed answer in memory does not help here: it has no text, and the entry would stop the fetch below.
@@ -600,7 +608,7 @@ export default defineBackground(() => {
       return true;
     }
     if (isFetchDiffTextRequest(message)) {
-      void fetchDiffText(message.url).then(sendResponse);
+      void fetchDiffText(message.url, message.headSha).then(sendResponse);
       return true;
     }
     if (isAiModelsRequest(message)) {

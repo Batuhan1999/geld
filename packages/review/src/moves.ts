@@ -73,6 +73,13 @@ function sidesOf(files: readonly PlanFile[]): { readonly removed: Side[]; readon
   return { removed, added };
 }
 
+/** Line `index` of a side directly follows the one before it in its file. */
+function adjacent(side: Side, index: number): boolean {
+  const here = side.at[index];
+  const before = side.at[index - 1];
+  return here !== undefined && before !== undefined && here === before + 1;
+}
+
 function sameHunk(a: HunkRef, b: HunkRef): boolean {
   return a.path === b.path && a.hunk === b.hunk;
 }
@@ -114,9 +121,17 @@ export function detectMoves(files: readonly PlanFile[]): readonly MovedBlock[] {
         const other = added[place.side];
         if (other === undefined || sameHunk(side.ref, other.ref)) continue;
         // Only runs starting at an anchor: a run beginning one line earlier was found from that line.
-        if (index > 0 && place.index > 0 && side.normalized[index - 1] === other.normalized[place.index - 1]) continue;
-        let length = 0;
-        while (index + length < side.normalized.length && place.index + length < other.normalized.length && side.normalized[index + length] === other.normalized[place.index + length]) length += 1;
+        if (index > 0 && place.index > 0 && adjacent(side, index) && adjacent(other, place.index) && side.normalized[index - 1] === other.normalized[place.index - 1]) continue;
+        let length = 1;
+        // A run is lines that stood together on both sides: changed lines either side of unchanged code are separate edits.
+        while (
+          index + length < side.normalized.length &&
+          place.index + length < other.normalized.length &&
+          adjacent(side, index + length) &&
+          adjacent(other, place.index + length) &&
+          side.normalized[index + length] === other.normalized[place.index + length]
+        )
+          length += 1;
         if (length >= MIN_MOVE_LINES) candidates.push({ removedSide, removedIndex: index, addedSide: place.side, addedIndex: place.index, length });
       }
     }

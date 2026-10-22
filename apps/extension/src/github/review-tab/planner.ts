@@ -105,7 +105,8 @@ const EMPTY: PlannerState = { loaded: false, plan: null, progress: null, plannin
 export function plannerState(input: PlanInput | null, settings: GeldSettings | null = null): PlannerState {
   const current = visit;
   if (current === null || !current.loaded) return EMPTY;
-  if (input === null) return { ...EMPTY, loaded: true, plan: current.record?.plan ?? null, progress: current.progress, planning: current.planning, error: current.record?.error ?? null, storiesInFlight: current.storiesInFlight };
+  // Navigation, shortcuts and the finish act on the plan the pass laid over the current diff, not the stored one a push left behind.
+  if (input === null) return { ...EMPTY, loaded: true, plan: current.effective ?? current.record?.plan ?? null, progress: current.progress, planning: current.planning, error: current.record?.error ?? null, storiesInFlight: current.storiesInFlight };
   current.input = input;
   const now = new Date().toISOString();
   let record = current.record;
@@ -134,9 +135,10 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
       }
     }
   }
+  const previous = current.progress === null ? null : planWithId(current, current.progress.planId);
   current.effective = plan;
   if (current.progress !== null && current.progress.planId !== plan.id) {
-    current.progress = carryProgress(current.progress, plan);
+    current.progress = carryProgress(current.progress, plan, previous);
     void saveProgress(current.key, current.progress);
   }
   return { loaded: true, plan, progress: current.progress, planning: current.planning, behind, error: record.error ?? null, storiesInFlight: current.storiesInFlight };
@@ -146,12 +148,17 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
 /* Progress                                                                   */
 /* ------------------------------------------------------------------------- */
 
+/** The plan progress was kept for, when this visit still has it: marks follow its steps to their successors. */
+function planWithId(current: Visit, id: string): ReviewPlan | null {
+  return [current.effective, current.record?.plan, current.record?.previous].find((plan): plan is ReviewPlan => plan !== null && plan !== undefined && plan.id === id) ?? null;
+}
+
 function withProgress(update: (progress: ReviewProgress) => ReviewProgress): void {
   const current = visit;
   const plan = current?.effective ?? null;
   if (current === null || plan === null) return;
   const base = current.progress ?? { planId: plan.id, steps: {}, current: null };
-  current.progress = update(base.planId === plan.id ? base : carryProgress(base, plan));
+  current.progress = update(base.planId === plan.id ? base : carryProgress(base, plan, planWithId(current, base.planId)));
   void saveProgress(current.key, current.progress);
   onChange();
 }
@@ -181,7 +188,7 @@ export function addReading(stepId: string, ms: number): void {
   const plan = current?.effective ?? null;
   if (current === null || plan === null || ms <= 0) return;
   const base = current.progress ?? { planId: plan.id, steps: {}, current: null };
-  current.progress = withReading(base.planId === plan.id ? base : carryProgress(base, plan), stepId, ms);
+  current.progress = withReading(base.planId === plan.id ? base : carryProgress(base, plan, planWithId(current, base.planId)), stepId, ms);
   void saveProgress(current.key, current.progress);
 }
 
@@ -295,8 +302,8 @@ export async function planWithAi(settings: GeldSettings, replan: boolean): Promi
     } else {
       const plan = normalizePlan(input, parsed.value.steps, { producer: 'ai', model: result.model, madeAt: now, fromHeaders: planIsFromHeaders(input), ...(parsed.value.overview === null ? {} : { overview: parsed.value.overview }) });
       record = recordWithError(recordWithPlan(record, plan, now), null, now);
+      if (current.progress !== null) current.progress = carryProgress(current.progress, plan, planWithId(current, current.progress.planId));
       current.effective = plan;
-      if (current.progress !== null) current.progress = carryProgress(current.progress, plan);
       current.storiesAsked.clear();
     }
   }
@@ -338,6 +345,8 @@ async function writeStory(settings: GeldSettings, step: ReviewStep, then: Review
   if (stored !== undefined && stored.fingerprint === step.fingerprint) return;
   if (current.storiesAsked.has(step.id) || current.storiesInFlight.has(step.id)) return;
   if (!(await reviewAiReady(settings))) return;
+  // Asked again while the key was read: one paid request per step.
+  if (current.storiesAsked.has(step.id) || current.storiesInFlight.has(step.id)) return;
   current.storiesAsked.add(step.id);
   current.storiesInFlight.add(step.id);
   onChange();

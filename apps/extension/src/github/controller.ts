@@ -871,6 +871,8 @@ export class GeldController {
     const matcher = this.matcherFor(repo);
     this.virtualSection = null;
     const reviewTab = page.kind === 'pull-review' && this.settings.reviewTab;
+    // Before the adapters read: files the Review view borrowed must be home to be classified and hidden.
+    if (!reviewTab) teardownReviewTab();
     if (!skipFiles) {
       this.loadDiffFacts(page, url, matcher);
       const view = phase('read', () => legacyAdapter.read() ?? reactAdapter.read());
@@ -892,7 +894,6 @@ export class GeldController {
         this.lastFiles = { view: null, breakdown: null, expanded: false, renderedEntryCount: 0 };
       }
     }
-    if (!reviewTab) teardownReviewTab();
     applyReviewTabLink(page, this.settings, () => this.schedule());
     const { view, breakdown: hidden, expanded, renderedEntryCount } = this.lastFiles;
 

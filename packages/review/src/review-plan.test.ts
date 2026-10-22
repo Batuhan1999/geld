@@ -119,6 +119,18 @@ describe('rules producer', () => {
     expect(rulesProposals(large)).toHaveLength(2);
   });
 
+  it('keeps a step that depends on a split one after its last part, however it was proposed', () => {
+    const big = Array.from({ length: 450 }, (_, index) => `line ${index}`);
+    const large: PlanInput = { ...input, commits: [], files: [file('a.ts', [hunk(0, big)]), file('b.ts', [hunk(0, big)]), file('c.ts', [hunk(0, ['use it'])])], findings: [] };
+    const proposals: StepProposal[] = [
+      { key: 'uses', title: 'Use the foundation', kind: 'feature', gist: null, touches: [{ path: 'c.ts', hunk: 0 }], dependsOn: ['base'], watch: [] },
+      { key: 'base', title: 'Foundation', kind: 'feature', gist: null, touches: [{ path: 'a.ts', hunk: 0 }, { path: 'b.ts', hunk: 0 }], dependsOn: [], watch: [] },
+    ];
+    const plan = normalizePlan(large, proposals, { producer: 'ai', model: 'm', madeAt: 'now' });
+    expect(plan.steps.map((step) => step.title)).toEqual(['Foundation · a.ts', 'Foundation · b.ts', 'Use the foundation']);
+    expect(plan.steps[2]?.dependsOn).toEqual([plan.steps[1]?.id]);
+  });
+
   it('splits one file still over the cap by runs of its hunks, in order', () => {
     const lines = (count: number): string[] => Array.from({ length: count }, (_, index) => `line ${index}`);
     const one: PlanInput = {
@@ -217,6 +229,25 @@ describe('progress', () => {
     expect(reviewComplete(plan, done)).toBe(true);
     expect(finishBody(plan, done)).toContain(`Reviewed in ${plan.steps.length} steps with Geld.`);
     expect(finishBody(plan, done)).toContain(`- **${first.title}**: hm`);
+    // A flag on a step a push changed is pending re-review: its note is not offered as a current concern.
+    const stale = { ...done, steps: { ...done.steps, [first.id]: { state: 'flagged' as const, at: 'now', note: 'hm', fingerprint: 'before the push' } } };
+    expect(finishBody(plan, stale)).not.toContain(first.title);
+  });
+
+  it('hands a mark to the step that took its hunks when an edit to the first hunk changed its id', () => {
+    const plan = rulesPlan(input, 'now');
+    const [first, ...rest] = plan.steps;
+    if (first === undefined) throw new Error('expected a step');
+    const progress: ReviewProgress = { planId: plan.id, steps: { [first.id]: { state: 'flagged', at: 'now', note: 'check this', fingerprint: first.fingerprint } }, current: first.id, reading: { [first.id]: 4000 } };
+    const edited = { ...first, id: 's-edited', fingerprint: 'after the push' };
+    const next = { ...plan, id: 'next', steps: [edited, ...rest] };
+    const carried = carryProgress(progress, next, plan);
+    expect(carried.steps['s-edited']?.note).toBe('check this');
+    expect(stepDisplayState(edited, carried)).toBe('changed');
+    expect(carried.current).toBe('s-edited');
+    expect(carried.reading).toEqual({ 's-edited': 4000 });
+    // Without the plan the marks were kept for, nothing can be followed.
+    expect(carryProgress(progress, next).steps).toEqual({});
   });
 });
 

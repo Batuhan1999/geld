@@ -44,6 +44,11 @@ describe('detectMoves', () => {
     expect(movesTouching(moves, { path: 'other.ts', hunk: 0 })).toHaveLength(0);
   });
 
+  it('does not read edits separated by unchanged code as one moved block', () => {
+    const scattered: PlanHunk = { ...hunk(0, [], EDITORS, 10), removedAt: EDITORS.map((_, offset) => (offset < 4 ? 10 + offset : 40 + offset)) };
+    expect(detectMoves([file('a.ts', [scattered]), file('b.ts', [hunk(0, EDITORS, [], 50)])])).toEqual([]);
+  });
+
   it('reads a reindented move as a move, not exact', () => {
     const indented = EDITORS.map((line) => `    ${line}`);
     const files = [file('a.ts', [hunk(0, [], EDITORS, 10)]), file('b.ts', [hunk(0, indented, [], 50)])];

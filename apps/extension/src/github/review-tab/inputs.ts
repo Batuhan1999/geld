@@ -52,7 +52,7 @@ export function diffHunksFor(diffUrl: string, headSha: string | null, onChange: 
   if (!entry.pending && entry.state.status !== 'ready' && Date.now() >= entry.retryAt) {
     entry.pending = true;
     const current = entry;
-    void fetchText(diffUrl).then((result) => {
+    void fetchText(diffUrl, headSha).then((result) => {
       current.pending = false;
       if (result.ok) current.state = { status: 'ready', files: parseUnifiedDiffHunks(result.text), reason: null };
       else if (result.retry) {
@@ -68,8 +68,8 @@ export function diffHunksFor(diffUrl: string, headSha: string | null, onChange: 
 
 const TRANSIENT = new Set(['queued', 'busy', 'rate-limited', 'port-closed', 'fetch-failed']);
 
-async function fetchText(url: string): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string; readonly retry: boolean; readonly retryAfterMs?: number }> {
-  const message: FetchDiffTextRequest = { type: 'geld:fetch-diff-text', url };
+async function fetchText(url: string, headSha: string | null): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string; readonly retry: boolean; readonly retryAfterMs?: number }> {
+  const message: FetchDiffTextRequest = { type: 'geld:fetch-diff-text', url, headSha };
   let response: unknown;
   try {
     response = await browser.runtime.sendMessage(message);
@@ -87,6 +87,8 @@ async function fetchText(url: string): Promise<{ readonly ok: true; readonly tex
 /* ------------------------------------------------------------------------- */
 
 interface CommitsEntry {
+  /** The head the list was asked for: a push adds commits, and the list is asked again for the new head. */
+  readonly head: string;
   commits: readonly { readonly sha: string; readonly message: string }[] | null;
   pending: Promise<void> | null;
   fetchedAt: number;
@@ -120,10 +122,10 @@ function collectCommits(value: unknown, into: Map<string, string>, depth = 0): v
  * The pull request's commits (sha and first message line) from the Commits
  * tab's JSON, null while on their way or when GitHub would not say.
  */
-export function commitsFor(pullPath: string, onChange: () => void): readonly { readonly sha: string; readonly message: string }[] | null {
+export function commitsFor(pullPath: string, headSha: string, onChange: () => void): readonly { readonly sha: string; readonly message: string }[] | null {
   let entry = commitsByPull.get(pullPath);
-  if (entry === undefined) {
-    entry = { commits: null, pending: null, fetchedAt: 0 };
+  if (entry === undefined || entry.head !== headSha) {
+    entry = { head: headSha, commits: null, pending: null, fetchedAt: 0 };
     commitsByPull.set(pullPath, entry);
   }
   if (entry.pending === null && entry.commits === null && (entry.fetchedAt === 0 || Date.now() - entry.fetchedAt >= COMMITS_REFRESH_MS)) {
@@ -142,6 +144,8 @@ export function commitsFor(pullPath: string, onChange: () => void): readonly { r
       }
     })().finally(() => {
       current.commits ??= [];
+      // A newer head took the slot meanwhile: its own request answers it.
+      if (commitsByPull.get(pullPath) !== current) return;
       current.fetchedAt = Date.now();
       current.pending = null;
       onChange();
@@ -181,14 +185,14 @@ export interface PlanInputSources {
 export type PlanInputState = { readonly status: 'loading'; readonly reason: string | null } | { readonly status: 'failed'; readonly reason: string } | { readonly status: 'ready'; readonly input: PlanInput; readonly commitsPending: boolean };
 
 /** The last input built, reused while nothing it was built from has changed (a pass runs on every mutation batch). */
-let memo: { readonly files: readonly FileHunks[]; readonly commitsKey: string; readonly title: string; readonly headSha: string; readonly state: PlanInputState } | null = null;
+let memo: { readonly files: readonly FileHunks[]; readonly commitsKey: string; readonly hiddenKey: string; readonly title: string; readonly headSha: string; readonly state: PlanInputState } | null = null;
 
 /** Assemble the planner's input, or say what is still on its way. */
 export function planInputFor(sources: PlanInputSources): PlanInputState {
   const diff = diffHunksFor(sources.diffUrl, sources.headSha, sources.onChange);
   if (diff.status === 'failed') return { status: 'failed', reason: diff.reason ?? 'The diff could not be read.' };
   if (diff.status !== 'ready') return { status: 'loading', reason: diff.reason };
-  const commits = commitsFor(sources.pullPath, sources.onChange);
+  const commits = commitsFor(sources.pullPath, sources.headSha, sources.onChange);
   // The commit list is one small request; the plan waits for it, since the rules group by commit first.
   if (commits === null) return { status: 'loading', reason: null };
   let commitsPending = false;
@@ -203,9 +207,12 @@ export function planInputFor(sources: PlanInputSources): PlanInputState {
   });
   const commitsKey = planCommits.map((commit) => `${commit.sha}:${commit.files?.length ?? '-'}`).join(',');
   const title = pullTitle();
-  if (memo !== null && memo.files === diff.files && memo.commitsKey === commitsKey && memo.title === title && memo.headSha === sources.headSha) return memo.state;
-  const files: PlanFile[] = diff.files.map((file) => {
-    const category = sources.classify(file.path);
+  // Classified every pass: a change to what Geld hides moves files in or out of the plan without a new head.
+  const categories = diff.files.map((file) => sources.classify(file.path));
+  const hiddenKey = categories.map((category) => category?.id ?? '').join('\n');
+  if (memo !== null && memo.files === diff.files && memo.commitsKey === commitsKey && memo.hiddenKey === hiddenKey && memo.title === title && memo.headSha === sources.headSha) return memo.state;
+  const files: PlanFile[] = diff.files.map((file, index) => {
+    const category = categories[index] ?? null;
     return {
       path: file.path,
       ...(file.previousPath === undefined ? {} : { previousPath: file.previousPath }),
@@ -222,7 +229,7 @@ export function planInputFor(sources: PlanInputSources): PlanInputState {
     input: { title, body: null, headSha: sources.headSha, commits: planCommits, files, findings: [], ...(moves === undefined ? {} : { moves }) },
     commitsPending,
   };
-  memo = { files: diff.files, commitsKey, title, headSha: sources.headSha, state };
+  memo = { files: diff.files, commitsKey, hiddenKey, title, headSha: sources.headSha, state };
   return state;
 }
 
