@@ -51,6 +51,15 @@ describe('carrier', () => {
     expect(parseBlock(body)?.kind).toBe('summary');
   });
 
+  it('reads no claim from an example inside a fenced code block', () => {
+    const example = encodeBlock(summary);
+    expect(parseBlock(`How to write one:\n\n\`\`\`html\n${example}\n\`\`\`\n`)).toBeUndefined();
+    expect(parseBlock(`~~~~\n${example}\n~~~~`)).toBeUndefined();
+    // The real block after an example is still read, and an example after it does not take its place.
+    expect(parseBlock(`\`\`\`\n${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\`\n\n${example}`)?.kind).toBe('summary');
+    expect(parseBlock(`${example}\n\n\`\`\`\n${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\``)?.kind).toBe('summary');
+  });
+
   it('keeps the fields a bot adds of its own when it writes the block', () => {
     const own = { ...summary, vendor: { cost: 3 } };
     expect(extractBlocks(encodeBlock(own))[0]?.value).toHaveProperty('vendor', { cost: 3 });

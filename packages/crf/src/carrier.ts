@@ -12,9 +12,27 @@ interface FoundBlock {
   readonly json: string;
 }
 
+/** The Markdown with every fenced code block (``` or ~~~, CommonMark's rules) blanked out: an example there is not a claim. */
+function outsideFences(markdown: string): string {
+  let fence: { readonly char: string; readonly length: number } | null = null;
+  return markdown
+    .split('\n')
+    .map((line) => {
+      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (fence === null) {
+        if (marker === undefined || (marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) return line;
+        fence = { char: marker[0] ?? '`', length: marker.length };
+        return '';
+      }
+      if (marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && line.trim() === marker) fence = null;
+      return '';
+    })
+    .join('\n');
+}
+
 function findBlocks(markdown: string): FoundBlock[] {
   const found: FoundBlock[] = [];
-  for (const match of markdown.matchAll(BLOCK_PATTERN)) {
+  for (const match of outsideFences(markdown).matchAll(BLOCK_PATTERN)) {
     const [, version, json] = match;
     if (version !== undefined && json !== undefined) found.push({ version, json });
   }
