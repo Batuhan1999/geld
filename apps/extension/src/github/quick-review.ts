@@ -285,7 +285,8 @@ function describe(button: HTMLButtonElement, lines: readonly string[]): HTMLElem
     if (tip.textContent !== lines.join('')) tip.replaceChildren(...withBreaks(lines));
     return null;
   }
-  if (document.querySelector('tool-tip') === null) {
+  // A segment that took the `title` keeps it: a `tool-tip` made later would be attached to nothing.
+  if (button.hasAttribute('title') || document.querySelector('tool-tip') === null) {
     button.title = lines.join('\n');
     return null;
   }
