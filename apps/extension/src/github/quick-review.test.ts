@@ -470,6 +470,69 @@ describe('the tab bar button', () => {
     window.history.replaceState(null, '', '/acme/widgets/pull/7');
   });
 
+  it('reads the merge box again when the header’s state changes in place, as a draft marked ready does', async () => {
+    let draft = true;
+    let reads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        reads += 1;
+        return new Response(mergeBox(draft ? 'UNMERGEABLE' : 'MERGEABLE', true, { draft }), { status: 200 });
+      }),
+    );
+    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
+    const label = document.querySelector('[data-component="StateLabel"]');
+    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(actionsNow()).toEqual(['close', 'ready']);
+    const afterLoad = reads;
+    // A pass with nothing changed reads nothing.
+    mount();
+    expect(reads).toBe(afterLoad);
+    // GitHub's live update: the pull request is ready for review, and the label says so.
+    draft = false;
+    label?.setAttribute('title', 'Status: Open');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(reads).toBeGreaterThan(afterLoad);
+    expect(actionsNow()).toEqual(['close', 'merge']);
+  });
+
+  it('keeps the newest reading when an older read of the merge box answers last', async () => {
+    let draft = true;
+    const gate: { release: (() => void) | null } = { release: null };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const answer = new Response(mergeBox(draft ? 'UNMERGEABLE' : 'MERGEABLE', true, { draft }), { status: 200 });
+        // The first read (still a draft) is slow, and answers only after the second.
+        if (gate.release === null && draft) {
+          await new Promise<void>((resolve) => {
+            gate.release = resolve;
+          });
+        }
+        return answer;
+      }),
+    );
+    document.body.insertAdjacentHTML('afterbegin', '<span data-component="StateLabel" title="Status: Draft">Draft</span>');
+    const label = document.querySelector('[data-component="StateLabel"]');
+    const actionsNow = (): (string | null)[] => [...(document.querySelector('.geld-quick-review__actions-group')?.children ?? [])].map((child) => child.getAttribute('data-action'));
+    mount();
+    await settle();
+    draft = false;
+    label?.setAttribute('title', 'Status: Open');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(actionsNow()).toEqual(['close', 'merge']);
+    if (gate.release === null) throw new Error('the first read was not held');
+    gate.release();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(actionsNow()).toEqual(['close', 'merge']);
+  });
+
   it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
     const row = (login: string, words: string): string => `<p><span data-assignee-name="${login}"><img src="/a.png"></span><span class="reviewers-status-icon" aria-label="${words}"></span></p>`;
     const partial = `<form id="pull-request-reviewers-form-1">${row('ann', 'ann approved these changes')}${row('ben', 'ben approved these changes')}${row('cy', 'cy requested changes')}${row('dee', 'dee left review comments')}</form>`;
