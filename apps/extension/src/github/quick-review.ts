@@ -43,6 +43,8 @@ export interface QuickReviewContext {
   readonly groups: readonly HeaderStatGroup[];
   /** The head commit when the review is sent (it may move while the popover is open). */
   readonly headSha: () => string | null;
+  /** Whether the conversation digest is on: then `#geld-reviews` waits for its Reviews row rather than settle for the sidebar. */
+  readonly digest?: boolean;
 }
 
 const GROUP_CLASS = 'geld-quick-review';
@@ -328,7 +330,7 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     holdUntilReady(mounted);
   }
   mounted.context = context;
-  followReviewHash(context.page.kind);
+  followReviewHash(context);
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   if (mounted.mergeFor !== pullPath) void loadMergeActions(mounted);
   showCount(mounted);
@@ -567,7 +569,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   armSnapshot(state);
   holdUntilReady(state);
   // The tally's link from this very tab changes only the hash: resolve it there and then.
-  window.addEventListener('hashchange', () => followReviewHash(state.context.page.kind), { signal: keys.signal });
+  window.addEventListener('hashchange', () => followReviewHash(state.context), { signal: keys.signal });
   const opensBox = (button: HTMLButtonElement, kind: 'merge' | 'close' | 'ready', open: (state: Mounted) => void): void => {
     button.addEventListener('click', () => {
       if (state.sending) return;
@@ -757,6 +759,12 @@ function armSnapshot(state: Mounted): void {
     'keydown',
     (event) => {
       if (event.key === 'Escape') hideSnapshot(state);
+      else if (event.key === 'Tab' && !event.shiftKey && state.snapshot !== null) {
+        const first = state.snapshot.querySelector<HTMLElement>('a');
+        if (first === null) return;
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
     },
     { signal: state.keys.signal },
   );
@@ -786,9 +794,26 @@ function showSnapshot(state: Mounted): void {
   ]);
   card.addEventListener('pointerenter', () => window.clearTimeout(state.snapshotTimer));
   card.addEventListener('pointerleave', () => snapshotSoon(state, false));
+  card.addEventListener('focusin', () => window.clearTimeout(state.snapshotTimer));
   card.addEventListener('focusout', (event) => {
     const next = event.relatedTarget;
     if (!(next instanceof Node) || (!card.contains(next) && next !== state.tally)) snapshotSoon(state, false);
+  });
+  // The card is at the end of the page, not after the tally in the tab order: Tab walks it as if it were.
+  card.addEventListener('keydown', (event) => {
+    const links = [...card.querySelectorAll<HTMLElement>('a')];
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideSnapshot(state);
+      state.tally.focus({ preventScroll: true });
+    } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === links[0]) {
+      event.preventDefault();
+      state.tally.focus({ preventScroll: true });
+    } else if (event.key === 'Tab' && !event.shiftKey && document.activeElement === links.at(-1)) {
+      event.preventDefault();
+      hideSnapshot(state);
+      state.group.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    }
   });
   document.body.append(card);
   state.snapshot = card;
@@ -796,6 +821,10 @@ function showSnapshot(state: Mounted): void {
   const left = Math.max(8, Math.min(rect.left, document.documentElement.clientWidth - card.offsetWidth - 8));
   card.style.left = `${Math.round(left)}px`;
   card.style.top = `${Math.round(rect.bottom + 6)}px`;
+  // Fixed, so scrolling the page cannot reach what overflows the window: the list scrolls inside the room left.
+  card.style.maxHeight = `${Math.max(120, Math.round(window.innerHeight - rect.bottom - 18))}px`;
+  // And it hangs from the tally: when the tally moves with the page, the card goes rather than float over other things.
+  window.addEventListener('scroll', () => hideSnapshot(state), { passive: true, once: true, signal: state.keys.signal });
 }
 
 function hideSnapshot(state: Mounted): void {
@@ -813,7 +842,8 @@ function hideSnapshot(state: Mounted): void {
  * `HASH_PATIENCE_MS`, since the timeline loads in pieces; a reviewer never
  * found falls back to the reviews.
  */
-function followReviewHash(kind: PageInfo['kind']): void {
+function followReviewHash(context: QuickReviewContext): void {
+  const kind = context.page.kind;
   const hash = window.location.hash;
   if (kind !== 'pull-conversation' || !(hash === REVIEWS_HASH || hash.startsWith(REVIEW_BY_HASH))) {
     hashSince = null;
@@ -833,6 +863,8 @@ function followReviewHash(kind: PageInfo['kind']): void {
     if (patient) return;
   }
   const row = document.querySelector<HTMLElement>(REVIEWS_ROW);
+  // The digest mounts after the controls on a fresh load: while it is on and may still come, the sidebar does not do.
+  if (row === null && context.digest === true && patient) return;
   const sidebar = document.querySelector<HTMLElement>('form[id^="pull-request-reviewers-form"], [data-testid="sidebar-reviewers"], [data-testid="reviewers-section"]');
   const target = row ?? sidebar;
   if (target === null) {

@@ -626,6 +626,33 @@ describe('the tab bar button', () => {
       ['ann', 'approved', '/acme/widgets/pull/7#pullrequestreview-42'],
       ['dee', 'commented', '/acme/widgets/pull/7#geld-review-by-dee'],
     ]);
+    const card = document.querySelector<HTMLElement>('.geld-quick-review__snapshot');
+    // Fixed under the tally, the list keeps to the room left in the window.
+    expect(card?.style.maxHeight).toMatch(/^\d+px$/);
+    // The keyboard walks into the card after the tally, and out of it to the review buttons.
+    tally?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(rows[0]);
+    rows[1]?.focus();
+    rows[1]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(document.querySelector('.geld-quick-review__snapshot')).toBeNull();
+    expect(document.activeElement?.classList.contains('geld-quick-review__segment')).toBe(true);
+    // It hangs from the tally: when the page scrolls, it goes.
+    tally?.dispatchEvent(new Event('focus'));
+    expect(document.querySelector('.geld-quick-review__snapshot')).not.toBeNull();
+    window.dispatchEvent(new Event('scroll'));
+    expect(document.querySelector('.geld-quick-review__snapshot')).toBeNull();
+  });
+
+  it('waits for the digest’s Reviews row before settling for the sidebar, while the digest is on', () => {
+    document.body.insertAdjacentHTML('beforeend', '<div class="discussion-sidebar-item"><form id="pull-request-reviewers-form-2"></form></div>');
+    const item = document.querySelector<HTMLElement>('.discussion-sidebar-item');
+    const scrolled: string[] = [];
+    if (item !== null) item.scrollIntoView = () => scrolled.push('sidebar');
+    window.history.replaceState(null, '', '/acme/widgets/pull/7#geld-reviews');
+    applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA, digest: true });
+    expect(scrolled).toEqual([]);
+    expect(window.location.hash).toBe('#geld-reviews');
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
   });
 
   it('resolves a reviewer marker on the conversation to their latest review’s own anchor', () => {
