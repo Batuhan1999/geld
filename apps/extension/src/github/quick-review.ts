@@ -412,7 +412,8 @@ function describe(button: HTMLButtonElement, lines: readonly string[]): HTMLElem
     if (tip.textContent !== lines.join('')) tip.replaceChildren(...withBreaks(lines));
     return null;
   }
-  if (document.querySelector('tool-tip') === null) {
+  // A segment that took the `title` keeps it: a `tool-tip` made later would be attached to nothing.
+  if (button.hasAttribute('title') || document.querySelector('tool-tip') === null) {
     button.title = lines.join('\n');
     return null;
   }
@@ -720,11 +721,16 @@ function isAuthorViewing(): boolean {
 }
 
 /** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
+/** Bumped by every read of the pending comments and by a discard: only the latest read's answer is kept. */
+let pendingRead = 0;
+
 async function loadPending(state: Mounted): Promise<readonly PendingComment[] | null> {
   const pullPath = state.pullPath;
   state.pendingFor = pullPath;
+  pendingRead += 1;
+  const read = pendingRead;
   const pending = await fetchPendingComments(pullPath);
-  if (state.pullPath !== pullPath) return null;
+  if (state.pullPath !== pullPath || pendingRead !== read) return null;
   state.pending = pending;
   showCount(state);
   return pending;
@@ -822,11 +828,15 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     if (!state.sending) submit.textContent = info.label;
     panel.setAttribute('aria-label', info.label);
   };
+  // The list is rebuilt only when what it shows changed, not on every keystroke (which would also reset its scroll).
+  let shown: { readonly comments: readonly PendingComment[] | null; readonly count: number; readonly open: boolean } | null = null;
   const refresh = (): void => {
     const pending = pendingCount(state);
     submit.disabled = state.sending || !canSubmit(draft.event, body.value, pending > 0);
     discard.hidden = pending === 0;
     discard.disabled = state.sending;
+    if (shown !== null && shown.comments === state.pending && shown.count === pending && shown.open === pendingOpen) return;
+    shown = { comments: state.pending, count: pending, open: pendingOpen };
     renderPending(pendingSection, pullPath, state.pending, pending, pendingOpen, () => {
       pendingOpen = !pendingOpen;
       refresh();
@@ -883,6 +893,8 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
         window.location.reload();
         return;
       }
+      // A read started before the discard would bring the discarded comments back.
+      pendingRead += 1;
       state.pending = [];
       showCount(state);
     });
