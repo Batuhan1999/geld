@@ -90,7 +90,27 @@ function dress(pill: HTMLButtonElement, label: Element): void {
     ...(glyph === null ? [] : [glyph.cloneNode(true)]),
     createElement('span', { class: 'geld-status-pill__label' }, [(label.textContent ?? '').trim()]),
     createElement('span', { class: 'geld-status-pill__caret', 'aria-hidden': 'true' }, [svgFromString(ICON_TRIANGLE_DOWN)]),
+    // The 1-click merge's face, laid over the pill while the instant key is held, so the pill keeps its width.
+    createElement('span', { class: 'geld-status-pill__merge', 'aria-hidden': 'true' }, [svgFromString(ICON_GIT_MERGE), 'Merge']),
   );
+}
+
+export const ATTR_INSTANT_MERGE = 'data-geld-instant-merge';
+
+/**
+ * The pills as GitHub draws a merged pull request's, the moment a merge went
+ * through (the page reloads to GitHub's own after): Primer's StateLabel keys
+ * its look on `data-status`, the classic label on its `State--merged` class.
+ */
+export function showMergedPills(pills: readonly HTMLButtonElement[]): void {
+  for (const pill of pills) {
+    pill.removeAttribute(ATTR_INSTANT_MERGE);
+    pill.removeAttribute('aria-haspopup');
+    if (pill.hasAttribute('data-status')) pill.setAttribute('data-status', 'pullMerged');
+    for (const token of [...pill.classList]) if (/^State--(?:open|draft|closed)$/.test(token)) pill.classList.replace(token, 'State--merged');
+    if (pill.hasAttribute('title')) pill.setAttribute('title', 'Status: Merged');
+    pill.replaceChildren(svgFromString(ICON_GIT_MERGE), createElement('span', { class: 'geld-status-pill__label' }, ['Merged']));
+  }
 }
 
 /**
@@ -98,7 +118,7 @@ function dress(pill: HTMLButtonElement, label: Element): void {
  * back, with `on` false), and return Geld's. `onOpen` runs on a click with
  * the pill clicked.
  */
-export function syncStatusPills(on: boolean, onOpen: (pill: HTMLButtonElement) => void): readonly HTMLButtonElement[] {
+export function syncStatusPills(on: boolean, onOpen: (pill: HTMLButtonElement, click: MouseEvent) => void): readonly HTMLButtonElement[] {
   const pills: HTMLButtonElement[] = [];
   for (const label of document.querySelectorAll<HTMLElement>(GITHUB_PILLS)) {
     if (label.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
@@ -118,9 +138,9 @@ export function syncStatusPills(on: boolean, onOpen: (pill: HTMLButtonElement) =
   return pills;
 }
 
-function createPill(onOpen: (pill: HTMLButtonElement) => void): HTMLButtonElement {
+function createPill(onOpen: (pill: HTMLButtonElement, click: MouseEvent) => void): HTMLButtonElement {
   const pill = createElement('button', { type: 'button', [ATTR_PILL]: '', [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
-  pill.addEventListener('click', () => onOpen(pill));
+  pill.addEventListener('click', (click) => onOpen(pill, click));
   return pill;
 }
 

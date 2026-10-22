@@ -335,7 +335,7 @@ describe('the tab bar button', () => {
     expect(label.nextElementSibling).toBe(pill());
     expect(pill()?.classList.contains('prc-StateLabel-x')).toBe(true);
     expect(pill()?.getAttribute('data-status')).toBe('pullOpened');
-    expect(pill()?.textContent).toBe('Open');
+    expect(pill()?.querySelector('.geld-status-pill__label')?.textContent).toBe('Open');
     expect(pill()?.querySelector('.geld-status-pill__caret')).not.toBeNull();
     expect(document.querySelector('.geld-quick-review__actions-group')).toBeNull();
     pill()?.click();
@@ -427,6 +427,66 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__error')?.textContent).toBe('GitHub could not convert the pull request to a draft: Not allowed');
   });
 
+  it('is a 1-click merge while ⌘ (Ctrl) is held on an approved pull request, and turns Merged when it goes through', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const posts: { url: string; body: string }[] = [];
+    let answer = 200;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/page_data/merge_box')) return new Response(mergeBox('MERGEABLE', true, { reviews: [{ author: { login: 'ann' }, state: 'APPROVED' }] }), { status: 200 });
+        if (init?.method === 'POST') {
+          posts.push({ url: url.replace(/^.*\/page_data\//, ''), body: String(init.body) });
+          return new Response(answer === 200 ? '{"status":"merged"}' : '{"error":"Required status check is failing"}', { status: answer });
+        }
+        return new Response('{}', { status: 404 });
+      }),
+    );
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload, pathname: window.location.pathname, hash: '', search: '' });
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(true);
+    expect(pill()?.getAttribute('aria-label')).toBe('Merge now: Squash and merge');
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' }));
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    // Refused: the merge box opens under the pill with GitHub's reason.
+    answer = 405;
+    pill()?.dispatchEvent(new MouseEvent('click', instant));
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__error')?.textContent).toBe('GitHub could not merge the pull request: Required status check is failing');
+    // Through: GitHub's default method and commit, then GitHub's merged pill until the page reloads.
+    answer = 200;
+    posts.length = 0;
+    pill()?.dispatchEvent(new MouseEvent('click', instant));
+    for (let i = 0; i < 3; i += 1) await settle();
+    expect(posts).toEqual([{ url: 'merge', body: JSON.stringify({ bypassBranchProtections: false, mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: '' }) }]);
+    expect(pill()?.getAttribute('data-status')).toBe('pullMerged');
+    expect(pill()?.textContent).toBe('Merged');
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('has no 1-click merge without an approval: ⌘-click opens the menu', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const sent = stubBox(() => mergeBox('MERGEABLE', true));
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    pill()?.dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(sent).toEqual([]);
+    expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' }));
+  });
+
   it('swaps the pill from the first paint where the reader could change the status last time in this repository', async () => {
     window.localStorage.clear();
     resetStatusHints();
@@ -470,7 +530,7 @@ describe('the tab bar button', () => {
     mount();
     for (let i = 0; i < 4; i += 1) await settle();
     expect(reads).toBeGreaterThan(afterLoad);
-    expect(pill()?.textContent).toBe('Open');
+    expect(pill()?.querySelector('.geld-status-pill__label')?.textContent).toBe('Open');
     pill()?.click();
     expect(menuRows().map((row) => row[0])).toEqual(['open', 'merged', 'closed']);
   });

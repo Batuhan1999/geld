@@ -1336,7 +1336,46 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 button.geld-status-pill {
+  position: relative;
   cursor: pointer;
+}
+
+/*
+ * ⌘ (Ctrl) held on an approved pull request GitHub would merge now: the pill is a 1-click merge, "Merge" in GitHub's
+ * merge colour on no fill, ringed in it. The merge face lies over the usual one, which keeps its room, so the pill's
+ * width (and the header's words after it) never move. `!important` over Primer's StateLabel fill for its status.
+ */
+.geld-status-pill__merge {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.geld-status-pill__merge > svg {
+  fill: currentColor;
+}
+
+button.geld-status-pill[data-geld-instant-merge] > :not(.geld-status-pill__merge) {
+  visibility: hidden;
+}
+
+button.geld-status-pill[data-geld-instant-merge] .geld-status-pill__merge {
+  display: inline-flex;
+}
+
+button.geld-status-pill[data-geld-instant-merge] {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--borderColor-done-emphasis, var(--fgColor-done, #8250df));
+  color: var(--fgColor-done, #8250df) !important;
+  filter: none;
+}
+
+button.geld-status-pill[data-geld-instant-merge]:hover {
+  background: var(--bgColor-done-muted, rgba(171, 125, 248, 0.15)) !important;
+  filter: none;
 }
 
 button.geld-status-pill:is(:hover, [aria-expanded='true']) {
