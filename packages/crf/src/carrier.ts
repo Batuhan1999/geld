@@ -38,10 +38,12 @@ function outsideFences(markdown: string): string {
       const quoted = QUOTE.test(line);
       const inner = quoted ? line.replace(QUOTE, '') : line;
       if (fence !== null) {
-        const lead = /^ */.exec(inner)?.[0].length ?? 0;
-        const ended = (fence.quoted && !quoted) || (fence.listed && inner.trim() !== '' && lead < fence.indent);
+        // A `>` is the quote's marker only for a fence opened in a quote: inside any other fence it is content.
+        const view = fence.quoted ? inner : line;
+        const lead = /^ */.exec(view)?.[0].length ?? 0;
+        const ended = (fence.quoted && !quoted) || (fence.listed && view.trim() !== '' && lead < fence.indent);
         if (!ended) {
-          const closer = /^( *)(`{3,}|~{3,})\s*$/.exec(inner);
+          const closer = /^( *)(`{3,}|~{3,})\s*$/.exec(view);
           const marker = closer?.[2];
           if (closer !== null && marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && (closer[1]?.length ?? 0) - fence.indent <= 3) fence = null;
           return '';

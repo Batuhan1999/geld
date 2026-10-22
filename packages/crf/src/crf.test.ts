@@ -65,6 +65,8 @@ describe('carrier', () => {
     // An unclosed fence ends with its quote or its list item, so the block after either is read.
     expect(parseBlock(`> \`\`\`\n> ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\n${example}`)?.kind).toBe('summary');
     expect(parseBlock(`- \`\`\`\n  ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\n${example}`)?.kind).toBe('summary');
+    // A quoted fence shown inside an example is the example's content and closes nothing.
+    expect(parseBlock(`\`\`\`\n> \`\`\`\n> ${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\`\n\n${example}`)?.kind).toBe('summary');
     // A marker four spaces in is the example's content, not its end: the example after it stays an example.
     expect(parseBlock(`${example}\n\n\`\`\`\n    \`\`\`\n${encodeBlock(CrfBlock.parse(EXAMPLE_STATUS))}\n\`\`\``)?.kind).toBe('summary');
   });
