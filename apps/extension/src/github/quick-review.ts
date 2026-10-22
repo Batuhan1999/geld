@@ -45,6 +45,8 @@ export interface QuickReviewContext {
   readonly groups: readonly HeaderStatGroup[];
   /** The head commit when the review is sent (it may move while the popover is open). */
   readonly headSha: () => string | null;
+  /** Whether the conversation digest is on: then `#geld-reviews` waits for its Reviews row rather than settle for the sidebar. */
+  readonly digest?: boolean;
 }
 
 const GROUP_CLASS = 'geld-quick-review';
@@ -212,6 +214,9 @@ function anchorOf(groups: readonly HeaderStatGroup[]): HTMLElement | null {
   for (const group of groups) {
     const host = group.host;
     if (!host.isConnected || host.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    // GitHub hides the header's counts on narrow screens: placed there, the button would be hidden with them while
+    // GitHub's own was hidden for it, leaving no way to review. A style read, not a layout one.
+    if (!host.checkVisibility()) continue;
     if (host.id === 'diffstat' || host.closest('[data-component="PageHeader"], .gh-header, #partial-discussion-header') !== null) return host;
   }
   return null;
@@ -291,6 +296,12 @@ interface Mounted {
 let mounted: Mounted | null = null;
 const drafts = new Map<string, Draft>();
 
+/** A sent box's words go; the Comment / Review choice is the reader's for the visit and stays. */
+function clearDraft(pullPath: string): void {
+  const kind = drafts.get(pullPath)?.kind ?? null;
+  drafts.set(pullPath, { body: '', event: 'comment', kind });
+}
+
 function draftFor(pullPath: string): Draft {
   let draft = drafts.get(pullPath);
   if (draft === undefined) {
@@ -316,13 +327,15 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     mounted.mergeActions = null;
     mounted.stateWords = null;
+    // The last pull request's pending comments are not this one's: none until this one's are read.
+    mounted.pending = null;
     // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
     mounted.reviewers = [];
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
     holdUntilReady(mounted);
   }
   mounted.context = context;
-  followReviewHash(context.page.kind);
+  followReviewHash(context);
   if (mounted.pendingFor !== pullPath) void loadPending(mounted);
   // GitHub turns a draft ready (and back), merges and closes in place: what the reader may do changes with the label.
   const stateWords = pullRequestStateWords();
@@ -568,7 +581,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for the box, not before.
   for (const type of ['pointerenter', 'focusin']) root.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
   // The tally's link from this very tab changes only the hash: resolve it there and then.
-  window.addEventListener('hashchange', () => followReviewHash(state.context.page.kind), { signal: keys.signal });
+  window.addEventListener('hashchange', () => followReviewHash(state.context), { signal: keys.signal });
   const opensBox = (button: HTMLButtonElement, kind: 'merge' | 'close' | 'ready', open: (state: Mounted) => void): void => {
     button.addEventListener('click', () => {
       if (state.sending) return;
@@ -603,7 +616,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       closePanel();
       void sendReview(state, event, '').then((failure) => {
         // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason.
-        if (failure !== null) openComposer(state, event, failure);
+        // A refused 💬 was a review of the pending comments: its box opens as a review, whatever the reader's usual choice.
+        if (failure !== null) openComposer(state, event, failure, event === 'comment' ? 'review' : null);
       });
     });
   }
@@ -757,6 +771,12 @@ function armSnapshot(state: Mounted): void {
     'keydown',
     (event) => {
       if (event.key === 'Escape') hideSnapshot(state);
+      else if (event.key === 'Tab' && !event.shiftKey && state.snapshot !== null) {
+        const first = state.snapshot.querySelector<HTMLElement>('a');
+        if (first === null) return;
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
     },
     { signal: state.keys.signal },
   );
@@ -786,9 +806,26 @@ function showSnapshot(state: Mounted): void {
   ]);
   card.addEventListener('pointerenter', () => window.clearTimeout(state.snapshotTimer));
   card.addEventListener('pointerleave', () => snapshotSoon(state, false));
+  card.addEventListener('focusin', () => window.clearTimeout(state.snapshotTimer));
   card.addEventListener('focusout', (event) => {
     const next = event.relatedTarget;
     if (!(next instanceof Node) || (!card.contains(next) && next !== state.tally)) snapshotSoon(state, false);
+  });
+  // The card is at the end of the page, not after the tally in the tab order: Tab walks it as if it were.
+  card.addEventListener('keydown', (event) => {
+    const links = [...card.querySelectorAll<HTMLElement>('a')];
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideSnapshot(state);
+      state.tally.focus({ preventScroll: true });
+    } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === links[0]) {
+      event.preventDefault();
+      state.tally.focus({ preventScroll: true });
+    } else if (event.key === 'Tab' && !event.shiftKey && document.activeElement === links.at(-1)) {
+      event.preventDefault();
+      hideSnapshot(state);
+      state.group.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    }
   });
   document.body.append(card);
   state.snapshot = card;
@@ -796,6 +833,10 @@ function showSnapshot(state: Mounted): void {
   const left = Math.max(8, Math.min(rect.left, document.documentElement.clientWidth - card.offsetWidth - 8));
   card.style.left = `${Math.round(left)}px`;
   card.style.top = `${Math.round(rect.bottom + 6)}px`;
+  // Fixed, so scrolling the page cannot reach what overflows the window: the list scrolls inside the room left.
+  card.style.maxHeight = `${Math.max(120, Math.round(window.innerHeight - rect.bottom - 18))}px`;
+  // And it hangs from the tally: when the tally moves with the page, the card goes rather than float over other things.
+  window.addEventListener('scroll', () => hideSnapshot(state), { passive: true, once: true, signal: state.keys.signal });
 }
 
 function hideSnapshot(state: Mounted): void {
@@ -813,7 +854,8 @@ function hideSnapshot(state: Mounted): void {
  * `HASH_PATIENCE_MS`, since the timeline loads in pieces; a reviewer never
  * found falls back to the reviews.
  */
-function followReviewHash(kind: PageInfo['kind']): void {
+function followReviewHash(context: QuickReviewContext): void {
+  const kind = context.page.kind;
   const hash = window.location.hash;
   if (kind !== 'pull-conversation' || !(hash === REVIEWS_HASH || hash.startsWith(REVIEW_BY_HASH))) {
     hashSince = null;
@@ -833,6 +875,8 @@ function followReviewHash(kind: PageInfo['kind']): void {
     if (patient) return;
   }
   const row = document.querySelector<HTMLElement>(REVIEWS_ROW);
+  // The digest mounts after the controls on a fresh load: while it is on and may still come, the sidebar does not do.
+  if (row === null && context.digest === true && patient) return;
   const sidebar = document.querySelector<HTMLElement>('form[id^="pull-request-reviewers-form"], [data-testid="sidebar-reviewers"], [data-testid="reviewers-section"]');
   const target = row ?? sidebar;
   if (target === null) {
@@ -946,6 +990,9 @@ function positionPanel(): void {
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {
@@ -1036,7 +1083,9 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       const payload: unknown = await response.json().catch(() => null);
       return reviewErrorText(response.status, payload);
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
@@ -1076,7 +1125,8 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       const said = messageOf(payload);
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
-    drafts.delete(pullPath);
+    clearDraft(pullPath);
+    if (state.pullPath !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
       window.location.reload();
@@ -1107,7 +1157,7 @@ const KIND_INFO: { readonly [K in CommentKind]: { readonly label: string; readon
  * segment that opened it chose the verdict, and another segment changes it
  * in place. After a refused send, GitHub's reason above the buttons.
  */
-function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null): void {
+function openComposer(state: Mounted, initial: ReviewEvent, failure: string | null, kindNow: CommentKind | null = null): void {
   const pullPath = state.pullPath;
   const draft = draftFor(pullPath);
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
@@ -1137,7 +1187,9 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   ]);
 
   let pendingOpen = false;
-  const kind = (): CommentKind => draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+  // This box's kind when it was opened for one (a refused review of pending comments), else the reader's choice.
+  let opened: CommentKind | null = kindNow;
+  const kind = (): CommentKind => opened ?? draft.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
   const posting = (): boolean => draft.event === 'comment' && kind() === 'comment';
   const showVerdict = (): void => {
     const info = EVENT_INFO[draft.event];
@@ -1152,9 +1204,12 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     if (!split) closeKindMenu();
     panel.setAttribute('aria-label', split ? KIND_INFO[kind()].label : info.label);
   };
+  let menuKeys: AbortController | null = null;
   const closeKindMenu = (): void => {
     kindMenu.hidden = true;
     kindToggle.setAttribute('aria-expanded', 'false');
+    menuKeys?.abort();
+    menuKeys = null;
   };
   const openKindMenu = (): void => {
     kindMenu.replaceChildren(
@@ -1167,6 +1222,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
         ]);
         item.addEventListener('click', () => {
           draft.kind = option;
+          opened = null;
           showCommentKind(state);
           closeKindMenu();
           showVerdict();
@@ -1183,6 +1239,10 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     kindMenu.style.left = `${Math.round(Math.max(8, toggle.right - kindMenu.offsetWidth))}px`;
     kindMenu.style.top = `${Math.round(Math.max(8, toggle.top - kindMenu.offsetHeight - 4))}px`;
     kindMenu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+    // Fixed where the caret was: when the box moves (the page scrolls, the window changes) it closes rather than stay behind.
+    menuKeys = new AbortController();
+    window.addEventListener('scroll', closeKindMenu, { passive: true, once: true, signal: menuKeys.signal });
+    window.addEventListener('resize', closeKindMenu, { once: true, signal: menuKeys.signal });
   };
   const refresh = (): void => {
     const pending = pendingCount(state);
@@ -1327,6 +1387,8 @@ function fitWriter(panel: HTMLElement, bodyBox: HTMLElement, writer: HTMLElement
   const box = getComputedStyle(bodyBox);
   const chrome = panel.offsetWidth - panel.clientWidth + parseFloat(box.paddingLeft) + parseFloat(box.paddingRight);
   panel.style.width = `${Math.round(Math.min(natural + chrome + WRITER_CUSHION, document.documentElement.clientWidth - 32))}px`;
+  // Measured once: a window narrowed (or zoomed) afterwards still keeps the box, and its buttons, inside it.
+  panel.style.maxWidth = 'calc(100vw - 32px)';
   positionPanel();
 }
 
@@ -1373,6 +1435,8 @@ function openMergeBox(state: Mounted): void {
   const bypass = known.offer === 'bypass';
   let method: MergeMethod = known.box.methods[0] ?? 'SQUASH';
   let box: MergeBox = known.box;
+  // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
+  let boxFor: MergeMethod = method;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -1395,15 +1459,26 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = box.commitTitle;
-      message.value = box.commitMessage;
+      title.value = boxFor === method ? box.commitTitle : '';
+      message.value = boxFor === method ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
     const past = bypass && consent.checked;
     submit.className = `btn btn-sm geld-quick-review__submit ${past ? 'geld-quick-review__submit--danger' : 'btn-primary'}`;
     if (!state.sending) submit.textContent = past ? 'Bypass rules and merge' : METHOD_CONFIRM[method];
-    submit.disabled = state.sending || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+    submit.disabled = state.sending || boxFor !== method || (bypass && !consent.checked) || (method !== 'REBASE' && title.value.trim() === '');
+  };
+  // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
+  // An answer for a method no longer chosen is dropped; a failed one leaves the fields to the reader.
+  const load = (asked: MergeMethod): void => {
+    void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
+      if (state.panel !== panel || method !== asked) return;
+      if (fresh !== null) box = fresh;
+      boxFor = asked;
+      fill();
+      refresh();
+    });
   };
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
@@ -1424,13 +1499,7 @@ function openMergeBox(state: Mounted): void {
     method = chosen;
     fill();
     refresh();
-    // GitHub writes a different commit for each method (a merge commit names the branch, a squash lists the commits).
-    void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-      if (fresh === null || state.panel !== panel || method !== chosen) return;
-      box = fresh;
-      fill();
-      refresh();
-    });
+    load(chosen);
   });
   for (const field of [title, message]) {
     field.addEventListener('input', () => {
@@ -1455,12 +1524,7 @@ function openMergeBox(state: Mounted): void {
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
-  void fetchMergeBox(pullPath, method, bypass).then((fresh) => {
-    if (fresh === null || state.panel !== panel) return;
-    box = fresh;
-    fill();
-    refresh();
-  });
+  load(method);
 }
 
 /**
