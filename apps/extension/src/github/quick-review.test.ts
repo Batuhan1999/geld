@@ -1047,6 +1047,13 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__snapshot')).not.toBeNull();
     window.dispatchEvent(new Event('scroll'));
     expect(document.querySelector('.geld-quick-review__snapshot')).toBeNull();
+    // Escape inside the card closes it and returns to the tally, once, without the tally's focus opening it again.
+    tally?.dispatchEvent(new Event('focus'));
+    const first = document.querySelector<HTMLAnchorElement>('.geld-quick-review__snapshot-row');
+    first?.focus();
+    first?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(document.querySelector('.geld-quick-review__snapshot')).toBeNull();
+    expect(document.activeElement).toBe(tally);
   });
 
   it('waits for the digest’s Reviews row before settling for the sidebar, while the digest is on', () => {
