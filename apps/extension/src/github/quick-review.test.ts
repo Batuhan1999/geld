@@ -365,6 +365,22 @@ describe('the tab bar button', () => {
     return sent;
   };
 
+  it('says a stacked pull request merges the stack below it too', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    stubBox(() => {
+      const payload = JSON.parse(mergeBox('MERGEABLE', true));
+      payload.mergeRequirements.conditions = [{ type: 'STACK', result: 'PASSED', isStacked: true }];
+      return JSON.stringify(payload);
+    });
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    pill()?.click();
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__stack-note')?.hidden).toBe(false);
+  });
+
   it('confirms a merge only with the chosen method’s commit, whatever order GitHub answers in', async () => {
     const held: { [method: string]: (() => void) | undefined } = {};
     const slow = new Set<string>();
