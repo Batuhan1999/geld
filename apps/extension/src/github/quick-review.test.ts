@@ -465,6 +465,26 @@ describe('the tab bar button', () => {
     window.history.replaceState(null, '', '/acme/widgets/pull/7');
   });
 
+  it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
+    const row = (login: string, words: string): string => `<p><span data-assignee-name="${login}"><img src="/a.png"></span><span class="reviewers-status-icon" aria-label="${words}"></span></p>`;
+    const partial = `<form id="pull-request-reviewers-form-1">${row('ann', 'ann approved these changes')}${row('ben', 'ben approved these changes')}${row('cy', 'cy requested changes')}${row('dee', 'dee left review comments')}</form>`;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('show_partial') ? new Response(partial, { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const tally = document.querySelector<HTMLElement>('.geld-quick-review__tally');
+    expect(tally?.hidden).toBe(false);
+    expect([...(tally?.children ?? [])].map((part) => part.textContent)).toEqual(['2', '1', '1']);
+    expect(tally?.getAttribute('aria-label')).toBe('2 approvals, 1 request for changes, 1 reviewer commented');
+    // Left of the group.
+    expect(tally?.nextElementSibling?.classList.contains('geld-quick-review__status')).toBe(true);
+    // Another pull request in the same tab whose reviews cannot be read shows no counts, not the last one's.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__tally')?.hidden).toBe(true);
+  });
+
   it('says "Review" on 💬 whenever it is alone in the review group, merge and close beside it or not', async () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
