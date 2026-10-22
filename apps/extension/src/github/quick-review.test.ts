@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { HeaderStatGroup } from './header-stats';
-import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest } from './quick-review';
+import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
 
 const SHA = 'a'.repeat(40);
 
@@ -21,13 +21,14 @@ describe('submitReviewRequest', () => {
 });
 
 describe('isInstantClick', () => {
-  it('sends Approve or Request changes at once on ⌘-click on a Mac and Ctrl-click elsewhere, never Comment', () => {
+  it('sends Approve or Request changes at once on ⌘-click on a Mac and Ctrl-click elsewhere, Comment only with comments pending', () => {
     expect(isInstantClick('approve', { metaKey: true, ctrlKey: false }, true)).toBe(true);
     expect(isInstantClick('request changes', { metaKey: true, ctrlKey: false }, true)).toBe(true);
     expect(isInstantClick('approve', { metaKey: false, ctrlKey: true }, true)).toBe(false);
     expect(isInstantClick('approve', { metaKey: false, ctrlKey: true }, false)).toBe(true);
     expect(isInstantClick('approve', { metaKey: false, ctrlKey: false }, true)).toBe(false);
     expect(isInstantClick('comment', { metaKey: true, ctrlKey: true }, true)).toBe(false);
+    expect(isInstantClick('comment', { metaKey: true, ctrlKey: false }, true, true)).toBe(true);
   });
 });
 
@@ -40,6 +41,9 @@ describe('segmentHint', () => {
     expect(segmentHint('approve', '⌘', true)).toEqual(['Approve without comments']);
     expect(segmentHint('request changes', 'Ctrl', true)).toEqual(['Request changes without comments']);
     expect(segmentHint('comment', '⌘', true)).toEqual(['Comment']);
+    // With comments pending, 💬 has a 1-click review that submits them.
+    expect(segmentHint('comment', '⌘', false, true)).toEqual(['Comment', '⌘ 1-click review']);
+    expect(segmentHint('comment', 'Ctrl', true, true)).toEqual(['Submit pending comments']);
   });
 });
 
@@ -173,7 +177,8 @@ describe('the tab bar button', () => {
     // ✓ and ✗ carry their sending glyph for the instant key; 💬 has none.
     expect(segment('approve').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();
     expect(segment('request changes').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();
-    expect(segment('comment').querySelector('.geld-quick-review__glyph--instant')).toBeNull();
+    // 💬 has one too, which the stylesheet shows only while comments are pending (⌘-click then submits them).
+    expect(segment('comment').querySelector('.geld-quick-review__glyph--instant')).not.toBeNull();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
   });
 
@@ -384,9 +389,15 @@ describe('the tab bar button', () => {
     expect(row?.querySelector('.geld-quick-review__pending-text code')?.textContent).toBe('a');
     expect(row?.querySelector('.geld-quick-review__pending-where')?.textContent).toBe('a.ts:3');
     expect(row?.getAttribute('title')).toBe('src/a.ts, line 3');
-    // Pending comments go with the review, so a comment needs no words of its own.
-    const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Comment');
+    // With comments pending 💬's box submits a review by default, and they go with it, so it needs no words of its own.
+    const submit = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Review');
     expect(submit?.disabled).toBe(false);
+    // As a plain comment instead, it needs words, and the pending comments stay pending.
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    const plain = [...(box?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])].find((item) => item.textContent?.startsWith('Comment'));
+    plain?.click();
+    expect(submit?.textContent).toBe('Comment');
+    expect(submit?.disabled).toBe(true);
     const discard = [...(box?.querySelectorAll('button') ?? [])].find((candidate) => candidate.textContent === 'Discard review');
     expect(discard?.hidden).toBe(false);
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -394,6 +405,56 @@ describe('the tab bar button', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls).toContain('DELETE /acme/widgets/pull/7/page_data/abandon_review');
     expect(badge?.hidden).toBe(true);
+  });
+
+  it('posts a plain comment from 💬 by default, and a review once chosen', async () => {
+    const sent: { url: string; body: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST' || init?.method === 'PUT') sent.push({ url, body: String(init.body) });
+      return new Response('{}', { status: url.includes('create_timeline_comment') || url.includes('submit_review') ? 200 : 404 });
+    }));
+    // Off the conversation, where a posted comment would reload the page to show it.
+    applyQuickReview(true, { page: { kind: 'pull-other', diffUrl: null, stateKey: '/acme/widgets/pull/7' }, groups: [groupAt(counts())], headSha: () => SHA });
+    segment('comment').click();
+    const box = document.querySelector('.geld-quick-review__panel');
+    const words = box?.querySelector('textarea');
+    if (!(words instanceof HTMLTextAreaElement)) throw new Error('no box');
+    words.value = 'Looks close.';
+    words.dispatchEvent(new Event('input'));
+    // The choice: icon, name and a one-line note each, the current one checked.
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    const items = [...(box?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])];
+    expect(items.map((item) => [item.querySelector('.geld-quick-review__menu-label')?.textContent, item.querySelector('.geld-quick-review__menu-note')?.textContent, item.getAttribute('aria-checked')])).toEqual([
+      ['Comment', 'Add to the conversation', 'true'],
+      ['Review', 'Submit as a review', 'false'],
+    ]);
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__submit')?.click();
+    await settle();
+    await settle();
+    expect(sent).toEqual([{ url: '/acme/widgets/pull/7/page_data/create_timeline_comment', body: JSON.stringify({ text: 'Looks close.' }) }]);
+    expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('Commented');
+    // A review instead goes through GitHub's review request, as a comment review.
+    segment('comment').click();
+    const again = document.querySelector('.geld-quick-review__panel');
+    const field = again?.querySelector('textarea');
+    if (!(field instanceof HTMLTextAreaElement)) throw new Error('no box');
+    field.value = 'As a review.';
+    field.dispatchEvent(new Event('input'));
+    again?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
+    [...(again?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])].find((item) => item.textContent?.startsWith('Review'))?.click();
+    again?.querySelector<HTMLButtonElement>('.geld-quick-review__submit')?.click();
+    await settle();
+    await settle();
+    expect(sent[1]).toEqual({ url: '/acme/widgets/pull/7/page_data/submit_review', body: JSON.stringify({ body: 'As a review.', event: 'comment', headSha: SHA }) });
+  });
+
+  it('writes a comment as GitHub’s conversation composer does', () => {
+    const request = timelineCommentRequest('/o/r/pull/7', 'Hello', 'n1');
+    expect(request.url).toBe('/o/r/pull/7/page_data/create_timeline_comment');
+    expect(request.init.method).toBe('POST');
+    expect(JSON.parse(String(request.init.body))).toEqual({ text: 'Hello' });
   });
 
   it('reads the pull request path', () => {
