@@ -559,6 +559,9 @@ function positionPanel(): void {
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
+  // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
+  // left below it and Primer's Overlay scrolls its body, so the buttons in its footer stay in view.
+  mounted.panel.style.maxHeight = fixed ? `${Math.max(160, Math.round(window.innerHeight - rect.bottom - 20))}px` : '';
 }
 
 function showPanel(state: Mounted, panel: HTMLElement, opener: ReviewEvent): void {

@@ -105,6 +105,12 @@ describe('the tab bar button', () => {
     // A pass while stuck keeps it there, without measuring.
     applyQuickReview(true, { page, groups: [groupAt(counts())], headSha: () => SHA });
     expect(own?.previousElementSibling).toBe(group);
+    // Its box is fixed under the toolbar, and keeps to the room left in the window so its buttons stay in view.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__segment[data-event="comment"]')?.click();
+    const box = document.querySelector<HTMLElement>('.geld-quick-review__panel');
+    expect(box?.style.position).toBe('fixed');
+    expect(box?.style.maxHeight).toMatch(/^\d+px$/);
+    box?.querySelector<HTMLButtonElement>('.btn-invisible:not(.geld-quick-review__discard)')?.click();
     top = 262;
     window.dispatchEvent(new Event('scroll'));
     expect(counts().previousElementSibling).toBe(group);
