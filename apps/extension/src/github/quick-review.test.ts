@@ -671,6 +671,13 @@ describe('the tab bar button', () => {
     expect(window.location.hash).toBe('#pullrequestreview-3');
   });
 
+  it('still puts its controls on the page under a malformed reviewer marker', () => {
+    window.history.replaceState(null, '', '/acme/widgets/pull/7#geld-review-by-%');
+    expect(() => mount()).not.toThrow();
+    expect(document.querySelector('.geld-quick-review')).not.toBeNull();
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+  });
+
   it('brings the reviews into view for the tally’s own link, and drops the marker', () => {
     document.body.insertAdjacentHTML('beforeend', '<div class="discussion-sidebar-item"><form id="pull-request-reviewers-form-1"></form></div>');
     const scrolled: string[] = [];

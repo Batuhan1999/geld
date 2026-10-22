@@ -847,6 +847,15 @@ function showSnapshot(state: Mounted): void {
   window.addEventListener('scroll', () => hideSnapshot(state), { passive: true, once: true, signal: state.keys.signal });
 }
 
+/** The login in a reviewer marker; a malformed escape (a hand-edited `%`) reads as no one, so the marker falls back to the Reviews row. */
+function loginOfMarker(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function hideSnapshot(state: Mounted): void {
   window.clearTimeout(state.snapshotTimer);
   state.snapshot?.remove();
@@ -872,7 +881,7 @@ function followReviewHash(context: QuickReviewContext): void {
   if (hashSince === null || hashSince.hash !== hash) hashSince = { hash, at: Date.now() };
   const patient = Date.now() - hashSince.at < HASH_PATIENCE_MS;
   if (hash.startsWith(REVIEW_BY_HASH)) {
-    const login = decodeURIComponent(hash.slice(REVIEW_BY_HASH.length)).toLowerCase();
+    const login = loginOfMarker(hash.slice(REVIEW_BY_HASH.length));
     const reviews = [...document.querySelectorAll<HTMLElement>('[id^="pullrequestreview-"]')].filter((node) => /^pullrequestreview-\d+$/.test(node.id) && reviewAuthorIs(node, login));
     const latest = reviews.at(-1);
     if (latest !== undefined) {
