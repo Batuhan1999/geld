@@ -1004,7 +1004,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__tally-part {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
 
 .geld-quick-review__tally-part > svg {
