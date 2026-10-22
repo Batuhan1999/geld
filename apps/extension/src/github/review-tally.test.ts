@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { reviewersPartialUrl, tallyOf, tallyWords } from './review-tally';
+import { reviewersPartialUrl, standingReviewers, tallyOf, tallyWords } from './review-tally';
 
 describe('review tally', () => {
   it('asks the Reviewers block GitHub refreshes itself from', () => {
@@ -14,5 +14,15 @@ describe('review tally', () => {
     expect(tally).toEqual({ approved: 2, changesRequested: 1, commented: 2 });
     expect(tallyWords(tally)).toBe('2 approvals, 1 request for changes, 2 reviewers commented');
     expect(tallyWords({ approved: 0, changesRequested: 0, commented: 0 })).toBe('');
+  });
+
+  it('keeps an approval standing over a later comment, as the merge box does', () => {
+    const reviewer = (login: string, state: 'approved' | 'commented') => ({ login, avatarSrc: null, state, bot: false });
+    const standing = standingReviewers([reviewer('Copilot', 'commented'), reviewer('aeschli', 'approved'), reviewer('connor4312', 'commented')], [
+      { login: 'aeschli', state: 'APPROVED', id: 1 },
+      { login: 'Connor4312', state: 'APPROVED', id: 2 },
+    ]);
+    expect(standing.map((entry) => `${entry.login}:${entry.state}`)).toEqual(['Copilot:commented', 'aeschli:approved', 'connor4312:approved']);
+    expect(tallyOf(standing)).toEqual({ approved: 2, changesRequested: 0, commented: 1 });
   });
 });

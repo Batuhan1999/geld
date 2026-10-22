@@ -36,6 +36,8 @@ export interface MergeBox {
 export interface ReviewVerdict {
   readonly login: string;
   readonly state: 'APPROVED' | 'CHANGES_REQUESTED';
+  /** The review's id, as its timeline anchor names it (`pullrequestreview-<id>`). */
+  readonly id: number | null;
 }
 
 /** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), or none. */
@@ -74,7 +76,8 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
   for (const review of reviews) {
     if (!isRecord(review) || !isRecord(review.author)) continue;
     const login = stringOf(review.author.login);
-    if (login !== '' && (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')) verdicts.push({ login, state: review.state });
+    const id = typeof review.id === 'number' && Number.isFinite(review.id) ? review.id : null;
+    if (login !== '' && (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')) verdicts.push({ login, state: review.state, id });
   }
   return {
     open: pull.state === 'OPEN',

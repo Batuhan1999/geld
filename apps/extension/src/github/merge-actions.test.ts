@@ -48,8 +48,8 @@ describe('parseMergeBox', () => {
       canClose: true,
       canMarkReady: false,
       verdicts: [
-        { login: 'aeschli', state: 'APPROVED' },
-        { login: 'Alice', state: 'CHANGES_REQUESTED' },
+        { login: 'aeschli', state: 'APPROVED', id: 1 },
+        { login: 'Alice', state: 'CHANGES_REQUESTED', id: 2 },
       ],
       mergeable: true,
       canBypass: false,

@@ -471,6 +471,56 @@ describe('the tab bar button', () => {
     expect(JSON.parse(String(request.init.body))).toEqual({ text: 'Hello' });
   });
 
+  it('draws the control once what the reader may do is read, so close and merge never push it aside', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    const root = document.querySelector('.geld-quick-review');
+    expect(root?.hasAttribute('data-loading')).toBe(true);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(root?.hasAttribute('data-loading')).toBe(false);
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__actions-group')?.hidden).toBe(false);
+  });
+
+  it('links the tally to the reviews and shows who reviewed on it, each a link to their review', async () => {
+    const row = (login: string, words: string): string => `<p><span data-assignee-name="${login}"><img src="/${login}.png"></span><span class="reviewers-status-icon" aria-label="${words}"></span></p>`;
+    const partial = `<form id="pull-request-reviewers-form-1">${row('ann', 'ann approved these changes')}${row('dee', 'dee left review comments')}</form>`;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('show_partial')) return new Response(partial, { status: 200 });
+      if (url.includes('/page_data/merge_box')) return new Response(mergeBox('MERGEABLE', true, { reviews: [{ id: 42, author: { login: 'ann' }, state: 'APPROVED' }] }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const tally = document.querySelector<HTMLAnchorElement>('.geld-quick-review__tally');
+    expect(tally?.getAttribute('href')).toBe('/acme/widgets/pull/7#geld-reviews');
+    tally?.dispatchEvent(new Event('focus'));
+    const rows = [...document.querySelectorAll<HTMLAnchorElement>('.geld-quick-review__snapshot-row')];
+    // An approval links to its own review; a comment review, whose id only the timeline has, to the reviewer's marker.
+    expect(rows.map((link) => [link.querySelector('.geld-quick-review__snapshot-name')?.textContent, link.querySelector('.geld-quick-review__snapshot-state')?.textContent, link.getAttribute('href')])).toEqual([
+      ['ann', 'approved', '/acme/widgets/pull/7#pullrequestreview-42'],
+      ['dee', 'commented', '/acme/widgets/pull/7#geld-review-by-dee'],
+    ]);
+  });
+
+  it('resolves a reviewer marker on the conversation to their latest review’s own anchor', () => {
+    document.body.insertAdjacentHTML('beforeend', '<div id="pullrequestreview-1"><a class="author" href="/dee">Dee Doe (dee)</a></div><div id="pullrequestreview-2"><a class="author" href="/ann">ann</a></div><div id="pullrequestreview-3"><a class="author" href="/dee">Dee Doe (dee)</a><a id="pullrequestreview-3-permalink"></a></div>');
+    window.history.replaceState(null, '', '/acme/widgets/pull/7#geld-review-by-dee');
+    mount();
+    expect(window.location.hash).toBe('#pullrequestreview-3');
+  });
+
+  it('brings the reviews into view for the tally’s own link, and drops the marker', () => {
+    document.body.insertAdjacentHTML('beforeend', '<div class="discussion-sidebar-item"><form id="pull-request-reviewers-form-1"></form></div>');
+    const scrolled: string[] = [];
+    const item = document.querySelector<HTMLElement>('.discussion-sidebar-item');
+    if (item !== null) item.scrollIntoView = () => scrolled.push('sidebar');
+    window.history.replaceState(null, '', '/acme/widgets/pull/7#geld-reviews');
+    mount();
+    expect(scrolled).toEqual(['sidebar']);
+    expect(window.location.hash).toBe('');
+  });
+
   it('reads the pull request path', () => {
     expect(pullPathOf('/acme/widgets/pull/7/changes')).toBe('/acme/widgets/pull/7');
     expect(pullPathOf('/acme/widgets/issues/7')).toBeNull();

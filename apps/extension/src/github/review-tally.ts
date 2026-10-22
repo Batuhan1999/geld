@@ -1,5 +1,6 @@
 import type { SidebarReviewer } from './review/crawler';
 import { crawlSidebarReviewers } from './review/crawler';
+import type { ReviewVerdict } from './merge-actions';
 
 /**
  * How the pull request's reviews stand, as the sidebar's Reviewers block
@@ -20,6 +21,21 @@ export interface ReviewTally {
 export function reviewersPartialUrl(pullPath: string): string | null {
   const match = /^(\/[^/]+\/[^/]+)\/pull\/(\d+)/.exec(pullPath);
   return match === null ? null : `${match[1]}/issues/${match[2]}/show_partial?partial=${encodeURIComponent('pull_requests/sidebar/show/reviewers')}`;
+}
+
+/**
+ * The sidebar names a reviewer by their latest review, so an approval
+ * followed by a comment reads "commented" there. GitHub's merge box (and
+ * the digest) keep the approval standing: its verdict for the same login
+ * wins. Dismissed verdicts are already gone from the merge box.
+ */
+export function standingReviewers(sidebar: readonly SidebarReviewer[], verdicts: readonly ReviewVerdict[]): SidebarReviewer[] {
+  return sidebar.map((reviewer) => {
+    const verdict = verdicts.find((entry) => entry.login.toLowerCase() === reviewer.login.toLowerCase());
+    if (verdict === undefined) return reviewer;
+    const state = verdict.state === 'APPROVED' ? 'approved' : 'changes_requested';
+    return reviewer.state === state ? reviewer : { ...reviewer, state };
+  });
 }
 
 export function tallyOf(reviewers: readonly SidebarReviewer[]): ReviewTally {
@@ -44,16 +60,31 @@ export function tallyWords(tally: ReviewTally): string {
   return parts.filter((part) => part !== '').join(', ');
 }
 
-/** The tally for a pull request, or null when GitHub could not say. */
-export async function fetchReviewTally(pullPath: string): Promise<ReviewTally | null> {
+/** The reviewers, each by their standing review, for a pull request; null when GitHub could not say. */
+export async function fetchReviewers(pullPath: string): Promise<readonly SidebarReviewer[] | null> {
   const url = reviewersPartialUrl(pullPath);
   if (url === null) return null;
   try {
     const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html', 'X-Requested-With': 'XMLHttpRequest' } });
     if (!response.ok) return null;
     const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-    return tallyOf(crawlSidebarReviewers(doc));
+    return crawlSidebarReviewers(doc).filter((reviewer) => reviewer.state !== 'awaiting');
   } catch {
     return null;
   }
+}
+
+/** Where the conversation shows the reviews: Geld's marker, which the page resolves (to the digest's Reviews row, else the sidebar's Reviewers). */
+export const REVIEWS_HASH = '#geld-reviews';
+/** A reviewer's latest review, when its id is not known here: the conversation finds it by its author. */
+export const REVIEW_BY_HASH = '#geld-review-by-';
+
+/**
+ * The link to one reviewer's standing review on the conversation: its own
+ * anchor when the merge box gave its id (approvals and requests for
+ * changes), else Geld's marker naming the reviewer (comment reviews, whose
+ * ids only the timeline has).
+ */
+export function reviewLink(pullPath: string, login: string, id: number | null): string {
+  return id === null ? `${pullPath}${REVIEW_BY_HASH}${encodeURIComponent(login)}` : `${pullPath}#pullrequestreview-${id}`;
 }
