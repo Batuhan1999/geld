@@ -1161,6 +1161,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   gap: 8px;
 }
 
+.geld-quick-review__stack-note {
+  margin: 0;
+  font-size: 12px;
+}
+
 .geld-quick-review__bypass {
   display: flex;
   align-items: flex-start;
