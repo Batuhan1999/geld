@@ -40,6 +40,7 @@ import type { Batch, BotLine, ReviewEntry, ReviewEntryState, ReviewThreadRef } f
 import { hideHoverCard, setHoverProvider, setReportProvider, setWhoProvider } from './hovercard';
 import type { HoverPreview, ReportCard, WhoCard } from './hovercard';
 import { knownMarkShape } from './mark-shape';
+import { loginOfLink, showLogins } from './login';
 import { allResolved, checkCountsFrom, checksSummary, digestMarkdown, isCurrent, itemMarkdown, newerSummaryAnchor, requiredReviewsFrom, standingReviewers } from './panel-model';
 import type { MarkdownSubject, RequiredReviews } from './panel-model';
 import { fixVisible } from '@geld/review';
@@ -2004,7 +2005,7 @@ function botAvatarByLogin(botId: string): string | null {
 /** The pull request's author, from the page header (the description card when the header is not there). */
 function prAuthorLogin(): string | null {
   const header = document.querySelector('.gh-header-meta a.author, [data-testid="issue-metadata-author"] a, .gh-header-meta a[data-hovercard-type="user"]');
-  const login = header === null ? null : (header.textContent ?? '').trim().replace(/^@/, '');
+  const login = header === null ? null : loginOfLink(header);
   if (login !== null && login !== '') return login;
   const card = document.querySelector('[data-geld-attached]');
   return card === null ? null : (authorOf(card)?.login ?? null);
@@ -3289,6 +3290,8 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
       fitChips(mounted.root);
       // Commit rows on loan get their dates once those land (the slot itself is not rebuilt for that).
       timeCommitRows(mounted.root, reapplySoon);
+      // GitHub's names on loan read as logins, as the panel's own rows do.
+      showLogins(mounted.root);
     });
   }
   setHoverProvider((row) => hoverPreviewFor(row, meta, groups, panelHandlers));
