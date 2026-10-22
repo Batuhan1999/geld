@@ -889,7 +889,7 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   a closed one Open ("Reopen pull request": GitHub gives no reopen permission of its own, so `viewerCanClose` stands for it);
   a merged one nothing, and GitHub's pill stays as it is.
   Pull requests have one way to close: the close reasons (not planned, duplicate) are issues', and GitHub's close request carries no body.
-  **⌘ (Ctrl off a Mac) held makes the pill a 1-click merge on an approved pull request** (`instantMergeReady`, `showInstantMerge`, `instantMerge`, `data-geld-instant-merge`): an approval standing, no request for changes, and GitHub would merge it now with its default method (`mergeOffer` is `merge`;
+  **⌘ (Ctrl off a Mac) held makes the pill a 1-click merge on an approved pull request** (`instantMergeReady`, `showInstantMerge`, `instantMerge`, `data-geld-instant-merge`): an approval standing, no request for changes, not in a stack (which would merge the pull requests below it too, so that goes through the merge box and its sentence), and GitHub would merge it now with its default method (`mergeOffer` is `merge`;
   a merge only past the rules never goes in one click, its box asks for GitHub's checkbox).
   While the key is held (read as the review group's instant key is, `followInstantKey`, plus the pointer over a pill) the pill reads "Merge" with the merge glyph in `--fgColor-done`, no fill and a 1px ring of `--borderColor-done-emphasis` (`!important` over Primer's fill for the status), its aria-label "Merge now: Squash and merge";
   the merge face (`.geld-status-pill__merge`, `aria-hidden`) lies absolutely over the usual one, which keeps its room (`visibility: hidden`), so the pill's width and the header's words after it never move.

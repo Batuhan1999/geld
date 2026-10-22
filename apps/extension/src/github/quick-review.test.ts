@@ -655,6 +655,25 @@ describe('the tab bar button', () => {
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' }));
   });
 
+  it('has no 1-click merge in a stack, which would merge the pull requests below it too', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const sent = stubBox(() => {
+      const payload = JSON.parse(mergeBox('MERGEABLE', true, { reviews: [{ author: { login: 'alice' }, state: 'APPROVED' }] }));
+      payload.mergeRequirements.conditions = [{ type: 'STACK', result: 'PASSED', isStacked: true }];
+      return JSON.stringify(payload);
+    });
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    pill()?.dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(sent).toEqual([]);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' }));
+  });
+
   it('keeps the status pill working where the review group stands aside, and takes it away when switched off', async () => {
     window.localStorage.clear();
     resetStatusHints();

@@ -1021,7 +1021,8 @@ function openFromPill(pill: HTMLButtonElement, click: MouseEvent): void {
  */
 function instantMergeReady(state: Mounted): boolean {
   const actions = state.mergeActions;
-  if (actions === null || actions.offer !== 'merge' || state.sending) return false;
+  // A stacked pull request merges the stack below it too: that wants the merge box's sentence, not a 1-click merge.
+  if (actions === null || actions.offer !== 'merge' || actions.box.stacked || state.sending) return false;
   const verdicts = actions.box.verdicts;
   return verdicts.some((verdict) => verdict.state === 'APPROVED') && !verdicts.some((verdict) => verdict.state === 'CHANGES_REQUESTED');
 }
