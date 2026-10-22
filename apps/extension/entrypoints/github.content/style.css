@@ -568,6 +568,14 @@
   white-space: nowrap;
 }
 
+/* GitHub's trailing marks: the comment count and the check-annotation icon, cloned with their own classes. */
+.geld-tree__trailing {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .geld-tree__label--root {
   font-weight: 600;
   color: var(--fgColor-default, #1f2328);
@@ -1578,6 +1586,113 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
   opacity: 0.6;
 }
 
+/* ---- Request a review, for people (the Reviews row's ⋯): standings, Other reviewers behind a search box ---- */
+
+.geld-review__menu-list.geld-review__request-list:has(.geld-review__people-more) {
+  width: 380px;
+  min-width: 0;
+  max-width: calc(100vw - 32px);
+  /* The menu's own width decides whether a standing's words fit beside the name (below). */
+  container-type: inline-size;
+}
+
+.geld-review__people-avatar {
+  border-radius: 50%;
+}
+
+/* Login, then the name and GitHub's "suggested" after it on the one line (the shared text box is a column). */
+.geld-review__people-item > .geld-review__menu-text {
+  display: block;
+}
+
+.geld-review__people-name {
+  margin-left: 6px;
+  color: var(--geld-review-muted);
+}
+
+/* A person's standing: its glyphs (a check, a dot — both when they approved and are awaited again) and the words. */
+.geld-review__people-state {
+  gap: 3px;
+}
+
+.geld-review__people-glyph {
+  display: inline-flex;
+}
+
+.geld-review__people-glyph > .octicon {
+  width: 12px;
+  height: 12px;
+}
+
+.geld-review__people-state[data-health='pending'] {
+  color: var(--geld-review-attention-fg);
+}
+
+.geld-review__people-words {
+  margin-left: 2px;
+}
+
+/* On a narrow menu the words go and the glyphs stay, the title holding the words. */
+@container (width < 340px) {
+  .geld-review__people-words {
+    display: none;
+  }
+}
+
+.geld-review__people-hint {
+  padding: 4px 8px;
+}
+
+/* What went wrong with a request, beside the buttons; empty until it does. */
+.geld-review__request-problem {
+  align-self: center;
+  color: var(--geld-review-danger-fg);
+}
+
+.geld-review__request-problem:empty {
+  display: none;
+}
+
+.geld-review__people-filter {
+  padding: 4px 8px 6px;
+}
+
+.geld-review__people-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--geld-review-border);
+  border-radius: 6px;
+  background: var(--geld-review-bg);
+  color: var(--fgColor-default, var(--color-fg-default));
+  font: inherit;
+  font-size: 12px;
+}
+
+.geld-review__people-search:focus {
+  outline: 2px solid var(--geld-review-accent);
+  outline-offset: -1px;
+}
+
+.geld-review__people-options {
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The arrow keys' choice reads like a hover; a suggestion of GitHub's is marked. */
+.geld-review__people-item[data-active] {
+  background: var(--geld-review-hover);
+}
+
+.geld-review__people-item[data-suggested] > .geld-review__menu-text::after {
+  content: 'suggested';
+  margin-left: 6px;
+  color: var(--geld-review-muted);
+  font-size: 11px;
+}
+
 .geld-review__menu-hint {
   color: var(--geld-review-muted);
   font-size: 12px;
@@ -1634,9 +1749,9 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 }
 
 /* GitHub's expanded checks draw their own top rule; the slot's is enough. */
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableContent'],
-.geld-review__slot[data-kind='checks'] [class*='ExpandedChecks-module__checksContainer'],
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableWrapper'] {
+.geld-review__slot[data-kind='checks'] [class*='expandableContent'],
+.geld-review__slot[data-kind='checks'] [class*='checksContainer'],
+.geld-review__slot[data-kind='checks'] [class*='expandableWrapper'] {
   border-top: 0 !important;
 }
 
@@ -1815,6 +1930,35 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 
 .geld-review__status--verdict[data-verdict='awaiting'] {
   color: var(--fgColor-attention, var(--color-attention-fg, #bf8700));
+}
+
+/* A bot's line under the Review bots row leads with its verdict's light, the chip's colours. */
+.geld-review__status--verdict[data-health='good'] {
+  color: var(--geld-review-done-fg);
+}
+
+.geld-review__status--verdict[data-health='warn'] {
+  color: var(--geld-review-attention-fg);
+}
+
+.geld-review__status--verdict[data-health='bad'] {
+  color: var(--geld-review-danger-fg);
+}
+
+.geld-review__status--verdict[data-health='pending'] {
+  color: var(--geld-review-muted);
+}
+
+/* The verdict's words beside the bot's name ("4/5 · 1 issue"), before the summary's first line. */
+.geld-review__bot-line-detail {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.geld-review__row--bot-line[data-current='false'] .geld-review__bot-line-detail::after {
+  content: ' · earlier commit';
 }
 
 /*
@@ -3051,7 +3195,8 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 .geld-review__qv [data-testid='comment-viewer-outer-box'],
 .geld-review__qv [class*='IssueCommentViewer'],
 .geld-review__qv [class*='CommentBox-module'],
-.geld-review__qv [class*='Comment-module__container'] {
+.geld-review__qv [class*='Comment-module__container'],
+.geld-review__qv [data-testid='comment-container'] {
   margin: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -3394,11 +3539,15 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   padding: 0;
 }
 
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxSectionHeader-module__wrapper'] {
+/* The section's own header ("Some checks were not successful", the ring, the chevron) repeats the row: hidden when
+ * the whole section is in the slot. GitHub's class names changed shape in Oct 2026 (`MergeBoxSectionHeader-module__
+ * wrapper--x` became `wrapper__x wrapperCanExpand__y`), so the header is known by its Collapse/Expand button. */
+.geld-review__slot[data-kind='checks'] [class*='MergeBoxSectionHeader-module__wrapper'],
+.geld-review__slot[data-kind='checks'] section[aria-label='Checks'] > :has(> button[aria-label$='checks' i]) {
   display: none !important;
 }
 
-.geld-review__slot[data-kind='checks'] [class*='MergeBoxExpandable-module__expandableWrapper'] {
+.geld-review__slot[data-kind='checks'] [class*='expandableWrapper'] {
   visibility: visible !important;
 }
 
@@ -3410,7 +3559,7 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 /* Grouped by status, each group's heading is a 28px button; with no grouping the "12 checks" heading is a bare 20px
  * line, so it sat 4px higher and the list 8px higher than in the other mode, and switching modes shifted the list.
  * The bare heading takes the button's box, its text centred, so both modes start at the same lines. */
-.geld-review__slot[data-kind='checks'] [class*='ExpandedChecks-module__totalChecksCountText'] {
+.geld-review__slot[data-kind='checks'] [class*='totalChecksCountText'] {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -3596,7 +3745,8 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 .geld-review__chat-body .react-issue-comment,
 .geld-review__chat-body [data-testid='comment-viewer-outer-box'],
 .geld-review__chat-body [class*='IssueCommentViewer'],
-.geld-review__chat-body [class*='Comment-module__container'] {
+.geld-review__chat-body [class*='Comment-module__container'],
+.geld-review__chat-body [data-testid='comment-container'] {
   margin: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -3687,8 +3837,13 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   line-height: 20px;
 }
 
+/* The reader's own line reads from the picture inward too, so it hangs from the bubble's right edge and runs
+ * leftward past a narrower bubble (the line is as wide as the bubble, below, and its words overflow). GitHub's
+ * `.flex-row` utility is `!important`, so the direction stays row and the end alignment does the mirroring: the
+ * one visible child, the header text, sits against the right edge and overflows to the left. Read as a row it
+ * would start at the left edge and run right, under the picture (notra#1148). */
 .geld-review__chat [data-geld-mine] > [data-geld-part='meta'] {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 .geld-review__chat [data-geld-part='meta'] h3,
@@ -3826,16 +3981,20 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 
 /* A lone message is the whole view (its byline and picture are the chat's own, outside the message), so the ring
  * goes round the box it sits in — the slot, the white area under its row — not round the chat's content, which
- * stops short of the slot's padding and ran the ring across the picture. */
-.geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]:is(:target, :has(:target))),
-.geld-review__slot:has(.geld-review__chat :target:is([id^='issuecomment-'], [id^='pullrequestreview-'], [id^='discussion_r']) [data-geld-message][data-geld-lone]) {
+ * stops short of the slot's padding and ran the ring across the picture. Only the slot whose own body holds the
+ * chat: a chat nested in a round sits in a slot inside the round's slot, and `:has()` matched the round's slot
+ * too, which drew a second ring from the round's header down — its right edge hidden behind the open line's
+ * header (an open row is `position: relative; z-index: 3`, above the slot's outline) and so read as a ring that
+ * stopped short. */
+.geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]:is(:target, :has(:target))),
+.geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat :target:is([id^='issuecomment-'], [id^='pullrequestreview-'], [id^='discussion_r']) [data-geld-message][data-geld-lone]) {
   outline: 1px solid var(--fgColor-accent, var(--color-accent-fg));
   outline-offset: -1px;
 }
 
 /* When the row the URL points at wears its 2px ring around row and slot together, that ring says it: no second one. */
-.geld-review__row[data-viewing] + .geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]),
-.geld-review__row[data-viewing] + .geld-review__slot:has(.geld-review__chat [data-geld-message][data-geld-lone]) .geld-review__chat {
+.geld-review__row[data-viewing] + .geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]),
+.geld-review__row[data-viewing] + .geld-review__slot:has(> .geld-review__slot-body > .geld-review__chats > .geld-review__chat [data-geld-message][data-geld-lone]) .geld-review__chat {
   outline: none;
 }
 
@@ -4076,6 +4235,19 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   left: auto;
   flex-direction: row-reverse;
   padding: 6px 8px 0 0;
+}
+
+/* The column is a stacking context (positioned, z-index 2), so a menu or picker opened inside it, whatever its own
+ * z-index, paints under the rail and target-ring overlays (`::after`, z-index 5) that run down the slot's edges: the
+ * ring's line crossed the open menu. While one of its popups is open the column stands above the overlays. Two
+ * rules, not one `:has()` list: `:has()` is unforgiving, and a Safari without `:popover-open` would drop the whole
+ * rule, the `details[open]` case with it. */
+.geld-review__chat [data-geld-message] > .geld-review__msg-side:has(details[open]) {
+  z-index: 6;
+}
+
+.geld-review__chat [data-geld-message] > .geld-review__msg-side:has(:popover-open) {
+  z-index: 6;
 }
 
 /* A lone message spans its row (no empty side, and no row container to measure one in): its controls straddle its
@@ -4647,15 +4819,27 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   font-weight: 600;
 }
 
-/* "edited": a quiet clock beside the time, the exact and relative moment in its title. */
+/* Edited: a quiet clock beside the time (which is the edit's); its tooltip says when the comment was first posted.
+ * The wrapper is the box GitHub's `tool-tip` positions against. */
+.geld-review__edited-wrap {
+  position: relative;
+  display: inline-flex;
+  align-self: center;
+  flex: 0 0 auto;
+  margin-left: -5px;
+}
+
 .geld-review__edited {
   display: inline-flex;
   align-items: center;
   align-self: center;
   flex: 0 0 auto;
-  margin-left: -5px;
   color: var(--geld-review-muted);
   cursor: help;
+}
+
+.geld-review__chat-byline > .geld-review__edited {
+  margin-left: -5px;
 }
 
 .geld-review__edited svg {
@@ -4734,9 +4918,26 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   transform: scaleX(-1);
 }
 
-/* A bot's own re-trigger badge inside its comment: Geld's Rerun stands for it (chat.ts, `AGENT_RERUN_CONTROLS`). */
-.geld-review__chat [data-geld-agent-rerun] {
+/* A bot's own badges inside its comment: Geld's Rerun stands for its re-trigger badge (chat.ts,
+   `AGENT_RERUN_CONTROLS`) and View for its "View in <bot>" badge (`AGENT_VIEW_LINKS`). */
+.geld-review__chat [data-geld-agent-rerun],
+.geld-review__chat [data-geld-agent-view] {
   display: none !important;
+}
+
+/* Two controls on one byline (View, then Rerun / See latest): the first wears the gap to the name, the next stand
+   6px apart. View is a link in the button's clothes. */
+.geld-review__rerun-wrap ~ .geld-review__rerun-wrap {
+  margin-left: 6px;
+}
+
+a.geld-review__rerun {
+  text-decoration: none;
+}
+
+a.geld-review__rerun:hover {
+  text-decoration: none;
+  color: var(--fgColor-default, var(--color-fg-default));
 }
 
 .geld-review__dialog-text {
@@ -5279,6 +5480,28 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
   flex: 0 0 auto;
 }
 
+/* Opened with GitHub's "…" (`Details--on` on the container, which shows the message body under the line), the
+ * message is what the reader asked for: the cell wraps and the subject shows whole — ellipsized on one line, the
+ * subject's middle stayed hidden while the body below began with its last word ("…gories"). */
+.geld-review__qv .TimelineItem .js-details-container.Details--on .pr-1.flex-auto.min-width-0 {
+  /* Back to flow, as GitHub lays it out: the subject wraps and the "…" button follows its last word inline. */
+  display: block;
+  overflow: visible;
+  white-space: normal;
+}
+
+.geld-review__qv .TimelineItem .js-details-container.Details--on .pr-1.flex-auto.min-width-0 > code {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* A message body that was only the subject's tail (quick-view.ts: joinCommitSubjects) has nothing left to show. */
+.geld-review__qv pre[data-geld-empty] {
+  display: none;
+}
+
 /* The cells' own flex row (`d-flex flex-auto`) is a flex item with `min-width: auto`, whose min-content is the whole
  * unwrapped message: a long message pushed the row past the time column, and the SHA under the time. Letting the
  * row shrink is what lets the message cell above ellipsize. */
@@ -5480,10 +5703,12 @@ html[data-geld-timeline='compact'] .TimelineItem-break {
 }
 
 /* The row with an open menu is above every other row, the open one included — otherwise a menu dropped from a
- * row above the open row painted under it (equal z-index, later in the DOM wins). */
+ * row above the open row painted under it (equal z-index, later in the DOM wins) — and above the rail and
+ * target-ring overlays (`::after`, z-index 5) on the rows and slots below it, which at 4 still drew their line
+ * across the menu (a round's ⋯ over the ring round a permalinked line inside it). */
 .geld-review__row:has(details[open]) {
   position: relative;
-  z-index: 4;
+  z-index: 6;
 }
 
 .geld-review__head-slot:empty {

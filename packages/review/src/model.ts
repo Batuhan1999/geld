@@ -57,7 +57,8 @@ export const STATUS_RANK: Readonly<Record<ReviewItemStatus, number>> = {
  * an old request for it). The Action reads the whole timeline and never
  * produces it.
  */
-export const BOT_VERDICTS = ['clean', 'findings', 'failed', 'running', 'loading'] as const;
+/** `unknown`: a run asked for on a pull request since merged or closed, which the bot never answered in a comment — GitHub no longer shows the checks of the time, so there is no word either way. */
+export const BOT_VERDICTS = ['clean', 'findings', 'failed', 'running', 'loading', 'unknown'] as const;
 export type BotVerdict = (typeof BOT_VERDICTS)[number];
 
 export const REVIEWER_STATES = ['approved', 'changes_requested', 'commented', 'pending'] as const;
@@ -139,6 +140,8 @@ export interface BotVerdictRecord {
   readonly sourceId?: string;
   /** For a `failed` verdict the bot explained: its own words for why it did not review ("Bugbot is disabled for this repository"). */
   readonly reason?: string;
+  /** The verdict was judged against the bot's check run's known start (`DerivedBotVerdict.runJudged`). */
+  readonly runJudged?: true;
 }
 
 export interface ReviewerRecord {
@@ -246,6 +249,7 @@ export const botVerdictSchema = z.object({
   checkName: z.string().min(1).optional(),
   sourceId: z.string().min(1).optional(),
   reason: z.string().min(1).optional(),
+  runJudged: z.literal(true).optional(),
 });
 
 export const reviewerSchema = z.object({
@@ -342,7 +346,8 @@ function botVerdictFrom(value: z.infer<typeof botVerdictSchema>): BotVerdictReco
   const graded = value.severity === undefined ? scored : { ...scored, severity: value.severity };
   const named = value.checkName === undefined ? graded : { ...graded, checkName: value.checkName };
   const sourced = value.sourceId === undefined ? named : { ...named, sourceId: value.sourceId };
-  return value.reason === undefined ? sourced : { ...sourced, reason: value.reason };
+  const reasoned = value.reason === undefined ? sourced : { ...sourced, reason: value.reason };
+  return value.runJudged === undefined ? reasoned : { ...reasoned, runJudged: true };
 }
 
 function metaFrom(value: z.infer<typeof geldPrMetaSchema>): GeldPrMeta {

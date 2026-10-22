@@ -72,7 +72,7 @@ query GeldPr($owner: String!, $name: String!, $number: Int!, $threadCursor: Stri
       }
       comments(first: 50, after: $commentCursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { databaseId author { login __typename } body createdAt }
+        nodes { databaseId author { login __typename } body createdAt lastEditedAt }
       }
       reviews(first: 50, after: $reviewCursor) {
         pageInfo { hasNextPage endCursor }
@@ -87,8 +87,8 @@ query GeldPr($owner: String!, $name: String!, $number: Int!, $threadCursor: Stri
                 pageInfo { hasNextPage endCursor }
                 nodes {
                   __typename
-                  ... on CheckRun { name status conclusion }
-                  ... on StatusContext { context state }
+                  ... on CheckRun { name status conclusion startedAt completedAt }
+                  ... on StatusContext { context state createdAt }
                 }
               }
             }
@@ -173,6 +173,8 @@ interface GqlComment {
   readonly author: GqlAuthor | null;
   readonly body: string;
   readonly createdAt: string;
+  /** Issue comments only (the query asks for it there); null when never edited. */
+  readonly lastEditedAt?: string | null;
 }
 
 interface GqlReview {
@@ -189,8 +191,11 @@ interface GqlCheckContext {
   readonly name?: string;
   readonly status?: string;
   readonly conclusion?: string | null;
+  readonly startedAt?: string | null;
+  readonly completedAt?: string | null;
   readonly context?: string;
   readonly state?: string;
+  readonly createdAt?: string | null;
 }
 
 interface GqlCheckContexts {
@@ -230,8 +235,8 @@ query GeldCheckContexts($owner: String!, $name: String!, $oid: GitObjectID!, $cu
             pageInfo { hasNextPage endCursor }
             nodes {
               __typename
-              ... on CheckRun { name status conclusion }
-              ... on StatusContext { context state }
+              ... on CheckRun { name status conclusion startedAt completedAt }
+              ... on StatusContext { context state createdAt }
             }
           }
         }
@@ -267,12 +272,22 @@ async function remainingCheckContexts(client: GithubClient, owner: string, repo:
 
 function checkRunOf(node: GqlCheckContext, sha: string): RawCheckRun | null {
   if (node.__typename === 'CheckRun' && node.name !== undefined && node.status !== undefined) {
-    return { name: node.name, status: node.status.toLowerCase(), conclusion: node.conclusion?.toLowerCase() ?? null, sha };
+    return {
+      name: node.name,
+      status: node.status.toLowerCase(),
+      conclusion: node.conclusion?.toLowerCase() ?? null,
+      sha,
+      ...(typeof node.startedAt === 'string' ? { startedAt: node.startedAt } : {}),
+      ...(typeof node.completedAt === 'string' ? { completedAt: node.completedAt } : {}),
+    };
   }
   if (node.__typename === 'StatusContext' && node.context !== undefined && node.state !== undefined) {
     const state = node.state.toLowerCase();
     const conclusion = state === 'success' ? 'success' : state === 'pending' ? null : 'failure';
-    return { name: node.context, status: state === 'pending' ? 'in_progress' : 'completed', conclusion, sha };
+    // A status is set in one moment: its creation is the run's start while pending and its finish once it is not.
+    const at = typeof node.createdAt === 'string' ? node.createdAt : undefined;
+    const when = at === undefined ? {} : state === 'pending' ? { startedAt: at } : { completedAt: at };
+    return { name: node.context, status: state === 'pending' ? 'in_progress' : 'completed', conclusion, sha, ...when };
   }
   return null;
 }
@@ -322,7 +337,13 @@ export async function loadPullRequest(client: GithubClient, owner: string, repo:
       });
     }
     for (const node of pr.comments.nodes) {
-      comments.push({ databaseId: node.databaseId, author: loginOf(node.author), body: node.body, createdAt: node.createdAt });
+      comments.push({
+        databaseId: node.databaseId,
+        author: loginOf(node.author),
+        body: node.body,
+        createdAt: node.createdAt,
+        ...(typeof node.lastEditedAt === 'string' ? { editedAt: node.lastEditedAt } : {}),
+      });
     }
     for (const node of pr.reviews.nodes) {
       reviews.push({

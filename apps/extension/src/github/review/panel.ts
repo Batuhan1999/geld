@@ -14,7 +14,7 @@ import { previewHostById, reportsHealth } from '@geld/review';
 import { botTitle, doneItemCount, isOpenStatus, resolveBotId } from '@geld/review';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from '../dom';
 import type { RevisionMarker } from './crawler';
-import { ICON_ALERT, ICON_CHECK_CIRCLE_FILL, ICON_FILE_DIFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_COMMENT, ICON_COMMENT_DISCUSSION, ICON_COPY, ICON_CROSS_REFERENCE, ICON_DOT_FILL, ICON_GIT_COMMIT, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_HISTORY, ICON_IN_PROGRESS, ICON_KEBAB_HORIZONTAL, ICON_LINK_EXTERNAL, ICON_LIST_FILTER, ICON_REPO_PUSH, ICON_REPORT, ICON_ROCKET, ICON_SKIP, ICON_SPARKLE_FILL, ICON_SYNC, ICON_X_CIRCLE_FILL } from '../ui/icons';
+import { ICON_ALERT, ICON_CHECK_CIRCLE_FILL, ICON_FILE_DIFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_COMMENT, ICON_COMMENT_DISCUSSION, ICON_COPY, ICON_CROSS_REFERENCE, ICON_DOT_FILL, ICON_GIT_COMMIT, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_HISTORY, ICON_IN_PROGRESS, ICON_KEBAB_HORIZONTAL, ICON_LINK_EXTERNAL, ICON_LIST_FILTER, ICON_PAPER_AIRPLANE, ICON_REPO_PUSH, ICON_REPORT, ICON_ROCKET, ICON_SKIP, ICON_SPARKLE_FILL, ICON_SYNC, ICON_X_CIRCLE_FILL } from '../ui/icons';
 import { authorLabels, botDetail, botHealth, checksHealth, checksSummary, checksTone, checksTotal, isCurrent, reviewsHealth, reviewsLabel, splitItems, statusBadge, toneOf, verdictLabel } from './panel-model';
 import type { CheckCounts, Health, InstalledBot, RequiredReviews, Tone } from './panel-model';
 import type { SuggestedFix } from '@geld/review';
@@ -24,6 +24,7 @@ import type { Closure, ClosureKind, EventHeadline } from './fold';
 import { headlineText } from './fold';
 import { reclaimOrphans, restoreAll } from './teleport';
 import { ATTR_REPORT, ATTR_WHO, rehostHoverCard } from './hovercard';
+import type { ReviewerCandidate } from './reviewers';
 import { shapeMark } from './mark-shape';
 import { inlineText } from './inline-text';
 
@@ -166,6 +167,26 @@ export interface ReviewThreadRef {
   readonly done: boolean;
 }
 
+/**
+ * One line under the Review bots row: a bot's latest word on the pull
+ * request — its newest run summary (a comment or a review body), with the
+ * threads that run opened. A bot that wrote no summary (threads only, or
+ * nothing yet) has a line with no comment to open; with threads it points at
+ * the first.
+ */
+export interface BotLine {
+  readonly bot: BotVerdictRecord;
+  /** The summary's anchor; null when the bot has posted no summary on the page. */
+  readonly anchor: string | null;
+  readonly author: string;
+  readonly avatarSrc: string | null;
+  /** The summary's first line; '' without one. */
+  readonly preview: string;
+  readonly time: string;
+  /** The threads of the run the summary reports on, each a row in its round. */
+  readonly threads: readonly ReviewThreadRef[];
+}
+
 /** A check row's avatar: GitHub rounds a user's or an OAuth App's, squares a GitHub App's or an organisation's. */
 export interface CheckAvatar {
   readonly src: string;
@@ -218,29 +239,81 @@ export interface SidebarVerdict {
  * the timeline only adds reviewers the sidebar does not list.
  */
 export function reviewerGroups(entries: readonly ReviewEntry[], sidebar: readonly SidebarVerdict[] = []): readonly ReviewerGroup[] {
-  const latest = new Map<string, { state: ReviewerGroupState; avatar: Avatar }>();
-  const settled = new Set<string>();
+  const statuses = reviewerStatuses(entries, sidebar);
+  const order: readonly Exclude<ReviewerGroupState, 'awaiting'>[] = ['approved', 'changes_requested', 'commented'];
+  const groups: ReviewerGroup[] = order.flatMap((state) => {
+    const reviewers = statuses.filter((status) => status.verdict === state).map((status) => status.avatar);
+    return reviewers.length === 0 ? [] : [{ state, reviewers }];
+  });
+  const awaited = statuses.filter((status) => status.awaiting).map((status) => status.avatar);
+  if (awaited.length > 0) groups.push({ state: 'awaiting', reviewers: awaited });
+  return groups;
+}
+
+/** One person's standing with the pull request: the verdict they gave, if any, and whether GitHub awaits them. */
+export interface ReviewerStatus {
+  readonly login: string;
+  readonly avatar: Avatar;
+  readonly verdict: Exclude<ReviewerGroupState, 'awaiting'> | null;
+  readonly awaiting: boolean;
+  /** The timeline's anchor for the verdict, when the page has it (a sidebar-only verdict has none yet). */
+  readonly anchor: string | null;
+}
+
+/**
+ * Every person once, in the order they first appear (the sidebar's first):
+ * the verdict they gave and whether they are awaited. A pending request is a
+ * fact beside any verdict, not instead of it — a reviewer who approved and
+ * was asked again still counts as approving (GitHub's merge box: "1
+ * approval, 1 pending review") while the sidebar names only the request, so
+ * the timeline supplies their verdict. The sidebar's stated verdict is final;
+ * a comment-only review sets no verdict aside; GitHub's dismissal leaves none.
+ */
+export function reviewerStatuses(entries: readonly ReviewEntry[], sidebar: readonly SidebarVerdict[] = []): readonly ReviewerStatus[] {
+  const byLogin = new Map<string, { login: string; avatar: Avatar; verdict: Exclude<ReviewerGroupState, 'awaiting'> | null; awaiting: boolean; anchor: string | null; settled: boolean }>();
+  const slot = (login: string, avatarSrc: string | null): NonNullable<ReturnType<typeof byLogin.get>> => {
+    const key = login.toLowerCase();
+    let record = byLogin.get(key);
+    if (record === undefined) {
+      record = { login, avatar: { src: avatarSrc ?? '', bot: false, login }, verdict: null, awaiting: false, anchor: null, settled: false };
+      byLogin.set(key, record);
+    } else if (record.avatar.src === '' && avatarSrc !== null && avatarSrc !== '') {
+      record.avatar = { ...record.avatar, src: avatarSrc };
+    }
+    return record;
+  };
   for (const reviewer of sidebar) {
     if (reviewer.bot) continue;
-    const key = reviewer.login.toLowerCase();
-    settled.add(key);
-    if (reviewer.state !== 'dismissed') latest.set(key, { state: reviewer.state, avatar: { src: reviewer.avatarSrc ?? '', bot: false, login: reviewer.login } });
+    const record = slot(reviewer.login, reviewer.avatarSrc);
+    if (reviewer.state === 'awaiting') {
+      record.awaiting = true;
+      continue;
+    }
+    record.settled = true;
+    if (reviewer.state !== 'dismissed') record.verdict = reviewer.state;
   }
   for (const entry of entries) {
     if (entry.state === 'thread' || entry.state === 'comment' || entry.state === 'dismissed') continue;
-    const key = entry.author.toLowerCase();
-    if (settled.has(key)) continue;
-    const current = latest.get(key);
-    // Awaited again (re-requested) sets any earlier verdict aside; a comment-only review sets nothing aside.
-    if (current?.state === 'awaiting') continue;
-    if (entry.state === 'commented' && current !== undefined && current.state !== 'commented') continue;
-    latest.set(key, { state: entry.state, avatar: { src: entry.avatarSrc ?? '', bot: false, login: entry.author } });
+    const record = slot(entry.author, entry.avatarSrc);
+    if (entry.state === 'awaiting') {
+      record.awaiting = true;
+      continue;
+    }
+    if (record.settled) {
+      // The sidebar said the verdict; the timeline still names where it is.
+      if (record.verdict === entry.state && record.anchor === null && !isProvisionalAnchor(entry.anchor)) record.anchor = entry.anchor;
+      continue;
+    }
+    if (entry.state === 'commented' && record.verdict !== null && record.verdict !== 'commented') continue;
+    record.verdict = entry.state;
+    record.anchor = isProvisionalAnchor(entry.anchor) ? null : entry.anchor;
   }
-  const order: readonly ReviewerGroupState[] = ['approved', 'changes_requested', 'commented', 'awaiting'];
-  return order.flatMap((state) => {
-    const reviewers = [...latest.values()].filter((entry) => entry.state === state).map((entry) => entry.avatar);
-    return reviewers.length === 0 ? [] : [{ state, reviewers }];
-  });
+  return [...byLogin.values()].map(({ login, avatar, verdict, awaiting, anchor }) => ({ login, avatar, verdict, awaiting, anchor }));
+}
+
+/** A line made from the sidebar alone (overview.ts `sidebarEntry`) carries no timeline anchor. */
+function isProvisionalAnchor(anchor: string): boolean {
+  return anchor.startsWith('sidebar:') || anchor.startsWith('awaiting:');
 }
 
 export interface PanelModel {
@@ -259,6 +332,8 @@ export interface PanelModel {
   readonly folds: readonly FoldRow[];
   readonly batches: readonly Batch[];
   readonly requestable: readonly InstalledBot[];
+  /** The Review bots row's list: each bot's latest run summary, in the chips' order. */
+  readonly botLines: readonly BotLine[];
   /** Bot run summaries (verdict comments) an open item can link to, by bot id. */
   readonly summaryAnchorFor: (botId: string) => string | null;
   /** What this bot's chip opens: its own source, or — while it runs (its source is then the shared trigger line) — its latest real summary, else nothing. */
@@ -294,6 +369,12 @@ export interface PanelModel {
   readonly comments: readonly ReviewEntry[];
   /** The Reviews row's heading: each reviewer once, by latest verdict, the sidebar's word first (`reviewerGroups`). */
   readonly reviewerGroups: readonly ReviewerGroup[];
+  /** Each person's standing, for the Reviews row's request menu (`reviewerStatuses`). */
+  readonly reviewerStatuses: readonly ReviewerStatus[];
+  /** Whether the page lets the reader ask for reviews (GitHub's own form is there). */
+  readonly canRequestReviewers: boolean;
+  /** Whether GitHub's merge box offers its review actions here (dismiss, re-request): an open pull request the reader can act on. */
+  readonly canDismissReviews: boolean;
   /**
    * The timeline is still being read (fragments on their way, a "Load more"
    * still to press): the heading is complete — it comes from the sidebar —
@@ -342,6 +423,14 @@ export interface PanelHandlers {
   readonly onRequest: (botIds: readonly string[]) => void;
   /** The Request a review menu closed: the panel may have held back a rebuild while it was open. */
   readonly onRequestMenuClosed: () => void;
+  /** Everyone who can be asked to review, as GitHub's own menu lists them (fetched when the people menu first needs it). */
+  readonly loadReviewerCandidates: () => Promise<readonly ReviewerCandidate[] | null>;
+  /** Ask these people (user ids) and teams (team ids) to review; someone who reviewed is asked again. Resolves false when GitHub refused. */
+  readonly onRequestReviewers: (userIds: readonly number[], teamIds: readonly number[]) => Promise<boolean>;
+  /** Open GitHub's dismiss dialog for `login`'s review. */
+  readonly onDismissReview: (login: string) => void;
+  /** Ask `login` to review again. */
+  readonly onReRequestReview: (login: string) => void;
   /** Show the comment at `anchor` where the reader is: inside compact view when it is folded there, else in the timeline. */
   readonly onOpenAnchor: (anchor: string) => void;
   /** Leave compact view for the full timeline and jump to `anchor` there. */
@@ -383,6 +472,8 @@ export const REVIEWS_KEY = 'reviews';
 export const PREVIEWS_KEY = 'previews';
 /** Row key for the Reports row; its slot lists the reporter bots' latest reports, each opening in place. */
 export const REPORTS_KEY = 'reports';
+/** Row key for the Review bots row; its slot lists each bot's latest run summary, each opening in place. */
+export const BOTS_KEY = 'bots';
 /** The Reports row's label, long and short. */
 export const REPORTS_LABEL: readonly [string, string] = ['Reports', 'Reports'];
 const NUDGE_CLASS = 'geld-review-nudge';
@@ -1175,7 +1266,7 @@ function botChip(bot: BotVerdictRecord, model: PanelModel, handlers: PanelHandle
 interface BotRunState {
   readonly health: Health | null;
   readonly word: string;
-  /** Ticked when the menu opens: a failed run, or one on an earlier commit. */
+  /** Ticked when the menu opens: a failed run, one on an earlier commit, or one that had findings (resolved since or not). */
   readonly preselect: boolean;
 }
 
@@ -1183,13 +1274,17 @@ function botRunState(bot: InstalledBot, model: PanelModel): BotRunState {
   const record = model.meta.bots.find((entry) => entry.id === bot.id);
   if (record === undefined) return { health: null, word: 'Not run', preselect: false };
   const health = botHealth(record);
-  if (health === 'pending') return { health, word: record.verdict === 'loading' ? 'Loading' : 'Running', preselect: false };
+  if (health === 'pending') return { health, word: record.verdict === 'loading' ? 'Loading' : record.verdict === 'unknown' ? 'No word' : 'Running', preselect: false };
   if (!isCurrent(record, model.meta.headSha)) return { health, word: 'Earlier commit', preselect: true };
   // A refused run ("disabled for this repository") is Skipped, and not ticked: asking again changes nothing until
   // the bot's setup does.
   if (record.verdict === 'failed' && record.reason !== undefined) return { health, word: 'Skipped', preselect: false };
-  const word = health === 'bad' ? 'Failed' : health === 'warn' ? 'Findings' : 'Passed';
-  return { health, word, preselect: health === 'bad' };
+  // A run that had findings is worth running again whether or not its threads have been resolved since: the chip
+  // shows the green check once they are, but the bot has not looked at the fixes. The line keeps saying "Findings"
+  // beside that check so the tick explains itself.
+  const findings = record.verdict === 'findings';
+  const word = health === 'bad' ? 'Failed' : findings || health === 'warn' ? 'Findings' : 'Passed';
+  return { health, word, preselect: health === 'bad' || findings };
 }
 
 /** How Geld knows the bot is here, for the line's tooltip. */
@@ -1210,7 +1305,8 @@ function presenceWords(bot: InstalledBot): string {
  * Request a review: a checkbox per bot, with what its last run here said
  * (failed, findings, passed, running, on an earlier commit, not run), so
  * the reader can run only the ones that need it. Failed and stale runs
- * start ticked. Bots with a sign of being here (active on the page,
+ * start ticked, and so does a run that had findings — resolved since or
+ * not, the bot has not seen the fixes. Bots with a sign of being here (active on the page,
  * declared by the repository, configured in it) are listed first; the rest
  * of the registry waits behind "Other bots", since a trigger for a bot that
  * is not installed is a public comment with a handle in it. Run posts one
@@ -1220,10 +1316,13 @@ function requestMenu(model: PanelModel, handlers: PanelHandlers): HTMLElement | 
   if (model.requestable.length === 0) return null;
   installMenuDismissal();
   const details = createElement('details', { class: `${PANEL_CLASS}__menu ${PANEL_CLASS}__request` });
+  // The ⋯ every row wears; while a bot runs it turns into the spinning sync glyph, which is the news.
   const summary = createElement(
     'summary',
     { class: `${PANEL_CLASS}__icon${model.running ? ` ${PANEL_CLASS}__icon--spin` : ''}`, 'aria-label': model.running ? 'A review is running · Request a review' : 'Request a review', title: model.running ? 'A review is running' : 'Request a review', role: 'button', [ATTR_FOCUS]: 'rerun' },
-    [icon(ICON_SYNC)],
+    // Idle, the control is an action — it posts the trigger comments — so it wears the send glyph, not the ⋯ of a
+    // menu that only offers choices; running, the spinning sync says a review is under way.
+    [icon(model.running ? ICON_SYNC : ICON_PAPER_AIRPLANE)],
   );
   summary.addEventListener('click', (event) => event.stopPropagation());
   // Closed by Run, Cancel, Escape or a click outside: whatever changed meanwhile renders now.
@@ -1293,6 +1392,263 @@ function requestMenu(model: PanelModel, handlers: PanelHandlers): HTMLElement | 
   return details;
 }
 
+/** How a person's standing reads in the people menu: glyph(s) and a word, "approved · awaiting" when both hold. */
+function statusWords(status: ReviewerStatus): { readonly glyphs: readonly string[]; readonly words: string; readonly health: Health | null } {
+  const glyphs: string[] = [];
+  const parts: string[] = [];
+  if (status.verdict !== null) {
+    glyphs.push(ENTRY_GLYPH[status.verdict]);
+    parts.push(REVIEWER_GROUP_WORD[status.verdict]);
+  }
+  if (status.awaiting) {
+    glyphs.push(ICON_DOT_FILL);
+    parts.push('awaiting');
+  }
+  const health: Health | null = status.verdict === 'approved' ? 'good' : status.verdict === 'changes_requested' ? 'bad' : status.awaiting ? 'pending' : null;
+  return { glyphs, words: parts.join(' · '), health };
+}
+
+/**
+ * Request a review, for people: the Reviews row's ⋯. Everyone with a
+ * standing — a verdict given, a request pending — is listed first with it
+ * (ticking someone who reviewed asks them again, which is how GitHub itself
+ * re-requests); "Other reviewers" opens the rest, as GitHub's own menu lists
+ * them, behind a search box that filters as you type and takes the arrow
+ * keys, Enter to tick and Escape to close. Request posts GitHub's own form
+ * once with everyone ticked; Cancel, Escape or a click outside closes.
+ */
+function reviewersMenu(model: PanelModel, handlers: PanelHandlers): HTMLElement | null {
+  if (!model.canRequestReviewers) return null;
+  installMenuDismissal();
+  const details = createElement('details', { class: `${PANEL_CLASS}__menu ${PANEL_CLASS}__request ${PANEL_CLASS}__people` });
+  const summary = createElement('summary', { class: `${PANEL_CLASS}__icon`, 'aria-label': 'Request a review', title: 'Request a review', role: 'button', [ATTR_FOCUS]: 'reviewers' }, [icon(ICON_KEBAB_HORIZONTAL)]);
+  summary.addEventListener('click', (event) => event.stopPropagation());
+  details.addEventListener('toggle', () => {
+    if (!details.open) handlers.onRequestMenuClosed();
+  });
+  const list = createElement('div', { class: `${PANEL_CLASS}__menu-list ${PANEL_CLASS}__request-list` });
+  list.append(createElement('div', { class: `${PANEL_CLASS}__menu-title` }, ['Request a review']));
+
+  /** Ticked reviewers by kind and login (`u:` a person, `t:` a team — a team's slug may read like a login); candidates carry the ids the form wants. */
+  const ticked = new Map<string, HTMLInputElement>();
+  const keyOf = (login: string, team: boolean): string => `${team ? 't' : 'u'}:${login.toLowerCase()}`;
+  const picked = (): string[] => [...ticked.entries()].filter(([, input]) => input.checked).map(([key]) => key);
+  const request = createElement('button', { type: 'button', class: `btn btn-sm btn-primary ${PANEL_CLASS}__request-run` }, ['Request']);
+  const problem = createElement('span', { class: `${PANEL_CLASS}__menu-hint ${PANEL_CLASS}__request-problem`, role: 'alert' });
+  let busy = false;
+  const syncRequest = (): void => {
+    if (busy) return;
+    const count = picked().length;
+    request.textContent = count === 0 ? 'Request' : count === 1 ? 'Request review' : `Request ${count} reviews`;
+    request.toggleAttribute('disabled', count === 0);
+  };
+  const personLine = (login: string, team: boolean, avatarSrc: string, name: string, status: ReviewerStatus | null, title: string): HTMLElement => {
+    const key = keyOf(login, team);
+    const input = ticked.get(key) ?? createElement('input', { type: 'checkbox', class: `${PANEL_CLASS}__request-check`, 'aria-label': team ? `${login} (team)` : login });
+    ticked.set(key, input);
+    input.addEventListener('change', syncRequest);
+    const picture = avatarSrc !== '' ? createElement('img', { class: `${PANEL_CLASS}__bot-icon ${PANEL_CLASS}__people-avatar`, src: avatarSrc, alt: '', width: '16', height: '16' }) : createElement('span', { class: `${PANEL_CLASS}__bot-icon ${PANEL_CLASS}__bot-icon--blank`, 'aria-hidden': 'true' });
+    const children: Node[] = [input, picture, createElement('span', { class: `${PANEL_CLASS}__menu-text` }, [login, ...(name === '' || name === login ? [] : [createElement('span', { class: `${PANEL_CLASS}__people-name` }, [name])])])];
+    if (status !== null) {
+      const { glyphs, words, health } = statusWords(status);
+      if (glyphs.length > 0) {
+        children.push(
+          createElement('span', { class: `${PANEL_CLASS}__request-state ${PANEL_CLASS}__people-state`, ...(health === null ? {} : { 'data-health': health }), title: words }, [
+            ...glyphs.map((glyph) => createElement('span', { class: `${PANEL_CLASS}__people-glyph`, 'aria-hidden': 'true' }, [icon(glyph)])),
+            createElement('span', { class: `${PANEL_CLASS}__people-words` }, [words]),
+          ]),
+        );
+      }
+    }
+    const label = createElement('label', { class: `${PANEL_CLASS}__request-item ${PANEL_CLASS}__people-item`, title, 'data-login': login }, children);
+    label.addEventListener('click', (event) => event.stopPropagation());
+    return label;
+  };
+
+  const standing = model.reviewerStatuses;
+  for (const status of standing) {
+    const { words } = statusWords(status);
+    list.append(personLine(status.login, false, status.avatar.src, '', status, status.verdict !== null ? `Asks ${status.login} to review again · ${words}` : `${status.login} · ${words}`));
+  }
+  if (standing.length === 0) list.append(createElement('div', { class: `${PANEL_CLASS}__menu-hint ${PANEL_CLASS}__people-hint` }, ['Nobody has been asked yet.']));
+
+  // Other reviewers: the search box and the list, filled from GitHub's candidates when first opened.
+  const more = createElement('details', { class: `${PANEL_CLASS}__request-more ${PANEL_CLASS}__people-more` });
+  const moreSummary = createElement('summary', { class: `${PANEL_CLASS}__request-more-summary` }, [icon(ICON_CHEVRON_RIGHT), 'Other reviewers']);
+  moreSummary.addEventListener('click', (event) => event.stopPropagation());
+  const listboxId = `geld-people-${Math.random().toString(36).slice(2, 8)}`;
+  const search = createElement('input', { type: 'text', class: `${PANEL_CLASS}__people-search`, placeholder: 'Type or choose a user', 'aria-label': 'Type or choose a user', autocomplete: 'off', spellcheck: 'false', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': listboxId, 'aria-autocomplete': 'list' });
+  const options = createElement('div', { class: `${PANEL_CLASS}__people-options`, id: listboxId, role: 'listbox', 'aria-label': 'Other reviewers' });
+  const hint = createElement('div', { class: `${PANEL_CLASS}__menu-hint ${PANEL_CLASS}__people-hint`, 'aria-live': 'polite' });
+  more.append(moreSummary, createElement('div', { class: `${PANEL_CLASS}__people-filter` }, [search]), hint, options);
+  list.append(more);
+
+  let candidates: readonly ReviewerCandidate[] | null = null;
+  let loading = false;
+  /** GitHub's id for each ticked key, once its candidates have been read. */
+  const ids = new Map<string, number>();
+  const rows: HTMLElement[] = [];
+  let active = -1;
+  const visibleRows = (): HTMLElement[] => rows.filter((row) => !row.hidden);
+  const setActive = (index: number): void => {
+    const shown = visibleRows();
+    active = shown.length === 0 ? -1 : Math.max(0, Math.min(index, shown.length - 1));
+    for (const [position, row] of shown.entries()) {
+      row.toggleAttribute('data-active', position === active);
+      row.setAttribute('aria-selected', String(position === active));
+    }
+    const current = shown[active];
+    if (current !== undefined) {
+      search.setAttribute('aria-activedescendant', current.id);
+      current.scrollIntoView({ block: 'nearest' });
+    } else search.removeAttribute('aria-activedescendant');
+  };
+  const filter = (): void => {
+    const needle = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of rows) {
+      const haystack = row.getAttribute('data-search') ?? '';
+      row.hidden = needle !== '' && !haystack.includes(needle);
+      if (!row.hidden) shown += 1;
+    }
+    if (candidates !== null) hint.textContent = shown === 0 ? 'Nothing to show' : '';
+    setActive(needle === '' ? -1 : 0);
+  };
+  const fill = (found: readonly ReviewerCandidate[]): void => {
+    const standingKeys = new Set(standing.map((entry) => keyOf(entry.login, false)));
+    for (const candidate of found) {
+      const key = keyOf(candidate.login, candidate.team);
+      ids.set(key, candidate.id);
+      if (standingKeys.has(key)) {
+        // Already listed above with their standing; the form still needs their id, which is now known.
+        continue;
+      }
+      const row = personLine(candidate.login, candidate.team, candidate.avatar, candidate.name, null, candidate.team ? `${candidate.login} · team` : candidate.suggested ? `${candidate.login} · suggested` : candidate.login);
+      row.id = `${listboxId}-${rows.length}`;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+      row.setAttribute('data-search', `${candidate.login} ${candidate.name}`.toLowerCase());
+      if (candidate.suggested) row.setAttribute('data-suggested', '');
+      rows.push(row);
+      options.append(row);
+    }
+    hint.textContent = rows.length === 0 ? 'Nobody else to ask.' : '';
+    filter();
+  };
+  const load = (): void => {
+    if (candidates !== null || loading) return;
+    loading = true;
+    hint.textContent = 'Loading…';
+    void handlers.loadReviewerCandidates().then((found) => {
+      loading = false;
+      // A failed lookup is not an empty one: `candidates` stays null so opening the section again asks again.
+      candidates = found;
+      if (found === null) {
+        hint.textContent = 'GitHub did not list anyone. Close and reopen to try again.';
+        return;
+      }
+      fill(found);
+    });
+  };
+  more.addEventListener('toggle', () => {
+    if (!more.open) return;
+    load();
+    window.requestAnimationFrame(() => search.focus({ preventScroll: true }));
+  });
+  search.addEventListener('input', filter);
+  search.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive(active + (event.key === 'ArrowDown' ? 1 : -1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const current = visibleRows()[active];
+      const input = current?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      if (input !== undefined && input !== null) {
+        input.checked = !input.checked;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else if (event.key === 'Escape') {
+      if (search.value !== '') {
+        event.preventDefault();
+        event.stopPropagation();
+        search.value = '';
+        filter();
+      }
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      setActive(event.key === 'Home' ? 0 : rows.length);
+    }
+  });
+  // Clicks in the box stay in the box: the row toggle above must not see them.
+  search.addEventListener('click', (event) => event.stopPropagation());
+
+  list.append(createElement('div', { class: `${PANEL_CLASS}__request-sep`, role: 'separator' }));
+  const cancel = createElement('button', { type: 'button', class: `btn btn-sm ${PANEL_CLASS}__request-cancel` }, ['Cancel']);
+  // Request keeps the menu open until GitHub has answered: a refusal is said here, with the ticks kept for another
+  // try, and Cancel (or the menu closing any other way) while the ids are still loading means nothing is posted.
+  let attempt = 0;
+  request.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const chosen = picked();
+    if (chosen.length === 0 || busy) return;
+    attempt += 1;
+    const mine = attempt;
+    const still = (): boolean => details.open && details.isConnected && attempt === mine;
+    busy = true;
+    problem.textContent = '';
+    request.toggleAttribute('disabled', true);
+    request.textContent = 'Requesting…';
+    const settle = (message: string | null): void => {
+      busy = false;
+      if (message === null) {
+        details.removeAttribute('open');
+        return;
+      }
+      problem.textContent = message;
+      syncRequest();
+    };
+    void (async () => {
+      // Someone listed by their standing alone has no id yet: GitHub's list supplies it.
+      if (!chosen.every((key) => ids.has(key))) {
+        const found = await handlers.loadReviewerCandidates();
+        if (!still()) return;
+        for (const candidate of found ?? []) ids.set(keyOf(candidate.login, candidate.team), candidate.id);
+      }
+      const users: number[] = [];
+      const teams: number[] = [];
+      for (const key of chosen) {
+        const id = ids.get(key);
+        if (id !== undefined) (key.startsWith('t:') ? teams : users).push(id);
+      }
+      if (users.length + teams.length === 0) {
+        settle('GitHub does not list them among the reviewers that can be asked here.');
+        return;
+      }
+      const posted = await handlers.onRequestReviewers(users, teams).catch(() => false);
+      if (!still()) return;
+      settle(posted ? null : 'GitHub did not take the request. Try again.');
+    })();
+  });
+  cancel.addEventListener('click', (event) => {
+    event.stopPropagation();
+    details.removeAttribute('open');
+  });
+  // Closing the menu by any means ends a request still waiting on ids; a menu rebuilt by the panel is a new one.
+  details.addEventListener('toggle', () => {
+    if (!details.open) {
+      attempt += 1;
+      busy = false;
+      problem.textContent = '';
+      syncRequest();
+    }
+  });
+  list.append(createElement('div', { class: `${PANEL_CLASS}__request-footer` }, [request, cancel, problem]));
+  syncRequest();
+  details.append(summary, list);
+  return details;
+}
+
 /** GitHub's own status ring: one arc per state, in its colours, drawn around a 16px circle. */
 function checksRing(counts: CheckCounts): SVGElement {
   const total = checksTotal(counts);
@@ -1350,15 +1706,6 @@ function alarmTone(health: Health): Tone | null {
   return toneOf(health) === 'bad' ? 'bad' : null;
 }
 
-function statusRow(label: [string, string], lead: Node, content: Node[], right: Node[], extra: Readonly<Record<string, string>> = {}, fit = false): HTMLElement {
-  return createElement('li', { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--status`, ...extra }, [
-    createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--muted`, 'aria-hidden': 'true' }, [lead]),
-    rowLabel(label[0], label[1]),
-    createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(fit ? { [ATTR_FIT]: '' } : {}) }, content),
-    createElement('span', { class: `${PANEL_CLASS}__right` }, right),
-  ]);
-}
-
 /**
  * The status rows, in the order a reader triages a pull request: who has
  * reviewed (people), what the review bots said, what the reporters found,
@@ -1366,7 +1713,10 @@ function statusRow(label: [string, string], lead: Node, content: Node[], right: 
  */
 function statusRows(model: PanelModel, handlers: PanelHandlers): HTMLElement | null {
   const rows = createElement('ul', { class: `${PANEL_CLASS}__rows ${PANEL_CLASS}__rows--status`, role: 'list' });
-  if (model.reviews !== null || model.comments.length > 0 || model.reviewerGroups.length > 0 || model.ingesting) {
+  // The row stands wherever there is something to say about reviews — or someone to ask: on a pull request with no
+  // review, no pending reviewer and no required count, GitHub still offers its reviewer form, and the Request a
+  // review menu lives on this row, so without it the first reviewer could not be asked from Geld.
+  if (model.reviews !== null || model.comments.length > 0 || model.reviewerGroups.length > 0 || model.ingesting || model.canRequestReviewers) {
     const health: Health = model.reviews === null ? 'pending' : reviewsHealth(model.reviews);
     const content: Node[] = [];
     // The words carry only what the reviewer groups cannot: how many approvals the repository asks for. Without
@@ -1383,8 +1733,15 @@ function statusRows(model: PanelModel, handlers: PanelHandlers): HTMLElement | n
     }
     // Every reviewer, grouped by their latest verdict: the state's glyph, their avatars, how many (the words go on
     // narrow screens; the glyph says it).
+    const verdictOf = new Map(model.reviewerGroups.filter((group) => group.state !== 'awaiting').flatMap((group) => group.reviewers.map((reviewer) => [reviewer.login.toLowerCase(), REVIEWER_GROUP_WORD[group.state]] as const)));
     for (const group of model.reviewerGroups) {
-      const names = group.reviewers.map((reviewer) => reviewer.login).join(', ');
+      // Someone awaited who already gave a verdict was asked again; their verdict still stands in its own group.
+      const names = group.reviewers
+        .map((reviewer) => {
+          const verdict = group.state === 'awaiting' ? verdictOf.get(reviewer.login.toLowerCase()) : undefined;
+          return verdict === undefined ? reviewer.login : `${reviewer.login} (asked again; ${verdict})`;
+        })
+        .join(', ');
       const label = `${group.reviewers.length} ${REVIEWER_GROUP_WORD[group.state]}`;
       content.push(
         createElement('span', { class: `${PANEL_CLASS}__reviewers`, 'data-state': group.state, title: `${REVIEWER_GROUP_TITLE[group.state]}: ${names}`, role: 'img', 'aria-label': `${label}: ${names}` }, [
@@ -1407,6 +1764,8 @@ function statusRows(model: PanelModel, handlers: PanelHandlers): HTMLElement | n
     mainClickToggles(main, () => handlers.onToggle(REVIEWS_KEY));
     const right: Node[] = [];
     if (model.reviews !== null) right.push(healthGlyph(health, reviewsLabel(model.reviews)));
+    const people = reviewersMenu(model, handlers);
+    if (people !== null) right.push(people);
     right.push(chevron(open, () => handlers.onToggle(REVIEWS_KEY)));
     const row = createElement('li', { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--status`, 'data-health': health, ...toneAttr(alarmTone(health)) }, [
       createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--muted`, 'aria-hidden': 'true' }, [icon(ICON_COMMENT_DISCUSSION)]),
@@ -1421,18 +1780,31 @@ function statusRows(model: PanelModel, handlers: PanelHandlers): HTMLElement | n
   }
   if (model.meta.bots.length > 0 || model.requestable.length > 0) {
     const worst: Health = model.meta.bots.map(botHealth).reduce<Health>((acc, health) => (acc === 'bad' || health === 'bad' ? 'bad' : acc === 'warn' || health === 'warn' ? 'warn' : acc === 'pending' || health === 'pending' ? 'pending' : 'good'), 'good');
+    const health: Health = model.meta.bots.length === 0 ? 'pending' : worst;
     const chips = model.meta.bots.map((bot) => botChip(bot, model, handlers));
     const menu = requestMenu(model, handlers);
-    rows.append(
-      statusRow(
-        ['Review bots', 'Bots'],
-        icon(HEALTH_ICON[model.meta.bots.length === 0 ? 'pending' : worst]),
-        chips.length === 0 ? [createElement('span', { class: `${PANEL_CLASS}__status-text` }, [model.ingesting ? 'Reading reviews…' : 'No reviews yet']), ...(model.ingesting ? [ingestingMark('Still reading the timeline: bot reviews are on their way')] : [])] : chips,
-        menu === null ? [] : [menu],
-        { 'data-health': model.meta.bots.length === 0 ? 'pending' : worst, ...toneAttr(alarmTone(model.meta.bots.length === 0 ? 'pending' : worst)) },
-        chips.length > 0,
-      ),
-    );
+    const content: Node[] = chips.length === 0 ? [createElement('span', { class: `${PANEL_CLASS}__status-text` }, [model.ingesting ? 'Reading reviews…' : 'No reviews yet']), ...(model.ingesting ? [ingestingMark('Still reading the timeline: bot reviews are on their way')] : [])] : chips;
+    // The row opens, as Reviews and Reports do, to a line per bot — its latest run summary, which opens in place
+    // with the run's threads linked under it. With no bot line to show there is nothing to open.
+    const opens = model.botLines.length > 0;
+    const open = opens && model.openKey === BOTS_KEY;
+    const toggle = (): void => handlers.onToggle(BOTS_KEY);
+    const main = opens
+      ? createElement('button', { type: 'button', class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--status`, 'aria-expanded': String(open), [ATTR_FOCUS]: `main:${BOTS_KEY}`, 'aria-label': plural(model.botLines.length, 'review bot') }, [createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(chips.length > 0 ? { [ATTR_FIT]: '' } : {}) }, content)])
+      : createElement('span', { class: `${PANEL_CLASS}__status-content`, ...(chips.length > 0 ? { [ATTR_FIT]: '' } : {}) }, content);
+    if (opens) mainClickToggles(main, toggle);
+    const right: Node[] = menu === null ? [] : [menu];
+    if (opens) right.push(chevron(open, toggle));
+    const row = createElement('li', { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--status`, 'data-health': health, ...toneAttr(alarmTone(health)) }, [
+      createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--muted`, 'aria-hidden': 'true' }, [icon(HEALTH_ICON[health])]),
+      rowLabel('Review bots', 'Bots'),
+      main,
+      createElement('span', { class: `${PANEL_CLASS}__right` }, right),
+    ]);
+    if (open) row.setAttribute('data-open', '');
+    if (opens) rowClickToggles(row, toggle);
+    rows.append(row);
+    if (open) rows.append(slotRow(BOTS_KEY, null, 'list'));
   }
   if (model.reports.latest.length > 0) rows.append(...reportsRow(model, handlers));
   if (model.checks !== null) {
@@ -1714,6 +2086,85 @@ function reportAvatar(entry: Report, model: PanelModel): CheckAvatar | null {
 }
 
 /**
+ * One bot as a line under the Review bots row: the verdict's light, the
+ * bot's mark, its name and detail ("4/5 · 1 issue"), the summary's first
+ * line and how many threads the run opened, the time, the comment's own ⋯
+ * and a chevron; open (`openSubKey` is its anchor) the summary stands under
+ * it as a one-bubble chat with the run's threads linked at its foot. A bot
+ * without a summary but with threads points at its first thread, as a
+ * wordless review does; one with neither is a line with nothing to open.
+ */
+function botLine(line: BotLine, model: PanelModel, handlers: PanelHandlers, reserveChevron: boolean): { readonly row: HTMLElement; readonly open: boolean } {
+  const { bot } = line;
+  const health = botHealth(bot);
+  const current = isCurrent(bot, model.meta.headSha);
+  const label = `${verdictLabel(bot)}${current ? '' : ' (earlier commit)'}`;
+  const lead = createElement('span', { class: `${PANEL_CLASS}__status ${PANEL_CLASS}__status--verdict`, 'data-health': health, role: 'img', 'aria-label': label, title: label }, [icon(bot.verdict === 'failed' ? ICON_ALERT : HEALTH_ICON[health])]);
+  const iconSrc = model.botIconFor(bot.id) ?? line.avatarSrc;
+  const picture = avatarStack(iconSrc === null ? [] : [{ src: iconSrc, bot: true, login: bot.login }], botTitle(bot.id, bot.login), true);
+  const opens = line.anchor !== null;
+  const firstThread = line.threads[0]?.anchor ?? null;
+  const goes = !opens && firstThread !== null;
+  const open = opens && model.openSubKey === line.anchor;
+  const act = (): void => {
+    if (opens && line.anchor !== null) handlers.onToggleSub(line.anchor);
+    else if (firstThread !== null) handlers.onOpenAnchor(firstThread);
+  };
+  const mainChildren: Node[] = [
+    createElement('span', { class: `${PANEL_CLASS}__name` }, [botTitle(bot.id, bot.login)]),
+    createElement('span', { class: `${PANEL_CLASS}__bot-detail ${PANEL_CLASS}__bot-line-detail` }, [botDetail(bot)]),
+  ];
+  if (line.preview !== '') mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(line.preview)));
+  if (line.threads.length > 0) mainChildren.push(createElement('span', { class: `${PANEL_CLASS}__pill` }, [plural(line.threads.length, 'thread')]));
+  const focusKey = goes ? `main:ptr:bot:${bot.id}` : `main:sub:${line.anchor ?? `bot:${bot.id}`}`;
+  const main =
+    opens || goes
+      ? createElement('button', { type: 'button', class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--entry`, ...(opens ? { 'aria-expanded': String(open) } : {}), [ATTR_FOCUS]: focusKey }, mainChildren)
+      : createElement('span', { class: `${PANEL_CLASS}__main ${PANEL_CLASS}__main--entry ${PANEL_CLASS}__main--static`, [ATTR_FOCUS]: focusKey }, mainChildren);
+  if (opens || goes) mainClickToggles(main, act);
+  const right = createElement('span', { class: `${PANEL_CLASS}__right` });
+  if (line.time !== '' && line.anchor !== null) right.append(createElement('span', { class: `${PANEL_CLASS}__time`, [ATTR_TIME_FOR]: line.anchor }, [line.time]));
+  const spacer = (): HTMLElement => createElement('span', { class: `${PANEL_CLASS}__spacer`, 'aria-hidden': 'true' });
+  if (opens && line.anchor !== null) right.append(controlSlot(line.anchor, true), chevron(open, act));
+  else if (goes) {
+    if (reserveChevron) right.append(spacer());
+    right.append(pointerChevron(act));
+  } else if (reserveChevron) right.append(spacer(), spacer());
+  const row = createElement(
+    'li',
+    { class: `${PANEL_CLASS}__row ${PANEL_CLASS}__row--sub ${PANEL_CLASS}__row--bot-line`, 'data-geld-sub': line.anchor ?? `bot:${bot.id}`, 'data-health': health, ...(current ? {} : { 'data-current': 'false' }), ...(goes ? { 'data-pointer': '' } : {}) },
+    [lead, picture, main, right],
+  );
+  if (open) row.setAttribute('data-open', '');
+  if (line.anchor !== null && model.viewingAnchor === line.anchor) row.setAttribute('data-viewing', '');
+  if (opens || goes) rowClickToggles(row, act);
+  return { row, open };
+}
+
+/**
+ * The Review bots row's list: one line per bot, in the chips' order. The
+ * open line's summary renders in the returned slot (`openComment` names it;
+ * `openLine` is its line, for the threads to link).
+ */
+export function renderBotsList(slot: HTMLElement, model: PanelModel, handlers: PanelHandlers): { readonly nested: HTMLElement | null; readonly openLine: BotLine | null } {
+  const list = createElement('ul', { class: `${PANEL_CLASS}__rows ${PANEL_CLASS}__rows--sub`, role: 'list' });
+  let nested: HTMLElement | null = null;
+  let openLine: BotLine | null = null;
+  const reserve = model.botLines.some((line) => line.anchor !== null);
+  for (const line of model.botLines) {
+    const { row, open } = botLine(line, model, handlers, reserve);
+    list.append(row);
+    if (!open) continue;
+    const sub = nestedSlot();
+    list.append(sub.item);
+    nested = sub.body;
+    openLine = line;
+  }
+  slot.replaceChildren(list);
+  return { nested, openLine };
+}
+
+/**
  * The Reports row's list: one line per latest report. An open check report
  * shows its detail here; an open comment report's comment renders in the
  * returned slot (`openComment` names it; null when the open line is a check's).
@@ -1871,8 +2322,15 @@ function entryRow(entry: ReviewEntry, model: PanelModel, handlers: PanelHandlers
   // ones blank. In a round an opening line has a ⋯ and a chevron (two squares); in the Reviews index every line
   // that goes somewhere has one chevron and nothing else.
   const spacer = (): HTMLElement => createElement('span', { class: `${PANEL_CLASS}__spacer`, 'aria-hidden': 'true' });
-  const siblingSquares = reserveChevron ? (pointer ? 1 : 2) : 0;
-  if (goes) {
+  // In the Reviews index a person's verdict wears a ⋯ (dismiss, ask again, show in timeline, copy link), so every
+  // line there has two squares: the ⋯ or its blank, then the chevron or its blank.
+  const reviewMenu = pointer && !bot && isVerdict(entry) && !isProvisional(entry) ? reviewActions(entry, model, handlers) : null;
+  const siblingSquares = reserveChevron ? 2 : 0;
+  if (pointer) {
+    right.append(reviewMenu ?? spacer());
+    if (goes) right.append(pointerChevron(act));
+    else if (siblingSquares === 2) right.append(spacer());
+  } else if (goes) {
     // A verdict with threads beside reviews with comments: the ⋯ square stays blank, the chevron lines up.
     if (siblingSquares === 2) right.append(spacer());
     right.append(pointerChevron(act));
@@ -1891,6 +2349,23 @@ function entryRow(entry: ReviewEntry, model: PanelModel, handlers: PanelHandlers
   if (!pointer && model.viewingAnchor === entry.anchor) row.setAttribute('data-viewing', '');
   if (opens || goes) rowClickToggles(row, act);
   return { row, open };
+}
+
+/**
+ * The ⋯ on a person's verdict in the Reviews index: what GitHub lets the
+ * reader do with it (dismiss it — GitHub asks the reason in its own dialog —
+ * or ask the reviewer again) and the two ways to it (the timeline, a link).
+ */
+function reviewActions(entry: ReviewEntry, model: PanelModel, handlers: PanelHandlers): HTMLElement {
+  const entries: MenuEntry[] = [];
+  // GitHub acts on a person's current verdict; an earlier one of theirs in the list (approved, then changes
+  // requested) is history and offers neither action, or the dismissal would land on the newer review.
+  const current = model.reviewerStatuses.find((status) => status.login.toLowerCase() === entry.author.toLowerCase())?.anchor === entry.anchor;
+  if (current && model.canDismissReviews && (entry.state === 'approved' || entry.state === 'changes_requested')) entries.push({ label: 'Dismiss review', onSelect: () => handlers.onDismissReview(entry.author) });
+  if (current && model.canRequestReviewers) entries.push({ label: 'Re-request review', onSelect: () => handlers.onReRequestReview(entry.author) });
+  entries.push({ label: 'Show in timeline', onSelect: () => handlers.onShowInTimeline(entry.anchor) });
+  entries.push({ label: 'Copy link', onSelect: () => handlers.onCopyLink(entry.anchor) });
+  return menu(entries, `review:${entry.anchor}`);
 }
 
 /** Lines with something to open (or to go to) first, then bare verdicts and pending requests; each run keeps its timeline order. */
@@ -1929,6 +2404,7 @@ function signatureOf(model: PanelModel): string {
     openPreviews: [...model.openPreviews].sort(),
     reports: model.reports.latest.map((entry) => `${entry.anchor}${entry.state}${entry.headline}${entry.project ?? ''}${(entry.short ?? []).map((part) => part.text).join('|')}`),
     requestable: model.requestable.map((bot) => `${bot.id}:${bot.presence}:${model.botIconFor(bot.id) ?? ''}`),
+    botLines: model.botLines.map((line) => `${line.bot.id}:${line.anchor ?? ''}:${line.preview}:${line.time}:${line.avatarSrc ?? ''}:${line.threads.map((thread) => `${thread.anchor}${thread.done ? 'd' : 'o'}`).join('|')}`),
     checks: model.checks,
     requiredFailing: model.requiredFailing,
     previews: [...model.previews.latest, ...model.previews.archived].map((entry) => `${entry.anchor}:${entry.host}:${entry.project}:${entry.status}:${entry.url ?? ''}:${model.avatarForAnchor(entry.anchor) ?? ''}`),
@@ -1937,6 +2413,9 @@ function signatureOf(model: PanelModel): string {
     reviews: model.reviews,
     comments: model.comments.map((entry) => `${entry.anchor}:${entry.state}:${entry.done ? 'd' : 'o'}:${entry.preview}:${entry.time}:${entry.replies}:${entry.myReaction ?? ''}:${entry.avatarSrc ?? ''}:${entry.parent ?? ''}:${(entry.threads ?? []).map((thread) => `${thread.anchor}${thread.done ? 'd' : 'o'}`).join('|')}`),
     reviewerGroups: model.reviewerGroups.map((group) => `${group.state}:${group.reviewers.map((reviewer) => `${reviewer.login}${reviewer.src}`).join(',')}`),
+    reviewerStatuses: model.reviewerStatuses.map((status) => `${status.login}:${status.verdict ?? ''}:${status.awaiting ? 'a' : ''}:${status.anchor ?? ''}`),
+    canRequestReviewers: model.canRequestReviewers,
+    canDismissReviews: model.canDismissReviews,
     ingesting: model.ingesting,
     openSubKey: model.openSubKey,
     openSources: [...model.openSources].sort(),
@@ -2100,10 +2579,18 @@ export function mountPanel(model: PanelModel, handlers: PanelHandlers, options: 
   // is its review content, so a run of commits that nothing followed (the last pushes of a PR nobody has reviewed
   // yet) is no round at all - its commits are in the Commits fold. By push the same run is a push and stays.
   const withContent = model.batches.filter((batch) => batch.items.length + batch.comments.length + batch.reviews.length + batch.previews.length > 0);
-  const attention = model.grouping === 'batch' ? [] : withContent.filter((batch) => batch.items.some((item) => isOpenStatus(item.status)));
+  // The latest round with no threads at all is the current one, not a settled one: nothing in it was ever to settle,
+  // and what it holds (a reviewer's remark, a bot's note on the newest push) is the state of the conversation, so it
+  // stands in the open group rather than folding away under "settled rounds".
+  // The newest round of all, not the newest with something to show: a newer round whose only content is seated under
+  // Reports or Review bots is still the newer one, and the round before it is history, not the current conversation.
+  const latest = model.batches[model.batches.length - 1];
+  const current = latest !== undefined && withContent.includes(latest) && latest.items.length === 0 ? latest : null;
+  const attention = model.grouping === 'batch' ? [] : withContent.filter((batch) => batch === current || batch.items.some((item) => isOpenStatus(item.status)));
   const settled = model.grouping === 'batch' ? [] : withContent.filter((batch) => !attention.includes(batch));
   if (attention.length > 0) {
-    rows.append(groupHeading('open', `${plural(attention.length, 'round')} to review · ${plural(open.length, 'open thread')}`, model, handlers));
+    const toReview = attention.filter((batch) => batch !== current).length;
+    rows.append(groupHeading('open', toReview === 0 ? 'Current round' : `${plural(toReview, 'round')} to review · ${plural(open.length, 'open thread')}`, model, handlers));
     if (!model.collapsedGroups.has('open')) appendBatches(attention);
   }
   if (settled.length > 0) {
