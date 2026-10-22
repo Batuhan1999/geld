@@ -967,22 +967,6 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: inherit;
 }
 
-/* 💬 alone in the review group: "Review" before its icon, so beside close and merge it reads as a review, not a plain comment. */
-.geld-quick-review__label {
-  display: none;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.geld-quick-review[data-alone] .geld-quick-review__label {
-  display: inline;
-}
-
-.geld-quick-review[data-alone] .geld-quick-review__segment[data-event='comment'] {
-  gap: 6px;
-  padding: 0 8px;
-}
-
 /* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
 .geld-quick-review__glyph--instant,
 .geld-quick-review[data-instant] .geld-quick-review__segment:not([data-event='comment']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant),
@@ -1005,7 +989,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__tally {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   color: var(--fgColor-muted, #59636e);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1020,7 +1004,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__tally-part {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
 }
 
 .geld-quick-review__tally-part > svg {

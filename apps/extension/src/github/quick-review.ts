@@ -10,7 +10,7 @@ import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCoun
 import { inlineText } from './review/inline-text';
 import type { ReviewTally } from './review-tally';
 import { fetchReviewTally, tallyWords } from './review-tally';
-import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_COMMENT, ICON_COMMENT_SEND, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -66,8 +66,8 @@ const SUBMITTED_MS = 3000;
 const ATTR_INSTANT = 'data-instant';
 /** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
 const ATTR_PENDING = 'data-pending';
-/** On the group while 💬 is alone in the review group (the author's own pull request): it then says "Review" before its icon. */
-const ATTR_ALONE = 'data-alone';
+/** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
+const ATTR_KIND = 'data-kind';
 
 interface EventInfo {
   readonly value: ReviewEvent;
@@ -121,11 +121,12 @@ const INSTANT_KEY = MAC ? '⌘' : 'Ctrl';
  * A segment's tooltip, one entry per line: its verdict and the key for a
  * 1-click review, or what a click does while that key is held.
  */
-export function segmentHint(event: ReviewEvent, instantKey: string, held = false, pending = false): readonly string[] {
+export function segmentHint(event: ReviewEvent, instantKey: string, held = false, pending = false, kind: CommentKind = 'comment'): readonly string[] {
   const info = EVENT_INFO[event];
   if (event === 'comment') {
-    if (!pending) return [info.label];
-    return held ? ['Submit pending comments'] : [info.label, `${instantKey} 1-click review`];
+    const label = kind === 'review' ? 'Review' : info.label;
+    if (!pending) return [label];
+    return held ? ['Submit pending comments'] : [label, `${instantKey} 1-click review`];
   }
   if (held) return [`${info.label} without comments`];
   return [info.label, `${instantKey} 1-click review`];
@@ -451,7 +452,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       'button',
       { type: 'button', id: `geld-quick-review-${tipIds}`, class: 'btn btn-sm BtnGroup-item geld-quick-review__segment', 'data-event': event, 'aria-label': info.label, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' },
       [
-        ...(event === 'comment' ? [createElement('span', { class: 'geld-quick-review__label', 'aria-hidden': 'true' }, ['Review'])] : []),
         createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
         ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
       ],
@@ -589,7 +589,8 @@ function followInstantKey(root: HTMLElement, signal: AbortSignal, onChange: () =
 function describeSegments(state: Mounted): void {
   const held = state.root.hasAttribute(ATTR_INSTANT);
   const pending = pendingCount(state) > 0;
-  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held, pending));
+  const kind = commentKindOf(state);
+  for (const event of SEGMENT_ORDER) describe(state.segments[event], segmentHint(event, INSTANT_KEY, held, pending, kind));
 }
 
 /**
@@ -602,8 +603,6 @@ function showAuthor(state: Mounted): void {
   if (state.isAuthor === isAuthor) return;
   state.isAuthor = isAuthor;
   state.group.replaceChildren(...SEGMENT_ORDER.filter((event) => !isAuthor || EVENT_INFO[event].authorMay).map((event) => state.segments[event]));
-  // 💬 alone says "Review", or beside close and merge it would read as a plain comment rather than a review.
-  state.root.toggleAttribute(ATTR_ALONE, state.group.childElementCount === 1);
   showActions(state);
 }
 
@@ -766,13 +765,35 @@ function showCount(state: Mounted): void {
   const text = count > 0 ? String(count) : '';
   if (state.counter.textContent !== text) state.counter.textContent = text;
   if (state.counter.hidden !== (count === 0)) state.counter.hidden = count === 0;
-  const name = count > 0 ? `Comment, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : 'Comment';
+  const label = KIND_INFO[commentKindOf(state)].label;
+  const name = count > 0 ? `${label}, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : label;
   if (state.segments.comment.getAttribute('aria-label') !== name) state.segments.comment.setAttribute('aria-label', name);
   // With comments pending, 💬 has a 1-click review too: its sending glyph and tooltip follow the count.
   if (state.root.hasAttribute(ATTR_PENDING) !== count > 0) {
     state.root.toggleAttribute(ATTR_PENDING, count > 0);
     describeSegments(state);
   }
+  showCommentKind(state);
+}
+
+/** What 💬's box would post now: the reader's choice for this pull request, else a review while comments are pending and a comment otherwise. */
+function commentKindOf(state: Mounted): CommentKind {
+  return drafts.get(state.pullPath)?.kind ?? (pendingCount(state) > 0 ? 'review' : 'comment');
+}
+
+/** 💬 wears the kind its box will post: the comment glyph, or `code-review`'s bubble with brackets for a review. */
+function showCommentKind(state: Mounted): void {
+  const kind = commentKindOf(state);
+  const button = state.segments.comment;
+  if (button.getAttribute(ATTR_KIND) === kind) return;
+  button.setAttribute(ATTR_KIND, kind);
+  const [plain, instant] = button.querySelectorAll('.geld-quick-review__glyph');
+  plain?.replaceChildren(svgFromString(kind === 'review' ? ICON_CODE_REVIEW : ICON_COMMENT));
+  instant?.replaceChildren(svgFromString(kind === 'review' ? ICON_CODE_REVIEW_SEND : ICON_COMMENT_SEND));
+  const label = KIND_INFO[kind].label;
+  const count = pendingCount(state);
+  button.setAttribute('aria-label', count > 0 ? `${label}, ${count} pending ${count === 1 ? 'comment' : 'comments'}` : label);
+  describeSegments(state);
 }
 
 /**
@@ -797,6 +818,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       return reviewErrorText(response.status, payload);
     }
     drafts.delete(pullPath);
+    showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
       return null;
@@ -836,6 +858,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
     drafts.delete(pullPath);
+    showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
       window.location.reload();
       return null;
@@ -923,6 +946,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
         ]);
         item.addEventListener('click', () => {
           draft.kind = option;
+          showCommentKind(state);
           closeKindMenu();
           showVerdict();
           refresh();
