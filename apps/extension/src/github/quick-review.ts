@@ -953,6 +953,8 @@ function openMergeBox(state: Mounted): void {
   let box: MergeBox = known.box;
   // The method `box`'s commit was written for: until the chosen method's has come, the confirmation waits.
   let boxFor: MergeMethod = method;
+  // False after a failed read: `box` then holds another method's commit, which must not fill the fields.
+  let commitFresh = true;
   let edited = false;
 
   const select = createElement('select', { class: 'form-select select-sm geld-quick-review__method', 'aria-label': 'Merge method' }, known.box.methods.map((name) => createElement('option', { value: name }, [METHOD_LABEL[name]])));
@@ -975,8 +977,8 @@ function openMergeBox(state: Mounted): void {
   const fill = (): void => {
     commit.hidden = method === 'REBASE';
     if (!edited) {
-      title.value = boxFor === method ? box.commitTitle : '';
-      message.value = boxFor === method ? box.commitMessage : '';
+      title.value = boxFor === method && commitFresh ? box.commitTitle : '';
+      message.value = boxFor === method && commitFresh ? box.commitMessage : '';
     }
   };
   const refresh = (): void => {
@@ -990,6 +992,7 @@ function openMergeBox(state: Mounted): void {
   const load = (asked: MergeMethod): void => {
     void fetchMergeBox(pullPath, asked, bypass).then((fresh) => {
       if (state.panel !== panel || method !== asked) return;
+      commitFresh = fresh !== null;
       if (fresh !== null) box = fresh;
       boxFor = asked;
       fill();

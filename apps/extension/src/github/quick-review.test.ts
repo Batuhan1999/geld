@@ -394,6 +394,40 @@ describe('the tab bar button', () => {
     expect(title.value).toBe('Merge pull request #7 from acme/topic');
   });
 
+  it('leaves the commit to the reader when the chosen method’s commit could not be read', async () => {
+    let failMerge = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.includes('/page_data/merge_box')) return new Response('{}', { status: 404 });
+        const method = /merge_method=([A-Z]+)/.exec(url)?.[1] ?? 'SQUASH';
+        if (method === 'MERGE' && failMerge) return new Response('{}', { status: 500 });
+        const payload = JSON.parse(mergeBox('MERGEABLE', true));
+        payload.pullRequest.viewerMergeActions[0].mergeMethods = [
+          { name: 'SQUASH', allowableStatus: 'ALLOWED', isDefault: true },
+          { name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: false },
+        ];
+        payload.mergeRequirements.commitMessageHeadline = 'Title (#7)';
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    failMerge = true;
+    document.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
+    for (let i = 0; i < 3; i += 1) await settle();
+    const select = document.querySelector<HTMLSelectElement>('.geld-quick-review__method');
+    const title = document.querySelector<HTMLInputElement>('.geld-quick-review__commit-title');
+    if (select === null || title === null) throw new Error('no merge box');
+    expect(title.value).toBe('Title (#7)');
+    select.value = 'MERGE';
+    select.dispatchEvent(new Event('change'));
+    for (let i = 0; i < 3; i += 1) await settle();
+    // The squash commit stays out of a merge commit's fields.
+    expect(title.value).toBe('');
+  });
+
   it('offers Ready for review in merge’s place on a draft, and presses the reader’s own verdict', async () => {
     vi.stubGlobal(
       'fetch',
