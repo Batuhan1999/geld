@@ -901,7 +901,8 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   With comments pending a review is the default (they go with it, as before), without them a comment, until the reader chooses;
   a plain comment needs words and leaves pending comments pending.
   It is GitHub's conversation composer's request (`timelineCommentRequest`: `POST page_data/create_timeline_comment` `{ text }`, read from its bundle;
-  an empty text answers 422 "Comment text is required."), after which the conversation reloads to show it and other tabs say "Commented". ✓ and ✗ open the box with no choice.
+  an empty text answers 422 "Comment text is required."), after which the conversation reloads to show it and other tabs say "Commented".
+  ✓ and ✗ open the box with no choice.
   **With comments pending, ⌘-click on 💬 submits them at once** as a comment review with no words (`isInstantClick(…, pending)`, `data-pending` on the group): its glyph gains the arrow while the key is held (`ICON_COMMENT_SEND`, the arrow below the bubble's edge, the bubble where it stands) and its tooltip reads "Comment" over "⌘ 1-click review", or "Submit pending comments" while held;
   a refusal opens the box with GitHub's reason, as for ✓ and ✗.
   **The group rides every tab's sticky header** (`place`, `stickyPlace`), so it is always to hand while reading.
