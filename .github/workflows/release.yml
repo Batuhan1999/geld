@@ -152,6 +152,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.plan.outputs.tag }}
+          # The tag is created where the zips were built, not at whatever main has become meanwhile.
+          target_commitish: ${{ github.sha }}
           name: Geld ${{ needs.plan.outputs.version }}
           generate_release_notes: true
           files: dist/*.zip

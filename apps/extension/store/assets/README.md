@@ -1,6 +1,6 @@
 # Store asset pack
 
-Finished, exact-size exports for the marketplace forms. The real Geld SVGs are used throughout; all product screens are captures of the built extension running on public GitHub pages, not generated UI. Image generation was used for the visual exploration stored under `raw/ai-*`; the upload-ready promo diagrams were then rebuilt as exact flat vector geometry so generated overlaps, gradients, clipped fragments and text-placement errors cannot survive into the submitted files.
+Finished, exact-size exports for the marketplace forms. The real Geld SVGs are used throughout; all product screens are captures of the built extension, not generated UI: on public GitHub pages, apart from the popup (`raw/04-popup.png`) and the options card (`raw/05-options-card.png`), which are the extension's own pages. Image generation was used for the visual exploration stored under `raw/ai-*`; the upload-ready promo diagrams were then rebuilt as exact flat vector geometry so generated overlaps, gradients, clipped fragments and text-placement errors cannot survive into the submitted files.
 
 ## Upload map
 

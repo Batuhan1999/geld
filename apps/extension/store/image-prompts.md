@@ -29,7 +29,7 @@ Two production notes that apply to all assets:
 | 2 | Marquee / large promo tile | 1400×560 | Chrome (featuring), Edge (optional) | P2 |
 | 3 | Store logo | 300×300 | Edge (required) | no prompt — export the SVG |
 | 4 | macOS app icon | 1024×1024 | Mac App Store (required) | P3 |
-| 5 | Screenshot set, 5 (6 for Edge) | design at 2880×1800, export also at 1280×800 | all four stores | P4–P9 |
+| 5 | Screenshot set: Chrome 5, Edge 6, Firefox 6, Safari 6 | design at 2880×1800, export also at 1280×800 | all four stores | P4–P9 |
 | 6 | Optional social/OG card | 1200×630 | geld.sh, GitHub social preview | P10 |
 
 The screenshot set is designed once at 2880×1800 (Apple's sharpest size, 16:10) and downscaled to 1280×800 for Chrome, Edge and Firefox. Keep all text ≥ 40 px tall at 2880 so it is still legible at 1280 (and at the 640×400 thumbnail Chrome actually renders).
@@ -176,5 +176,5 @@ The captures are the product; take them from the real pages the project already 
 - 440×280 and 1400×560: PNG-24, no alpha, exact size.
 - 300×300 Edge logo: PNG from the SVG, white background.
 - 1024×1024 macOS icon: PNG **with** alpha; drop it into `AppIcon.appiconset` as the 512pt@2x slot.
-- Screenshots: 2880×1800 PNG for Apple; the same files downscaled to 1280×800 (Lanczos) as PNG-24 without alpha for Chrome, Edge and Firefox. Chrome shows them at 640×400 — check legibility at that size.
+- Screenshots: 2880×1800 JPEG for Apple; the same files downscaled to 1280×800 (Lanczos) as JPEG for Chrome, Edge and Firefox, as `assets/README.md` and `listing.md` list them. Chrome shows them at 640×400 — check legibility at that size.
 - Keep reusable sources beside the exports when they do not contain secrets. This repository keeps the generated abstract fields and public-page captures under `apps/extension/store/assets/raw/`; the upload-ready files are mapped in `assets/README.md`.
