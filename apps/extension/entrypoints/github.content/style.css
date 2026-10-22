@@ -967,7 +967,7 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: inherit;
 }
 
-/* 💬 alone in the whole control: "Review" before its icon, so it does not read as a stray button. */
+/* 💬 alone in the review group: "Review" before its icon, so beside close and merge it reads as a review, not a plain comment. */
 .geld-quick-review__label {
   display: none;
   font-size: 12px;

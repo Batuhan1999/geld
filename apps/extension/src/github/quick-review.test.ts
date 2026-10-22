@@ -332,12 +332,13 @@ describe('the tab bar button', () => {
     expect(tally?.nextElementSibling?.classList.contains('geld-quick-review__status')).toBe(true);
   });
 
-  it('says "Review" on 💬 when it is the only action the reader has', async () => {
+  it('says "Review" on 💬 whenever it is alone in the review group, merge and close beside it or not', async () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('UNMERGEABLE', false), { status: 200 }) : new Response('{}', { status: 404 }))));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
     mount();
+    expect(document.querySelector('.geld-quick-review')?.hasAttribute('data-alone')).toBe(true);
     for (let i = 0; i < 4; i += 1) await settle();
-    expect(document.querySelector<HTMLElement>('.geld-quick-review__actions-group')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__actions-group')?.hidden).toBe(false);
     expect(document.querySelector('.geld-quick-review')?.hasAttribute('data-alone')).toBe(true);
   });
 
