@@ -1141,7 +1141,8 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     // An instant send leaves words saved in the box out on purpose: they stay for the next box.
     if (body !== '') clearDraft(pullPath);
     // The reader went on to another pull request meanwhile: that page is neither reloaded nor told this one is done.
-    if (state.pullPath !== pullPath) return null;
+    // The controls may still name it while the browser already shows the next one (the controller's route pass is debounced).
+    if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
@@ -1183,7 +1184,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
       return said === null ? `GitHub could not post the comment (HTTP ${response.status}).` : `GitHub could not post the comment: ${said}`;
     }
     clearDraft(pullPath);
-    if (state.pullPath !== pullPath) return null;
+    if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
     showCommentKind(state);
     if (state.context.page.kind === 'pull-conversation') {
       window.location.reload();
