@@ -511,6 +511,22 @@ describe('the tab bar button', () => {
     expect(segment('comment').getAttribute('data-kind')).toBe('comment');
   });
 
+  it('renames an open 💬 box when a comment is left pending meanwhile, so its button says what a click sends', () => {
+    window.history.replaceState(null, '', '/acme/widgets/pull/9');
+    const context = { page: { kind: 'pull-files' as const, diffUrl: null, stateKey: '/acme/widgets/pull/9' }, groups: [groupAt(counts())], headSha: () => SHA };
+    applyQuickReview(true, context);
+    segment('comment').click();
+    const submit = (): string | null | undefined => document.querySelector('.geld-quick-review__panel .geld-quick-review__submit')?.textContent;
+    expect(submit()).toBe('Comment');
+    const counter = document.createElement('button');
+    counter.className = 'ReviewMenuButton__x';
+    counter.innerHTML = '<span>Submit review</span><span data-component="ButtonCounter">1</span>';
+    document.body.append(counter);
+    applyQuickReview(true, context);
+    expect(submit()).toBe('Review');
+    counter.remove();
+  });
+
   it('turns an open ✓ box into a comment when the page then says the reader is the author', () => {
     document.head.innerHTML = '<meta name="user-login" content="alice">';
     mount();
