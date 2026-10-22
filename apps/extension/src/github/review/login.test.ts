@@ -28,6 +28,8 @@ describe('loginOfLink', () => {
     expect(authorOf(comment)).toEqual({ login: 'connor4312', bot: false });
     const app = link('<div><a class="author" href="/apps/copilot-pull-request-reviewer">Copilot</a></div>');
     expect(authorOf(app)).toEqual({ login: 'copilot-pull-request-reviewer[bot]', bot: true });
+    // An absolute link to the App is the App too.
+    expect(authorOf(link('<div><a class="author" href="https://github.com/apps/greptile-apps">greptile-apps</a></div>'))).toEqual({ login: 'greptile-apps[bot]', bot: true });
   });
 });
 
