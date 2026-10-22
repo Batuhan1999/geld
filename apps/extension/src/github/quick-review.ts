@@ -217,10 +217,10 @@ function createButton(pullPath: string, context: QuickReviewContext): Mounted {
   return state;
 }
 
-/** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
 /** Bumped by every read of the pending comments and by a discard: only the latest read's answer is kept. */
 let pendingRead = 0;
 
+/** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
 async function loadPending(state: Mounted): Promise<readonly PendingComment[] | null> {
   const pullPath = state.pullPath;
   state.pendingFor = pullPath;
