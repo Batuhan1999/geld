@@ -12,22 +12,48 @@ interface FoundBlock {
   readonly json: string;
 }
 
-/** The Markdown with every fenced code block (``` or ~~~, CommonMark's rules) blanked out: an example there is not a claim. */
+/** An open fence: its marker, whether it stands in a quote, and the column its content starts at (a list item's). */
+interface Fence {
+  readonly char: string;
+  readonly length: number;
+  readonly quoted: boolean;
+  readonly indent: number;
+  /** Opened on a list marker's line: a less indented line ends the item, and the fence with it. */
+  readonly listed: boolean;
+}
+
+const QUOTE = /^ {0,3}> ?/;
+const OPENER = /^( *)((?:[-*+]|\d{1,9}[.)]) +)?( {0,3})(`{3,}|~{3,})(.*)$/;
+
+/**
+ * The Markdown with every fenced code block (``` or ~~~) blanked out: an example there is not a claim. CommonMark's
+ * rules as far as a comment needs them: a fence may stand in a quote or a list item, closes with a marker at most three
+ * spaces in from where its content starts, and ends unclosed when its quote or list item does.
+ */
 function outsideFences(markdown: string): string {
-  let fence: { readonly char: string; readonly length: number } | null = null;
+  let fence: Fence | null = null;
   return markdown
     .split('\n')
     .map((line) => {
-      // A fence may stand inside a list item or a quote (`- ```json`, `  ````, `> ````): their markers come first.
-      const found = /^[\s>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[\s>]*(`{3,}|~{3,})(.*)$/.exec(line);
-      const marker = found?.[1];
-      const tail = found?.[2] ?? '';
-      if (fence === null) {
-        if (marker === undefined || (marker[0] === '`' && tail.includes('`'))) return line;
-        fence = { char: marker[0] ?? '`', length: marker.length };
-        return '';
+      const quoted = QUOTE.test(line);
+      const inner = quoted ? line.replace(QUOTE, '') : line;
+      if (fence !== null) {
+        const lead = /^ */.exec(inner)?.[0].length ?? 0;
+        const ended = (fence.quoted && !quoted) || (fence.listed && inner.trim() !== '' && lead < fence.indent);
+        if (!ended) {
+          const closer = /^( *)(`{3,}|~{3,})\s*$/.exec(inner);
+          const marker = closer?.[2];
+          if (closer !== null && marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && (closer[1]?.length ?? 0) - fence.indent <= 3) fence = null;
+          return '';
+        }
+        fence = null;
       }
-      if (marker !== undefined && marker[0] === fence.char && marker.length >= fence.length && tail.trim() === '') fence = null;
+      const found = OPENER.exec(inner);
+      const marker = found?.[4];
+      if (found === null || marker === undefined || (marker[0] === '`' && (found[5] ?? '').includes('`'))) return line;
+      const lead = found[1]?.length ?? 0;
+      const item = found[2] ?? '';
+      fence = { char: marker[0] ?? '`', length: marker.length, quoted, indent: lead + item.length, listed: item !== '' };
       return '';
     })
     .join('\n');
