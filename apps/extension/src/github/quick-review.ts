@@ -578,7 +578,16 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   armSnapshot(state);
   holdUntilReady(state);
   // The tally's link from this very tab changes only the hash: resolve it there and then.
-  window.addEventListener('hashchange', () => followReviewHash(state.context), { signal: keys.signal });
+  window.addEventListener(
+    'hashchange',
+    () => {
+      // A new target: the last landing's re-landings would pull the page back to the Reviews row.
+      landing?.abort();
+      landing = null;
+      followReviewHash(state.context);
+    },
+    { signal: keys.signal },
+  );
   const opensBox = (button: HTMLButtonElement, kind: 'merge' | 'close' | 'ready', open: (state: Mounted) => void): void => {
     button.addEventListener('click', () => {
       if (state.sending) return;
@@ -837,8 +846,9 @@ function showSnapshot(state: Mounted): void {
     const links = [...card.querySelectorAll<HTMLElement>('a')];
     if (event.key === 'Escape') {
       event.preventDefault();
-      hideSnapshot(state);
+      // Focus first: the tally's focus would open a new card if this one were already gone.
       state.tally.focus({ preventScroll: true });
+      hideSnapshot(state);
     } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === links[0]) {
       event.preventDefault();
       state.tally.focus({ preventScroll: true });
@@ -928,18 +938,21 @@ function followReviewHash(context: QuickReviewContext): void {
   if (row.getAttribute('aria-expanded') !== 'true') row.click();
   // The page above is still settling while the conversation loads, so the row is brought back under the sticky
   // header a few times over the next second, unless the reader scrolls first.
-  let moved = false;
-  const stop = (): void => {
-    moved = true;
-  };
-  window.addEventListener('wheel', stop, { once: true, passive: true });
-  window.addEventListener('keydown', stop, { once: true });
+  landing?.abort();
+  const settle = new AbortController();
+  landing = settle;
+  const stop = (): void => settle.abort();
+  window.addEventListener('wheel', stop, { once: true, passive: true, signal: settle.signal });
+  window.addEventListener('keydown', stop, { once: true, signal: settle.signal });
   for (const delay of [300, 900]) {
     window.setTimeout(() => {
-      if (!moved) landRow();
+      if (!settle.signal.aborted) landRow();
     }, delay);
   }
 }
+
+/** The Reviews row's re-landings in flight: the reader scrolling, or another hash, ends them. */
+let landing: AbortController | null = null;
 
 /** Room left above a row brought into view: GitHub's sticky header and a little air. */
 const LANDING_OFFSET = 96;
