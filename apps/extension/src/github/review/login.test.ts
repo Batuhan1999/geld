@@ -18,15 +18,16 @@ describe('loginOfLink', () => {
     expect(loginOfLink(link('<span data-hovercard-url="/users/sandy081/hovercard">Sandeep Somavarapu (sandy081)</span>'))).toBe('sandy081');
     expect(loginOfLink(link('<span>Sandeep Somavarapu (sandy081)</span>'))).toBe('sandy081');
     expect(loginOfLink(link('<a href="/orgs/acme/teams/core">acme/core</a>'))).toBe('acme/core');
-    // An App, by the same rule as a comment's author, so its name gets Geld's App card.
+    // An App by its path, whatever name it shows, as a comment's author has it, so its name gets Geld's App card.
     expect(loginOfLink(link('<a class="author" href="/apps/dependabot">dependabot</a>'))).toBe('dependabot[bot]');
+    expect(loginOfLink(link('<a href="/apps/copilot-pull-request-reviewer">Copilot</a>'))).toBe('copilot-pull-request-reviewer[bot]');
   });
 
   it('gives a comment its author’s login, as the sidebar names them, so one reviewer is one person', () => {
     const comment = link('<div><a class="author" href="/connor4312" data-hovercard-type="user">Connor Peet (connor4312)</a></div>');
     expect(authorOf(comment)).toEqual({ login: 'connor4312', bot: false });
     const app = link('<div><a class="author" href="/apps/copilot-pull-request-reviewer">Copilot</a></div>');
-    expect(authorOf(app)).toEqual({ login: 'Copilot[bot]', bot: true });
+    expect(authorOf(app)).toEqual({ login: 'copilot-pull-request-reviewer[bot]', bot: true });
   });
 });
 

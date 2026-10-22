@@ -6,22 +6,32 @@ import { onRestore } from './teleport';
  * the link reads "Connor Peet (connor4312)": the login is the profile the link
  * leads to (`/connor4312`), the user hovercard it carries
  * (`/users/connor4312/hovercard`), or the parenthesis after the name; an
- * App's as its name with `[bot]`. Null for a link that names nobody.
+ * App's from its path (`appLoginOf`). Null for a link that names nobody.
  */
 export function loginOfLink(link: Element): string | null {
   const href = link.getAttribute('href') ?? '';
-  // An App's link names the App (`/apps/dependabot`, "dependabot"): its login is the name with `[bot]`, as `authorOf` has it.
-  const app = /^(?:https?:\/\/[^/]+)?\/apps\/([^/?#]+)/.exec(href)?.[1];
-  if (app !== undefined) {
-    const name = (link.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/^@/, '') || app;
-    return /\[bot\]$/i.test(name) ? name : `${name}[bot]`;
-  }
+  const app = appLoginOf(href);
+  if (app !== null) return app;
   const profile = /^(?:https?:\/\/[^/]+)?\/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/?$/.exec(href)?.[1];
   if (profile !== undefined) return profile;
   const card = /^\/users\/([^/?#]+)\/hovercard/.exec(link.getAttribute('data-hovercard-url') ?? '')?.[1];
   if (card !== undefined) return decodeURIComponent(card);
   const text = (link.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/^@/, '');
   return /\(([A-Za-z0-9-]+)\)$/.exec(text)?.[1] ?? (text === '' ? null : text);
+}
+
+/**
+ * An App's login from its link (`/apps/copilot-pull-request-reviewer`): the slug with `[bot]`, whatever name the link
+ * shows ("Copilot"), as GitHub's API and the Action's payload spell it.
+ */
+export function appLoginOf(href: string): string | null {
+  const slug = /^(?:https?:\/\/[^/]+)?\/apps\/([^/?#]+)/.exec(href)?.[1];
+  if (slug === undefined) return null;
+  try {
+    return `${decodeURIComponent(slug)}[bot]`;
+  } catch {
+    return null;
+  }
 }
 
 const PEOPLE = 'a.author, a[data-hovercard-type="user"], [data-test-selector="pr-timeline-events-actor-profile-link"], [data-hovercard-url^="/users/"]';
