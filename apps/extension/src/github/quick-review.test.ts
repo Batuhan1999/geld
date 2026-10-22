@@ -218,6 +218,10 @@ describe('the tab bar button', () => {
     expect(chosen()).toBe('Comment');
     expect(submitButton()?.classList.contains('btn-primary')).toBe(false);
     segment('request changes').click();
+    if (words instanceof HTMLTextAreaElement) {
+      words.value = '';
+      words.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     // The same segment again closes it.
     segment('request changes').click();
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
@@ -268,6 +272,31 @@ describe('the tab bar button', () => {
     expect(sent).toEqual([{ url: '/acme/widgets/pull/7/page_data/submit_review', body: JSON.stringify({ body: '', event: 'approve', headSha: SHA }) }]);
     expect(document.querySelector('.geld-quick-review__panel')).toBeNull();
     expect(document.querySelector('.geld-quick-review__status')?.textContent).toBe('Approved');
+  });
+
+  it('opens the box with the verdict instead of sending when words wait in it', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      sent.push(String(input));
+      return new Response('{}', { status: 200 });
+    }));
+    mount();
+    segment('comment').click();
+    const typed = (value: string): void => {
+      const words = document.querySelector('.geld-quick-review__panel textarea');
+      if (!(words instanceof HTMLTextAreaElement)) return;
+      words.value = value;
+      words.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    typed('Looks right.');
+    segment('comment').click();
+    segment('approve').dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(sent.filter((url) => url.endsWith('/submit_review'))).toEqual([]);
+    expect(chosen()).toBe('Approve');
+    expect(document.querySelector<HTMLTextAreaElement>('.geld-quick-review__panel textarea')?.value).toBe('Looks right.');
+    typed('');
+    segment('approve').click();
   });
 
   it('asks for words with GitHub’s reason when it refuses an instant verdict', async () => {
