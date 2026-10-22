@@ -49,6 +49,14 @@ describe('detectMoves', () => {
     expect(detectMoves([file('a.ts', [scattered]), file('b.ts', [hunk(0, EDITORS, [], 50)])])).toEqual([]);
   });
 
+  it('finds a moved block that opens on a closing brace or a blank line', () => {
+    const block = ['}', '', ...EDITORS.slice(0, 6)];
+    const [move] = detectMoves([file('a.ts', [hunk(0, [], block, 10)]), file('b.ts', [hunk(0, block, [], 40)])]);
+    expect(move?.lines).toBe(block.length);
+    expect(move?.from.line).toBe(10);
+    expect(move?.to.line).toBe(40);
+  });
+
   it('reads a reindented move as a move, not exact', () => {
     const indented = EDITORS.map((line) => `    ${line}`);
     const files = [file('a.ts', [hunk(0, [], EDITORS, 10)]), file('b.ts', [hunk(0, indented, [], 50)])];

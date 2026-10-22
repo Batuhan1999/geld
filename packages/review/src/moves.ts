@@ -120,19 +120,38 @@ export function detectMoves(files: readonly PlanFile[]): readonly MovedBlock[] {
       for (const place of places) {
         const other = added[place.side];
         if (other === undefined || sameHunk(side.ref, other.ref)) continue;
-        // Only runs starting at an anchor: a run beginning one line earlier was found from that line.
-        if (index > 0 && place.index > 0 && adjacent(side, index) && adjacent(other, place.index) && side.normalized[index - 1] === other.normalized[place.index - 1]) continue;
+        // Only runs starting at an anchor: a run whose line before also anchors was found from that line. Trivial lines
+        // before it (a `}`, a blank) anchor nothing, so the run takes them in first, or a block opening on one is missed.
+        let start = 0;
+        let anchoredBefore = false;
+        while (
+          index - start > 0 &&
+          place.index - start > 0 &&
+          adjacent(side, index - start) &&
+          adjacent(other, place.index - start) &&
+          side.normalized[index - start - 1] === other.normalized[place.index - start - 1]
+        ) {
+          const before = side.normalized[index - start - 1] ?? '';
+          if (isSubstantive(before) && (addedAt.get(before)?.length ?? 0) <= MAX_OCCURRENCES) {
+            anchoredBefore = true;
+            break;
+          }
+          start += 1;
+        }
+        if (anchoredBefore) continue;
+        const from = index - start;
+        const to = place.index - start;
         let length = 1;
         // A run is lines that stood together on both sides: changed lines either side of unchanged code are separate edits.
         while (
-          index + length < side.normalized.length &&
-          place.index + length < other.normalized.length &&
-          adjacent(side, index + length) &&
-          adjacent(other, place.index + length) &&
-          side.normalized[index + length] === other.normalized[place.index + length]
+          from + length < side.normalized.length &&
+          to + length < other.normalized.length &&
+          adjacent(side, from + length) &&
+          adjacent(other, to + length) &&
+          side.normalized[from + length] === other.normalized[to + length]
         )
           length += 1;
-        if (length >= MIN_MOVE_LINES) candidates.push({ removedSide, removedIndex: index, addedSide: place.side, addedIndex: place.index, length });
+        if (length >= MIN_MOVE_LINES) candidates.push({ removedSide, removedIndex: from, addedSide: place.side, addedIndex: to, length });
       }
     }
   });

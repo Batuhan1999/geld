@@ -308,6 +308,11 @@ export async function planWithAi(settings: GeldSettings, replan: boolean): Promi
   const now = new Date().toISOString();
   if (visit !== current) return;
   current.planning = false;
+  // A push landed while the model planned: its answer is about hunks the page no longer shows, and automatic mode asks again.
+  if (current.input !== null && current.input.headSha !== input.headSha) {
+    onChange();
+    return;
+  }
   let record = current.record ?? recordWithPlan(null, rulesPlan(input, now), now);
   if (!result.ok) {
     record = recordWithError(record, result.reason, now);

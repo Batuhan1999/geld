@@ -17,7 +17,7 @@ import { debugScopesItem, repoConfigChoicesItem, whitespaceOptOutsItem } from '.
 import type { FileStats, GeldSettings } from '@geld/core';
 import type { Classified, HiddenBreakdown } from './breakdown';
 import { breakdownFromFiles, buildBreakdown, EMPTY_BREAKDOWN } from './breakdown';
-import { DiffSource } from './diff-source';
+import { DiffSource, willRetry } from './diff-source';
 import type { ResolvedRepoConfig } from './repo-config-source';
 import { RepoConfigSource, validConfigs } from './repo-config-source';
 import { createElement, isOwnElement, OWN_UI_ATTRIBUTE, queryAll, restoreManagedText, svgFromString, writeAttribute } from './dom';
@@ -964,11 +964,12 @@ export class GeldController {
       classify: (path) => this.classify(matcher, path, null),
       activeCategories: matcher.activeCategories,
       // A commit's files for the rules producer's co-change grouping: its `.diff` through the budgeted source,
-      // cached per SHA like the commit hovercards; a failure answers "no files" so the plan is not held for it.
+      // cached per SHA like the commit hovercards. A failure the source will retry is still pending (a plan stored
+      // meanwhile would keep its grouping without these files for this head); only a final one answers "no files".
       commitFiles: (sha) => {
         const state = this.diffSource.request(`${url.origin}${page.stateKey.replace(/\/pull\/\d+$/, '')}/commit/${sha}.diff`, sha, 'background');
         if (state.status === 'ready') return state.files.map((file) => file.path);
-        return state.status === 'failed' ? [] : null;
+        return state.status === 'failed' && !willRetry(state) ? [] : null;
       },
       reapply: () => this.schedule(),
     });
