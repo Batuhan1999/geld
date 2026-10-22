@@ -488,6 +488,16 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review')?.hasAttribute('data-alone')).toBe(true);
   });
 
+  it('turns an open ✓ box into a comment when the page then says the reader is the author', () => {
+    document.head.innerHTML = '<meta name="user-login" content="alice">';
+    mount();
+    segment('approve').click();
+    expect(chosen()).toBe('Approve');
+    document.head.innerHTML = '<meta name="user-login" content="bob">';
+    mount();
+    expect(chosen()).toBe('Comment');
+  });
+
   it('counts the pending comments, lists them and discards the review as GitHub does', async () => {
     const pending = {
       id: '1',
