@@ -96,8 +96,9 @@ export const Run = z.object({
   scope: z.enum(['full', 'incremental']).optional(),
   coverage: z.object({ from: Sha.optional(), to: Sha }).optional(),
   part: z.object({ index: PositiveInt, total: PositiveInt }).optional(),
-  startedAt: z.iso.datetime().optional(),
-  completedAt: z.iso.datetime().optional(),
+  // ISO 8601 date-times with `Z` or a numeric offset (`+00:00`), as the spec allows.
+  startedAt: z.iso.datetime({ offset: true }).optional(),
+  completedAt: z.iso.datetime({ offset: true }).optional(),
   trigger: Trigger.optional(),
 });
 
@@ -107,7 +108,16 @@ export const Result = z.object({
   verdict: z.enum(['clean', 'findings']),
   score: z.object({ value: z.number(), max: z.number().positive() }).optional(),
   risk: z.enum(['minimal', 'low', 'moderate', 'high']).optional(),
-  counts: z.partialRecord(Severity, z.int().nonnegative()).optional(),
+  // An object of the known severities, open like every other: a bot's own count beside them must not void the block.
+  counts: z
+    .object({
+      critical: z.int().nonnegative().optional(),
+      high: z.int().nonnegative().optional(),
+      medium: z.int().nonnegative().optional(),
+      low: z.int().nonnegative().optional(),
+      info: z.int().nonnegative().optional(),
+    })
+    .optional(),
   findings: z.array(Finding).optional(),
   truncated: z.boolean().optional(),
   resolvedSinceLast: z.int().nonnegative().optional(),

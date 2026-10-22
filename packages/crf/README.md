@@ -101,7 +101,7 @@ Required on `summary`, `status` and `refusal`. A `finding` carries `{ id }` alon
 | `scope` | `full` · `incremental` | Optional. `incremental`: only what changed since the bot's last run |
 | `coverage` | `{ from?: SHA, to: SHA }` | Optional. The commits an incremental run covered |
 | `part` | `{ index, total }` | Optional. For a review published across several comments |
-| `startedAt`, `completedAt` | ISO 8601 date-time | Optional |
+| `startedAt`, `completedAt` | ISO 8601 date-time, with `Z` or a numeric offset | Optional |
 | `trigger` | `{ type, commentId?, by? }` | Optional. `type`: `push` · `comment` · `check` · `schedule` · `manual` · `api` |
 
 ### `result` (on a `summary`, expected once `run.state` is `completed`)

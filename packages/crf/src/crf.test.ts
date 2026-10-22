@@ -51,6 +51,18 @@ describe('carrier', () => {
     expect(parseBlock(body)?.kind).toBe('summary');
   });
 
+  it('keeps the fields a bot adds of its own when it writes the block', () => {
+    const own = { ...summary, vendor: { cost: 3 } };
+    expect(extractBlocks(encodeBlock(own))[0]?.value).toHaveProperty('vendor', { cost: 3 });
+  });
+
+  it('lets a malformed last block make no claim, and never run into the next one', () => {
+    // The last block is the claim: an earlier valid one does not come back because the last is broken.
+    expect(parseBlock(`${encodeBlock(summary)}\n<!-- crf:v0 {"schema":"crf/v0", broken -->`)).toBeUndefined();
+    // An unfinished block ends at its own comment's end, leaving the valid block after it whole.
+    expect(parseBlock(`<!-- crf:v0 {"schema":"crf/v0" -->\n${encodeBlock(summary)}`)?.kind).toBe('summary');
+  });
+
   it('makes no claim for malformed or invalid blocks', () => {
     expect(extractBlocks('<!-- crf:v0 {"schema": nope} -->')).toEqual([]);
     expect(parseBlock('<!-- crf:v0 {"schema":"crf/v0","kind":"reply"} -->')).toBeUndefined();

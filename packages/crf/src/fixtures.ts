@@ -86,6 +86,8 @@ export const FIXTURES: readonly Fixture[] = [
   { name: 'security track, superseded', valid: true, value: { ...EXAMPLE_STATUS, run: { ...EXAMPLE_STATUS.run, track: 'security', state: 'superseded' } } },
   { name: 'gate and risk', valid: true, value: { ...EXAMPLE_SUMMARY, result: { verdict: 'clean', risk: 'minimal', gate: { blocking: false, threshold: 'critical' } } } },
   { name: 'unknown fields are ignored', valid: true, value: { ...EXAMPLE_REPLY, vendor: { anything: true } } },
+  { name: 'a bot’s own count beside the known ones', valid: true, value: { ...EXAMPLE_SUMMARY, result: { ...EXAMPLE_SUMMARY.result, counts: { medium: 1, vendorTotal: 2 } } } },
+  { name: 'times with a numeric offset', valid: true, value: { ...EXAMPLE_SUMMARY, run: { ...EXAMPLE_SUMMARY.run, startedAt: '2026-10-16T07:20:11+00:00', completedAt: '2026-10-16T09:24:40+02:00' } } },
   { name: 'refusal without a refusal', valid: false, value: { ...EXAMPLE_REFUSAL, refusal: undefined } },
   { name: 'vendor severity in the severity field', valid: false, value: { ...EXAMPLE_FINDING, finding: { ...EXAMPLE_FINDING.finding, severity: 'P1' } } },
   { name: 'short head SHA', valid: false, value: { ...EXAMPLE_STATUS, run: { ...EXAMPLE_STATUS.run, headSha: 'abc123' } } },

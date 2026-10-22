@@ -3,8 +3,31 @@ import { CRF_VERSION, CrfBlock } from './schema';
 
 export const MARKER_PREFIX = `crf:${CRF_VERSION}`;
 
-// The JSON cannot contain a raw `-->` (writers escape `<` and `>`), so the first `}` followed by `-->` ends the block.
-const BLOCK_PATTERN = /<!--\s*crf:(v\d+)\s+(\{[\s\S]*?\})\s*-->/g;
+// Each HTML comment whole, to its own `-->` (the JSON cannot contain one: writers escape `<` and `>`), so a block whose
+// JSON is unfinished ends where its comment does and never runs on into the next block.
+const BLOCK_PATTERN = /<!--\s*crf:(v\d+)\s+([\s\S]*?)\s*-->/g;
+
+interface FoundBlock {
+  readonly version: string;
+  readonly json: string;
+}
+
+function findBlocks(markdown: string): FoundBlock[] {
+  const found: FoundBlock[] = [];
+  for (const match of markdown.matchAll(BLOCK_PATTERN)) {
+    const [, version, json] = match;
+    if (version !== undefined && json !== undefined) found.push({ version, json });
+  }
+  return found;
+}
+
+function parseJson(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+}
 
 export interface RawBlock {
   readonly version: string;
@@ -13,17 +36,10 @@ export interface RawBlock {
 
 /** Every `<!-- crf:vN {…} -->` in a comment's raw Markdown, in order, JSON-parsed but not validated. Malformed JSON is skipped. */
 export function extractBlocks(markdown: string): RawBlock[] {
-  const blocks: RawBlock[] = [];
-  for (const match of markdown.matchAll(BLOCK_PATTERN)) {
-    const [, version, json] = match;
-    if (version === undefined || json === undefined) continue;
-    try {
-      blocks.push({ version, value: JSON.parse(json) });
-    } catch {
-      continue;
-    }
-  }
-  return blocks;
+  return findBlocks(markdown).flatMap(({ version, json }) => {
+    const value = parseJson(json);
+    return value === undefined ? [] : [{ version, value }];
+  });
 }
 
 /**
@@ -31,14 +47,18 @@ export function extractBlocks(markdown: string): RawBlock[] {
  * `<` and `>` become `\u003c` and `\u003e`: still the same JSON, and a `-->` inside a title cannot end the comment early.
  */
 export function encodeBlock(block: CrfBlock): string {
-  const json = JSON.stringify(CrfBlock.parse(block)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  // Validated, but the writer's own object is what is written: parsing strips the fields a bot may add of its own.
+  CrfBlock.parse(block);
+  const json = JSON.stringify(block).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
   return `<!-- ${MARKER_PREFIX} ${json} -->`;
 }
 
+/** The last block of this version, chosen before it is parsed: a malformed last block makes no claim rather than revive an earlier one. */
 function lastOfThisVersion(markdown: string): unknown {
-  return extractBlocks(markdown)
+  const last = findBlocks(markdown)
     .filter((block) => block.version === CRF_VERSION)
-    .at(-1)?.value;
+    .at(-1);
+  return last === undefined ? undefined : parseJson(last.json);
 }
 
 /** The comment's block, validated against this package's schema. The last block wins; an invalid one makes no claim. */
