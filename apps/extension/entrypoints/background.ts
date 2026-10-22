@@ -280,6 +280,13 @@ async function fetchDiffText(url: string, headSha: string | null): Promise<Fetch
   // A parsed answer in memory does not help here: it has no text, and the entry would stop the fetch below.
   cache.delete(url);
   const result = await fetchDiff(url, 'page');
+  // A push landed while this head's text was on its way: what the fetch cached may be the diff before it, so it goes, and
+  // the newer head's request (or the next pass) fetches its own.
+  if (headSha !== null && textHeads.get(url) !== headSha) {
+    textCache.delete(url);
+    cache.delete(url);
+    return { ok: false, reason: 'queued' };
+  }
   if (!result.ok) return { ok: false, reason: result.reason, ...(result.retryAfterMs === undefined ? {} : { retryAfterMs: result.retryAfterMs }) };
   const text = readTextCache(url);
   return text === null ? { ok: false, reason: 'no-text' } : { ok: true, text };
