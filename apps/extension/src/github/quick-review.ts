@@ -1,4 +1,5 @@
 import { firstSentence } from '@geld/review';
+import { loadWriter, prefetchWriter, writerNow } from './comment-writer';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
@@ -579,6 +580,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   followInstantKey(root, keys.signal, () => describeSegments(state));
   armSnapshot(state);
   holdUntilReady(state);
+  // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for a review segment, not before.
+  for (const type of ['pointerenter', 'focusin']) state.group.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
   // The tally's link from this very tab changes only the hash: resolve it there and then.
   window.addEventListener(
     'hashchange',
@@ -1223,8 +1226,9 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
   draft.event = allowed(initial);
 
-  const body = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
-  body.value = draft.body;
+  // GitHub's own writer when it is at hand; a plain field stands in while it is fetched, or for good when it cannot be.
+  const writer = writerNow(pullPath, draft.body);
+  let body = writer?.field ?? plainField(draft.body);
   const pendingSection = createElement('div', { class: 'geld-quick-review__pending' });
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
   if (failure !== null) {
@@ -1238,8 +1242,9 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const kindToggle = createElement('button', { type: 'button', class: 'btn btn-sm BtnGroup-item geld-quick-review__kind-toggle', 'aria-label': 'Comment or review', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, [svgFromString(ICON_TRIANGLE_DOWN)]);
   const submitGroup = createElement('div', { class: 'geld-quick-review__submit-group' }, [submit]);
   const kindMenu = createElement('div', { class: 'geld-quick-review__menu', role: 'menu', 'aria-label': 'Comment or review', hidden: '' });
+  const bodyBox = createElement('div', { class: 'Overlay-body' }, [writer?.element ?? body, pendingSection, error]);
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
-    createElement('div', { class: 'Overlay-body' }, [body, pendingSection, error]),
+    bodyBox,
     createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submitGroup])]),
     kindMenu,
   ]);
@@ -1335,11 +1340,15 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     refresh();
   };
 
-  body.addEventListener('input', () => {
+  // On the box, not the field: GitHub's toolbar writes through `input` too, and the field is swapped when the writer lands.
+  bodyBox.addEventListener('input', (event) => {
+    if (event.target !== body) return;
     draft.body = body.value;
     refresh();
   });
   panel.addEventListener('keydown', (event) => {
+    // GitHub's suggestion lists (mentions, references, saved replies) close on Escape themselves.
+    if (event.key === 'Escape' && event.defaultPrevented) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       if (!kindMenu.hidden) {
@@ -1412,6 +1421,21 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   showVerdict();
   refresh();
   body.focus({ preventScroll: true });
+  if (writer !== null) fitWriter(panel, bodyBox, writer.element);
+  else
+    void loadWriter(pullPath, body.value).then((loaded) => {
+      if (loaded === null || state.panel !== panel || !body.isConnected) return;
+      const plain = body;
+      const focused = document.activeElement === plain;
+      loaded.field.value = plain.value;
+      plain.replaceWith(loaded.element);
+      body = loaded.field;
+      fitWriter(panel, bodyBox, loaded.element);
+      if (focused) {
+        body.focus({ preventScroll: true });
+        body.setSelectionRange(plain.selectionStart, plain.selectionEnd, plain.selectionDirection);
+      }
+    });
   // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
   void loadPending(state).then(() => {
     if (state.panel !== panel) return;
@@ -1419,6 +1443,28 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     showVerdict();
     refresh();
   });
+}
+
+function plainField(text: string): HTMLTextAreaElement {
+  const field = createElement('textarea', { class: 'form-control width-full geld-quick-review__body', placeholder: 'Leave a comment', 'aria-label': 'Review comment', rows: '4' });
+  field.value = text;
+  return field;
+}
+
+/** Room past the writer's own width, so its toolbar folds no button into "⋯" and stops short of the box's edge. */
+const WRITER_CUSHION = 16;
+
+/** The box as wide as GitHub's writer needs for every toolbar button, plus the cushion, inside the viewport. */
+function fitWriter(panel: HTMLElement, bodyBox: HTMLElement, writer: HTMLElement): void {
+  writer.style.width = 'max-content';
+  const natural = writer.offsetWidth;
+  writer.style.width = '';
+  const box = getComputedStyle(bodyBox);
+  const chrome = panel.offsetWidth - panel.clientWidth + parseFloat(box.paddingLeft) + parseFloat(box.paddingRight);
+  panel.style.width = `${Math.round(Math.min(natural + chrome + WRITER_CUSHION, document.documentElement.clientWidth - 32))}px`;
+  // Measured once: a window narrowed (or zoomed) afterwards still keeps the box, and its buttons, inside it.
+  panel.style.maxWidth = 'calc(100vw - 32px)';
+  positionPanel();
 }
 
 /** The footer every box shares: anything on the left, then Cancel and the action. */

@@ -210,7 +210,7 @@ describe('the tab bar button', () => {
     const words = box?.querySelector('textarea');
     if (words instanceof HTMLTextAreaElement) {
       words.value = 'Needs a test.';
-      words.dispatchEvent(new Event('input'));
+      words.dispatchEvent(new Event('input', { bubbles: true }));
     }
     segment('request changes').click();
     expect(document.querySelector('.geld-quick-review__panel')).toBe(box);
@@ -622,7 +622,7 @@ describe('the tab bar button', () => {
     const words = box?.querySelector('textarea');
     if (!(words instanceof HTMLTextAreaElement)) throw new Error('no box');
     words.value = 'Looks close.';
-    words.dispatchEvent(new Event('input'));
+    words.dispatchEvent(new Event('input', { bubbles: true }));
     // The choice: icon, name and a one-line note each, the current one checked.
     box?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
     const items = [...(box?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])];
@@ -642,7 +642,7 @@ describe('the tab bar button', () => {
     const field = again?.querySelector('textarea');
     if (!(field instanceof HTMLTextAreaElement)) throw new Error('no box');
     field.value = 'As a review.';
-    field.dispatchEvent(new Event('input'));
+    field.dispatchEvent(new Event('input', { bubbles: true }));
     again?.querySelector<HTMLButtonElement>('.geld-quick-review__kind-toggle')?.click();
     [...(again?.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item') ?? [])].find((item) => item.textContent?.startsWith('Review'))?.click();
     again?.querySelector<HTMLButtonElement>('.geld-quick-review__submit')?.click();
@@ -795,6 +795,86 @@ describe('the tab bar button', () => {
     mount();
     expect(scrolled).toEqual(['sidebar']);
     expect(window.location.hash).toBe('');
+  });
+
+  const WRITER_HTML = `
+    <form id="new_comment_form"><div class="js-previewable-comment-form preview-selected CommentBox">
+      <markdown-toolbar for="new_comment_field"><button id="bold-1" data-md-button="bold" data-hotkey-scope="new_comment_field" aria-labelledby="tip-1"></button><tool-tip id="tip-1" for="bold-1">Bold</tool-tip></markdown-toolbar>
+      <textarea id="new_comment_field" class="js-comment-field js-session-resumable" name="comment[body]"></textarea>
+      <div class="js-preview-body"><p>old preview</p></div>
+    </div></form>`;
+
+  it('writes in GitHub’s own comment writer, a copy re-id’d away from the page’s box', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') sent.push(String(init.body));
+      return new Response('{}', { status: String(input).includes('create_timeline_comment') ? 200 : 404 });
+    }));
+    document.body.insertAdjacentHTML('beforeend', WRITER_HTML);
+    const own = document.querySelector<HTMLTextAreaElement>('#new_comment_field');
+    if (own !== null) own.value = 'my unsent words';
+    window.history.replaceState(null, '', '/acme/widgets/pull/10');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/10' }, groups: [groupAt(counts())], headSha: () => SHA });
+    segment('comment').click();
+    const box = document.querySelector('.geld-quick-review__panel');
+    const writer = box?.querySelector('.js-previewable-comment-form');
+    const field = writer?.querySelector('textarea');
+    if (!(field instanceof HTMLTextAreaElement)) throw new Error('no writer');
+    expect(writer?.classList.contains('write-selected')).toBe(true);
+    expect(box instanceof HTMLElement ? box.style.maxWidth : '').toBe('calc(100vw - 32px)');
+    expect(writer?.classList.contains('preview-selected')).toBe(false);
+    expect(writer?.querySelector('.js-preview-body')?.textContent).toBe('');
+    expect(field.value).toBe('');
+    expect(field.id).not.toBe('new_comment_field');
+    expect(field.classList.contains('js-session-resumable')).toBe(false);
+    expect(writer?.querySelector('markdown-toolbar')?.getAttribute('for')).toBe(field.id);
+    const bold = writer?.querySelector('[data-md-button="bold"]');
+    expect(bold?.getAttribute('data-hotkey-scope')).toBe(field.id);
+    expect(writer?.querySelector('tool-tip')?.getAttribute('for')).toBe(bold?.id);
+    expect(bold?.getAttribute('aria-labelledby')).toBe(writer?.querySelector('tool-tip')?.id);
+    expect(own?.value).toBe('my unsent words');
+    // In a form of its own, as GitHub's preview needs, whose submit (GitHub's Ctrl+Enter) goes nowhere.
+    const form = field.form;
+    expect(form?.id).not.toBe('new_comment_form');
+    const submitted = new Event('submit', { cancelable: true });
+    form?.dispatchEvent(submitted);
+    expect(submitted.defaultPrevented).toBe(true);
+    field.value = 'Ship it.';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    box?.querySelector<HTMLButtonElement>('.geld-quick-review__submit')?.click();
+    await settle();
+    expect(sent).toEqual([JSON.stringify({ text: 'Ship it.' })]);
+  });
+
+  it('fetches the writer off the conversation, on intent, and swaps it in keeping the words', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      return url === '/acme/widgets/pull/11' ? new Response(`<html><body>${WRITER_HTML}</body></html>`, { status: 200 }) : new Response('{}', { status: 404 });
+    }));
+    window.history.replaceState(null, '', '/acme/widgets/pull/11/changes');
+    applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/11' }, groups: [groupAt(counts())], headSha: () => SHA });
+    expect(asked).not.toContain('/acme/widgets/pull/11');
+    segment('comment').click();
+    const stand = document.querySelector<HTMLTextAreaElement>('.geld-quick-review__panel textarea');
+    if (stand === null) throw new Error('no box');
+    expect(stand.closest('.js-previewable-comment-form')).toBeNull();
+    stand.value = 'Halfway';
+    stand.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    await settle();
+    expect(asked.filter((url) => url === '/acme/widgets/pull/11')).toHaveLength(1);
+    const field = document.querySelector('.geld-quick-review__panel .js-previewable-comment-form textarea');
+    if (!(field instanceof HTMLTextAreaElement)) throw new Error('no writer');
+    expect(field.value).toBe('Halfway');
+    expect(stand.isConnected).toBe(false);
+    // The next box has the writer at once, from the same fetch.
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .btn-invisible:not(.geld-quick-review__discard)')?.click();
+    document.querySelector('.geld-quick-review__group[aria-label="Submit review"]')?.dispatchEvent(new Event('pointerenter'));
+    segment('comment').click();
+    expect(document.querySelector('.geld-quick-review__panel .js-previewable-comment-form textarea')).not.toBeNull();
+    expect(asked.filter((url) => url === '/acme/widgets/pull/11')).toHaveLength(1);
   });
 
   it('reads the pull request path', () => {
