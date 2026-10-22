@@ -335,6 +335,12 @@ describe('the tab bar button', () => {
     expect(tally?.getAttribute('aria-label')).toBe('2 approvals, 1 request for changes, 1 reviewer commented');
     // Left of the group.
     expect(tally?.nextElementSibling?.classList.contains('geld-quick-review__status')).toBe(true);
+    // Another pull request in the same tab whose reviews cannot be read shows no counts, not the last one's.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/8');
+    applyQuickReview(true, { page: { kind: 'pull-conversation', diffUrl: null, stateKey: '/acme/widgets/pull/8' }, groups: [groupAt(counts())], headSha: () => SHA });
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__tally')?.hidden).toBe(true);
   });
 
   it('wears the kind of comment its box will post: a review while comments are pending or once chosen, a plain comment otherwise', async () => {

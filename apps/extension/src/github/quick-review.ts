@@ -309,6 +309,9 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     mounted.pullPath = pullPath;
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
     mounted.mergeActions = null;
+    // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
+    mounted.reviewers = [];
+    showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
     holdUntilReady(mounted);
   }
   mounted.context = context;
