@@ -697,6 +697,7 @@ describe('the tab bar button', () => {
     const field = writer?.querySelector('textarea');
     if (!(field instanceof HTMLTextAreaElement)) throw new Error('no writer');
     expect(writer?.classList.contains('write-selected')).toBe(true);
+    expect(box instanceof HTMLElement ? box.style.maxWidth : '').toBe('calc(100vw - 32px)');
     expect(writer?.classList.contains('preview-selected')).toBe(false);
     expect(writer?.querySelector('.js-preview-body')?.textContent).toBe('');
     expect(field.value).toBe('');

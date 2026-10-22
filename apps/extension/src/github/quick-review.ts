@@ -1378,6 +1378,8 @@ function fitWriter(panel: HTMLElement, bodyBox: HTMLElement, writer: HTMLElement
   const box = getComputedStyle(bodyBox);
   const chrome = panel.offsetWidth - panel.clientWidth + parseFloat(box.paddingLeft) + parseFloat(box.paddingRight);
   panel.style.width = `${Math.round(Math.min(natural + chrome + WRITER_CUSHION, document.documentElement.clientWidth - 32))}px`;
+  // Measured once: a window narrowed (or zoomed) afterwards still keeps the box, and its buttons, inside it.
+  panel.style.maxWidth = 'calc(100vw - 32px)';
   positionPanel();
 }
 
