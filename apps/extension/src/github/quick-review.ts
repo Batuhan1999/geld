@@ -610,8 +610,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   });
   armSnapshot(state);
   holdUntilReady(state);
-  // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for the box, not before.
-  for (const type of ['pointerenter', 'focusin']) root.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
+  // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for a review segment, not before.
+  for (const type of ['pointerenter', 'focusin']) state.group.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
   // The tally's link from this very tab changes only the hash: resolve it there and then.
   window.addEventListener(
     'hashchange',
