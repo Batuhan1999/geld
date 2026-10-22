@@ -4,7 +4,7 @@ Geld is a Safari Web Extension packaged in Apple’s required macOS containing a
 
 Recording: {{VIDEO_URL}}
 
-Captured on {{TEST_DEVICE}}. The recording shows Geld {{VERSION}} (build {{BUILD}}) from launch through the complete setup and typical workflow: opening the containing app, enabling the Safari extension, granting github.com access, opening a public GitHub pull request, hiding and revealing test files, and using the toolbar popup and settings.
+Captured on {{TEST_DEVICE}}. The recording shows Geld {{VIDEO_VERSION}}, and this submission is Geld {{VERSION}} (build {{BUILD}}). It goes from launch through the complete setup and typical workflow: opening the containing app, enabling the Safari extension, granting github.com access, opening a public GitHub pull request, hiding and revealing test files, and using the toolbar popup and settings.
 
 Geld has no account registration, purchases, subscriptions, or user-generated content. Optional GitHub sign-in is not required for the core workflow and does not create a Geld account.
 
@@ -26,16 +26,17 @@ f. Geld hides the matching test files and shows a “test files hidden” row.
 g. Use that row, the Tests panel in the file tree, or the Geld toolbar popup to reveal the files.
 h. Open Geld’s settings from the toolbar popup to configure optional categories and custom patterns.
 
-Optional “Sign in with GitHub” synchronizes settings through a secret gist in the user’s own GitHub account. It is not required to test Geld and does not create a Geld account.
+Optional “Sign in with GitHub” authorizes Geld’s GitHub App and synchronizes settings through a secret gist in the user’s own GitHub account. It is not required to test Geld and does not create a Geld account.
 
 4. External services, tools, and platforms
 
 - github.com: the website whose pull-request and commit diff interface Geld augments.
 - patch-diff.githubusercontent.com: GitHub’s raw diff host, used to calculate accurate file and line counts when the page does not contain every diff.
-- api.github.com: used to fetch Geld’s public signed pattern catalog and, only when the user opts in, for GitHub OAuth and gist synchronization.
-- GitHub OAuth device flow: optional; requests the “gist” scope only.
+- api.github.com: used to fetch Geld’s public signed pattern catalog and, only when the user opts in, for GitHub sign-in and gist synchronization.
+- GitHub App device flow: optional. The user approves Geld’s GitHub App on GitHub, with the permissions GitHub shows on that page. Geld uses the resulting token only to read and write the user’s own settings gist.
+- An AI gateway the user configures: optional, experimental and off by default. Only when the user turns it on, enters their own gateway address, model and API key (for example Vercel AI Gateway, OpenRouter, OpenAI or TypeSafe) and asks for a triage does Geld send that pull request’s review comments to that gateway, from the user’s browser. Geld provides no AI service of its own.
 
-Geld has no server or database and uses no analytics, advertising, payment processor, AI service, subscription, or in-app purchase. Repository content and diff classification are processed locally. Geld never receives repository content or user data. With optional synchronization enabled, settings are stored by GitHub in the user’s own secret gist.
+Geld has no server or database and uses no analytics, advertising, payment processor, subscription, or in-app purchase. Repository content and diff classification are processed locally, apart from the optional AI triage above, which goes only to the gateway the user chose. Geld never receives repository content or user data. With optional synchronization enabled, settings are stored by GitHub in the user’s own secret gist.
 
 5. Regional differences
 

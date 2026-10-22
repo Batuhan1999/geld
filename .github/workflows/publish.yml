@@ -27,7 +27,8 @@ name: Publish to stores
 #   Firefox : AMO_JWT_ISSUER, AMO_JWT_SECRET  (add-on id comes from the manifest's browser_specific_settings)
 #   Safari  : APPLE_ASC_KEY_ID, APPLE_ASC_ISSUER_ID, APPLE_ASC_PRIVATE_KEY (base64 .p8),
 #             APPLE_CERTIFICATE_P12 (base64), APPLE_CERTIFICATE_PASSWORD, APPLE_TEAM_ID
-#             plus repository variables SAFARI_REVIEW_VIDEO_URL and SAFARI_REVIEW_TEST_DEVICE
+#             plus repository variables SAFARI_REVIEW_VIDEO_URL, SAFARI_REVIEW_VIDEO_VERSION and
+#             SAFARI_REVIEW_TEST_DEVICE
 # See apps/extension/store/PUBLISHING.md for where each comes from.
 
 on:
@@ -225,13 +226,21 @@ jobs:
           KEY: ${{ secrets.APPLE_ASC_KEY_ID }}
           CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           REVIEW_VIDEO: ${{ vars.SAFARI_REVIEW_VIDEO_URL }}
+          REVIEW_VIDEO_VERSION: ${{ vars.SAFARI_REVIEW_VIDEO_VERSION }}
           REVIEW_DEVICE: ${{ vars.SAFARI_REVIEW_TEST_DEVICE }}
+          TAG: ${{ needs.assets.outputs.tag }}
         run: |
+          # The recording is labelled with what it shows, so a new version needs a new recording; a new build of the same one does not.
+          version="${TAG#v}"; version="${version%%-build.*}"
+          recorded="${REVIEW_VIDEO_VERSION%% *}"
           if [ -z "$KEY" ] || [ -z "$CERT" ]; then
             echo "::warning title=Safari::Skipped: Apple credentials are not configured (see apps/extension/store/PUBLISHING.md)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           elif [ -z "$REVIEW_VIDEO" ] || [ -z "$REVIEW_DEVICE" ]; then
             echo "::warning title=Safari::Skipped: Apple requires a physical-Mac recording and tested-device details. Set SAFARI_REVIEW_VIDEO_URL and SAFARI_REVIEW_TEST_DEVICE (see apps/extension/store/PUBLISHING.md)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [ "$recorded" != "$version" ]; then
+            echo "::warning title=Safari::Skipped: the review recording shows Geld ${REVIEW_VIDEO_VERSION:-(unset)}, not $version. Record this version and update SAFARI_REVIEW_VIDEO_URL and SAFARI_REVIEW_VIDEO_VERSION (see apps/extension/store/PUBLISHING.md)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -338,6 +347,7 @@ jobs:
           TAG: ${{ needs.assets.outputs.tag }}
           NOTES: ${{ needs.assets.outputs.notes }}
           SAFARI_REVIEW_VIDEO_URL: ${{ vars.SAFARI_REVIEW_VIDEO_URL }}
+          SAFARI_REVIEW_VIDEO_VERSION: ${{ vars.SAFARI_REVIEW_VIDEO_VERSION }}
           SAFARI_REVIEW_TEST_DEVICE: ${{ vars.SAFARI_REVIEW_TEST_DEVICE }}
           FASTLANE_SKIP_UPDATE_CHECK: '1'
           FASTLANE_HIDE_CHANGELOG: '1'
