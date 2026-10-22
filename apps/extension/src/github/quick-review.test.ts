@@ -318,6 +318,20 @@ describe('the tab bar button', () => {
     expect(segment('request changes').hasAttribute('data-current')).toBe(false);
   });
 
+  it('tallies the standing reviews from the Reviewers block, left of the group', async () => {
+    const row = (login: string, words: string): string => `<p><span data-assignee-name="${login}"><img src="/a.png"></span><span class="reviewers-status-icon" aria-label="${words}"></span></p>`;
+    const partial = `<form id="pull-request-reviewers-form-1">${row('ann', 'ann approved these changes')}${row('ben', 'ben approved these changes')}${row('cy', 'cy requested changes')}${row('dee', 'dee left review comments')}</form>`;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('show_partial') ? new Response(partial, { status: 200 }) : new Response('{}', { status: 404 }))));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    const tally = document.querySelector<HTMLElement>('.geld-quick-review__tally');
+    expect(tally?.hidden).toBe(false);
+    expect([...(tally?.children ?? [])].map((part) => part.textContent)).toEqual(['2', '1', '1']);
+    expect(tally?.getAttribute('aria-label')).toBe('2 approvals, 1 request for changes, 1 reviewer commented');
+    // Left of the group.
+    expect(tally?.nextElementSibling?.classList.contains('geld-quick-review__status')).toBe(true);
+  });
+
   it('says "Review" on 💬 when it is the only action the reader has', async () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('UNMERGEABLE', false), { status: 200 }) : new Response('{}', { status: 404 }))));

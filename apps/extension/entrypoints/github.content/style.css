@@ -946,6 +946,46 @@ html[data-geld-quick-review] details.js-reviews-container {
   opacity: 0.6;
 }
 
+/* "3 ✓ 1 ✗ 3 💬": how the reviews stand, read only, so no surface: muted counts, each glyph in its verdict's colour. */
+.geld-quick-review__tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  cursor: default;
+}
+
+.geld-quick-review__tally[hidden] {
+  display: none;
+}
+
+.geld-quick-review__tally-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.geld-quick-review__tally-part > svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.geld-quick-review__tally-part[data-tone='approved'] > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__tally-part[data-tone='changes'] > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__tally-part[data-tone='commented'] > svg {
+  color: var(--fgColor-muted, #59636e);
+}
+
 /* "Approved", "Submitting…": a moment's word beside the group, nothing when idle. */
 .geld-quick-review__status {
   color: var(--fgColor-muted, #59636e);

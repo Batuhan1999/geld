@@ -1,0 +1,59 @@
+import type { SidebarReviewer } from './review/crawler';
+import { crawlSidebarReviewers } from './review/crawler';
+
+/**
+ * How the pull request's reviews stand, as the sidebar's Reviewers block
+ * keeps them: each reviewer once, by their latest review (an approval, a
+ * request for changes, or comments; a dismissed approval reads as
+ * comments). The block is GitHub's own partial, served for any tab
+ * (`issues/N/show_partial?partial=pull_requests/sidebar/show/reviewers`,
+ * the URL the block refreshes itself from), so the tally is the same on
+ * Files changed as on the conversation.
+ */
+export interface ReviewTally {
+  readonly approved: number;
+  readonly changesRequested: number;
+  readonly commented: number;
+}
+
+/** `/owner/repo/pull/N` → the Reviewers block's partial. */
+export function reviewersPartialUrl(pullPath: string): string | null {
+  const match = /^(\/[^/]+\/[^/]+)\/pull\/(\d+)/.exec(pullPath);
+  return match === null ? null : `${match[1]}/issues/${match[2]}/show_partial?partial=${encodeURIComponent('pull_requests/sidebar/show/reviewers')}`;
+}
+
+export function tallyOf(reviewers: readonly SidebarReviewer[]): ReviewTally {
+  let approved = 0;
+  let changesRequested = 0;
+  let commented = 0;
+  for (const reviewer of reviewers) {
+    if (reviewer.state === 'approved') approved += 1;
+    else if (reviewer.state === 'changes_requested') changesRequested += 1;
+    else if (reviewer.state === 'commented' || reviewer.state === 'dismissed') commented += 1;
+  }
+  return { approved, changesRequested, commented };
+}
+
+/** "2 approvals, 1 request for changes, 3 reviewers commented": what the tally says, in words, for its label. */
+export function tallyWords(tally: ReviewTally): string {
+  const parts = [
+    tally.approved > 0 ? `${tally.approved} ${tally.approved === 1 ? 'approval' : 'approvals'}` : '',
+    tally.changesRequested > 0 ? `${tally.changesRequested} ${tally.changesRequested === 1 ? 'request for changes' : 'requests for changes'}` : '',
+    tally.commented > 0 ? `${tally.commented} ${tally.commented === 1 ? 'reviewer commented' : 'reviewers commented'}` : '',
+  ];
+  return parts.filter((part) => part !== '').join(', ');
+}
+
+/** The tally for a pull request, or null when GitHub could not say. */
+export async function fetchReviewTally(pullPath: string): Promise<ReviewTally | null> {
+  const url = reviewersPartialUrl(pullPath);
+  if (url === null) return null;
+  try {
+    const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html', 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!response.ok) return null;
+    const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+    return tallyOf(crawlSidebarReviewers(doc));
+  } catch {
+    return null;
+  }
+}

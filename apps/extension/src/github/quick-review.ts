@@ -8,6 +8,8 @@ import type { PageInfo } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
+import type { ReviewTally } from './review-tally';
+import { fetchReviewTally, tallyWords } from './review-tally';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_COMMENT, ICON_EYE, ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST_CLOSED, ICON_LOCK, ICON_TRASH, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
@@ -221,6 +223,8 @@ interface Mounted {
   readonly closeButton: HTMLButtonElement;
   /** "Ready for review", in merge's place on a draft the reader may take out of draft. */
   readonly readyButton: HTMLButtonElement;
+  /** "3 ✓ 1 ✗ 3 💬": how the reviews stand, left of the group, for reading only. */
+  readonly tally: HTMLElement;
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
@@ -422,6 +426,7 @@ function withBreaks(lines: readonly string[]): (string | HTMLElement)[] {
 function createControls(pullPath: string, context: QuickReviewContext): Mounted {
   const counter = createElement('span', { class: 'geld-quick-review__count', 'aria-hidden': 'true', hidden: '' });
   const status = createElement('span', { class: 'geld-quick-review__status', role: 'status' });
+  const tally = createElement('span', { class: 'geld-quick-review__tally', role: 'img', hidden: '' });
   const segment = (event: ReviewEvent): HTMLButtonElement => {
     const info = EVENT_INFO[event];
     tipIds += 1;
@@ -455,7 +460,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const actions = createElement('div', { class: 'BtnGroup geld-quick-review__group geld-quick-review__actions-group', role: 'group', 'aria-label': 'Merge or close', hidden: '' });
   const actionTips = [describe(mergeButton, ['Merge pull request']), describe(closeButton, ['Close pull request']), describe(readyButton, ['Ready for review'])].filter((tip): tip is HTMLElement => tip !== null);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
-  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), actions, ...tips, ...actionTips]);
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), actions, ...tips, ...actionTips]);
   const keys = new AbortController();
   const stickyWatch = new MutationObserver(() => {
     if (mounted !== state) return;
@@ -474,6 +479,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     mergeButton,
     closeButton,
     readyButton,
+    tally,
     mergeActions: null,
     mergeFor: null,
     mergeTimer: 0,
@@ -609,14 +615,35 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   const pullPath = state.pullPath;
   state.mergeFor = pullPath;
   window.clearTimeout(state.mergeTimer);
-  const actions = await readMergeActions(pullPath);
+  const [actions, tally] = await Promise.all([readMergeActions(pullPath), fetchReviewTally(pullPath)]);
   if (mounted !== state || state.pullPath !== pullPath) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
+  if (tally !== null) showTally(state, tally);
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
   return actions;
+}
+
+const TALLY_PARTS: ReadonlyArray<{ readonly key: keyof ReviewTally; readonly icon: string; readonly tone: string }> = [
+  { key: 'approved', icon: ICON_CHECK, tone: 'approved' },
+  { key: 'changesRequested', icon: ICON_X, tone: 'changes' },
+  { key: 'commented', icon: ICON_COMMENT, tone: 'commented' },
+];
+
+/** "3 ✓ 1 ✗ 3 💬": each kind of standing review counted, the kinds with none left out, nothing at all with no reviews. */
+function showTally(state: Mounted, tally: ReviewTally): void {
+  const words = tallyWords(tally);
+  if (state.tally.getAttribute('aria-label') === words && state.tally.hidden === (words === '')) return;
+  state.tally.replaceChildren(
+    ...TALLY_PARTS.filter((part) => tally[part.key] > 0).map((part) =>
+      createElement('span', { class: 'geld-quick-review__tally-part', 'data-tone': part.tone }, [createElement('span', {}, [String(tally[part.key])]), svgFromString(part.icon)]),
+    ),
+  );
+  state.tally.setAttribute('aria-label', words);
+  state.tally.title = words;
+  state.tally.hidden = words === '';
 }
 
 /**
