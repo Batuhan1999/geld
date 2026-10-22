@@ -818,11 +818,13 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 /*
  * ✓ and ✗ under the pointer, and only there, tint that surface with the theme's own success and danger (the muted
- * surface laid over it at 70%, so the grey still shows through) and colour the icon. Theme variables only, no fixed green
+ * surface laid over it at 70%, so the grey still shows through), its border with the muted border of the same colour
+ * (about the grey border's lightness, only tinted) and colour the icon. Theme variables only, no fixed green
  * or red: colour-blind and high-contrast themes redefine these.
  */
 .geld-quick-review__segment.btn[data-event='approve']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-success-muted);
 }
 
 .geld-quick-review__segment.btn[data-event='approve']:hover .geld-quick-review__glyph > svg {
@@ -831,6 +833,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__segment.btn[data-event='request changes']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-danger-muted);
 }
 
 .geld-quick-review__segment.btn[data-event='request changes']:hover .geld-quick-review__glyph > svg {
@@ -838,11 +841,12 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /*
- * Merge and close, their own group right of the review group, tinting the same surface on hover with GitHub's state
+ * Merge and close, their own group right of the review group, tinting the same surface and border on hover with GitHub's state
  * colours, which accessible themes redefine: merged (`done`, purple by default) and closed (red by default).
  */
 .geld-quick-review__segment.btn[data-action='merge']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-done-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-done-muted);
 }
 
 .geld-quick-review__segment.btn[data-action='merge']:hover .geld-quick-review__glyph > svg {
@@ -851,6 +855,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__segment.btn[data-action='close']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-closed-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-closed-muted);
 }
 
 .geld-quick-review__segment.btn[data-action='close']:hover .geld-quick-review__glyph > svg {
@@ -859,10 +864,32 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__segment.btn[data-action='ready']:hover {
   background: linear-gradient(color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-open-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-open-muted);
 }
 
 .geld-quick-review__segment.btn[data-action='ready']:hover .geld-quick-review__glyph > svg {
   color: var(--fgColor-open);
+}
+
+/* Primer draws a group's dividers as each next button's left border: a hovered button's right edge is its neighbour's, tinted with it. */
+.geld-quick-review__segment.btn[data-event='approve']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-success-muted);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-danger-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='merge']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-done-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='close']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-closed-muted);
+}
+
+.geld-quick-review__segment.btn[data-action='ready']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-open-muted);
 }
 
 /*
