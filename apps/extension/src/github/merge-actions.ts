@@ -12,9 +12,13 @@
 export type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE';
 
 export interface MergeBox {
+  /** GitHub's state for the pull request (a draft is `OPEN` with `draft`); null when the answer did not say. */
+  readonly state: 'OPEN' | 'CLOSED' | 'MERGED' | null;
   readonly open: boolean;
   readonly draft: boolean;
   readonly canClose: boolean;
+  /** Whether the reader may turn the open pull request back into a draft. */
+  readonly canConvertToDraft: boolean;
   /** Whether the reader may take the draft out of draft ("Ready for review"). */
   readonly canMarkReady: boolean;
   /** Each reviewer's standing verdict, as GitHub counts them (their latest approval or request for changes, dismissed ones gone). */
@@ -80,10 +84,12 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     if (login !== '' && (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')) verdicts.push({ login, state: review.state, id });
   }
   return {
+    state: pull.state === 'OPEN' || pull.state === 'CLOSED' || pull.state === 'MERGED' ? pull.state : null,
     open: pull.state === 'OPEN',
     draft: pull.isDraft === true,
     canClose: pull.viewerCanClose === true,
     canMarkReady: pull.viewerCanMarkReadyForReview === true,
+    canConvertToDraft: pull.viewerCanConvertToDraft === true,
     verdicts,
     mergeable: requirements.state === 'MERGEABLE',
     canBypass: pull.viewerCanAdminBypassMergeRequirements === true,
@@ -161,6 +167,16 @@ export function readyRequest(pullPath: string, nonce: string): { readonly url: s
   return { url: `${pullPath}/page_data/mark_ready_for_review`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
 }
 
+/** What GitHub's header sends to turn an open pull request back into a draft: nothing but the request. */
+export function draftRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  return { url: `${pullPath}/page_data/convert_to_draft`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
+}
+
+/** What GitHub sends to reopen a closed pull request: nothing but the request. */
+export function reopenRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  return { url: `${pullPath}/page_data/reopen_pull_request`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
+}
+
 /** The reader's own standing verdict on the pull request, if they have one. */
 export function viewerVerdict(box: MergeBox, login: string): ReviewVerdict['state'] | null {
   return box.verdicts.find((verdict) => verdict.login.toLowerCase() === login.toLowerCase())?.state ?? null;
@@ -197,8 +213,18 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
 }
 
 /** The reason a merge or close failed, in GitHub's words when it gave any. */
-export function actionErrorText(action: 'merge' | 'close' | 'ready', status: number, payload: unknown): string {
-  const verb = action === 'ready' ? 'mark the pull request ready for review' : `${action} the pull request`;
+export type StatusAction = 'merge' | 'close' | 'ready' | 'draft' | 'reopen';
+
+const ACTION_VERB: { readonly [A in StatusAction]: string } = {
+  merge: 'merge the pull request',
+  close: 'close the pull request',
+  ready: 'mark the pull request ready for review',
+  draft: 'convert the pull request to a draft',
+  reopen: 'reopen the pull request',
+};
+
+export function actionErrorText(action: StatusAction, status: number, payload: unknown): string {
+  const verb = ACTION_VERB[action];
   if (isRecord(payload)) {
     const said = stringOf(payload.error).trim();
     const metadata = isRecord(payload.metadata) ? payload.metadata : {};

@@ -43,7 +43,9 @@ describe('parseMergeBox', () => {
   it('reads what the reader may do and the commit GitHub would write', () => {
     const box = parseMergeBox(payload());
     expect(box).toEqual({
+      state: 'OPEN',
       open: true,
+      canConvertToDraft: false,
       draft: false,
       canClose: true,
       canMarkReady: false,
