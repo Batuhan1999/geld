@@ -284,6 +284,8 @@ interface Mounted {
   panel: HTMLElement | null;
   /** Gives the open box another verdict, keeping its words. */
   retarget: ((event: ReviewEvent) => void) | null;
+  /** The open box's own refresh: a send finishing for another box (one closed meanwhile) re-enables this one. */
+  panelRefresh: (() => void) | null;
   /** A review on its way: the controls and the box wait for it. */
   sending: boolean;
   submittedTimer: number;
@@ -574,6 +576,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     context,
     panel: null,
     retarget: null,
+    panelRefresh: null,
     sending: false,
     submittedTimer: 0,
     pending: null,
@@ -1154,6 +1157,7 @@ function closePanel(restoreFocus = false): void {
   mounted.panel.remove();
   mounted.panel = null;
   mounted.retarget = null;
+  mounted.panelRefresh = null;
   const opener = mounted.opener === null ? null : buttonFor(mounted, mounted.opener);
   mounted.opener = null;
   opener?.setAttribute('aria-expanded', 'false');
@@ -1300,6 +1304,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     return 'GitHub could not submit the review.';
   } finally {
     state.sending = false;
+    state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
     if (state.status.textContent === 'Submitting…') state.status.textContent = '';
   }
@@ -1337,6 +1342,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
     return 'GitHub could not post the comment.';
   } finally {
     state.sending = false;
+    state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
     if (state.status.textContent === 'Posting…') state.status.textContent = '';
   }
@@ -1514,6 +1520,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     refresh();
     void discardPendingReview(pullPath).then((done) => {
       state.sending = false;
+      state.panelRefresh?.();
       if (!done) {
         error.textContent = 'GitHub could not discard the review.';
         error.hidden = false;
@@ -1532,6 +1539,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   });
 
   showPanel(state, panel, initial);
+  state.panelRefresh = refresh;
   state.retarget = (event) => {
     draft.event = allowed(event);
     if (state.opener !== null) buttonFor(state, state.opener)?.setAttribute('aria-expanded', 'false');
@@ -1616,6 +1624,7 @@ async function sendAction(state: Mounted, kind: StatusAction, request: { readonl
     return actionErrorText(kind, 0, null);
   } finally {
     state.sending = false;
+    state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
     for (const pill of state.pills) pill.removeAttribute('aria-busy');
     if (state.status.textContent === ACTION_STATUS[kind]) state.status.textContent = '';
@@ -1725,6 +1734,7 @@ function openMergeBox(state: Mounted): void {
   submit.addEventListener('click', () => void send());
 
   showPanel(state, panel, 'merge');
+  state.panelRefresh = refresh;
   fill();
   refresh();
   (bypass ? consent : submit).focus({ preventScroll: true });
