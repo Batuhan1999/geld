@@ -270,10 +270,10 @@ const textHeads = new Map<string, string>();
 
 /** The page's own diff as text: the text cache first (unless the head moved since), else one `page` fetch (which fills it). */
 async function fetchDiffText(url: string, headSha: string | null): Promise<FetchDiffTextResponse> {
-  if (headSha !== null) {
-    const known = textHeads.get(url);
+  // Text cached for a head nobody named (the header's request before a push) may be the diff before it: fetched again.
+  if (headSha !== null && textHeads.get(url) !== headSha) {
     textHeads.set(url, headSha);
-    if (known !== undefined && known !== headSha) textCache.delete(url);
+    textCache.delete(url);
   }
   const cached = readTextCache(url);
   if (cached !== null) return { ok: true, text: cached };

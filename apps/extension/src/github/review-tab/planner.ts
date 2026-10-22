@@ -126,7 +126,7 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
       void savePlanRecord(current.key, record);
     } else {
       const delta = planDelta(planSignatures(plan), input);
-      plan = normalizePlan(input, remapProposals(record.plan, input), { producer: record.plan.producer, model: record.plan.model, madeAt: record.plan.madeAt, fromHeaders: record.plan.fromHeaders, ...(record.plan.overview === undefined ? {} : { overview: record.plan.overview }) });
+      plan = laidOver(record.plan, input);
       behind = { head: input.headSha, newHunks: delta.added.length, goneHunks: delta.removed.length };
       if (automatic && settings !== null && !current.planning && current.autoReplanHead !== input.headSha) {
         current.autoReplanHead = input.headSha;
@@ -134,6 +134,9 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
         void reviewAiReady(settings).then((ready) => (ready ? planWithAi(settings, true) : undefined));
       }
     }
+  } else if (!sameHidden(plan, input)) {
+    // Same head, but what Geld hides changed: hidden files belong under `supporting`, visible ones in the steps.
+    plan = laidOver(record.plan, input);
   }
   const previous = current.progress === null ? null : planWithId(current, current.progress.planId);
   current.effective = plan;
@@ -147,6 +150,19 @@ export function plannerState(input: PlanInput | null, settings: GeldSettings | n
 /* ------------------------------------------------------------------------- */
 /* Progress                                                                   */
 /* ------------------------------------------------------------------------- */
+
+/** A stored plan laid over the current diff: the hunks it knows stay in their steps, the rest gather under Everything else. */
+function laidOver(stored: ReviewPlan, input: PlanInput): ReviewPlan {
+  return normalizePlan(input, remapProposals(stored, input), { producer: stored.producer, model: stored.model, madeAt: stored.madeAt, fromHeaders: stored.fromHeaders, ...(stored.overview === undefined ? {} : { overview: stored.overview }) });
+}
+
+/** The plan treats as hidden exactly the files the input hides (of those it holds): hidden hunks are a step's `supporting`. */
+function sameHidden(plan: ReviewPlan, input: PlanInput): boolean {
+  const supporting = new Set(plan.steps.flatMap((step) => step.supporting.map((ref) => ref.path)));
+  const held = new Set(plan.steps.flatMap((step) => [...step.touches, ...step.supporting].map((ref) => ref.path)));
+  const hidden = new Set(input.files.filter((file) => file.hidden !== null && held.has(file.path)).map((file) => file.path));
+  return supporting.size === hidden.size && [...hidden].every((path) => supporting.has(path));
+}
 
 /** The plan progress was kept for, when this visit still has it: marks follow its steps to their successors. */
 function planWithId(current: Visit, id: string): ReviewPlan | null {
@@ -166,7 +182,7 @@ function withProgress(update: (progress: ReviewProgress) => ReviewProgress): voi
 export function markStep(step: ReviewStep, state: StepState, note?: string): void {
   withProgress((progress) => ({
     ...progress,
-    steps: { ...progress.steps, [step.id]: { state, at: new Date().toISOString(), fingerprint: step.fingerprint, ...(note === undefined || note.trim() === '' ? {} : { note: note.trim() }) } },
+    steps: { ...progress.steps, [step.id]: { state, at: new Date().toISOString(), fingerprint: step.fingerprint, signatures: step.signatures, ...(note === undefined || note.trim() === '' ? {} : { note: note.trim() }) } },
   }));
 }
 

@@ -995,6 +995,8 @@ export interface StepProgress {
   readonly note?: string;
   /** The step's fingerprint when the mark was made; a different one now means the hunks changed since. */
   readonly fingerprint: string;
+  /** The step's hunk signatures when marked: a step whose id changed (its first hunk edited) is found again by them. */
+  readonly signatures?: readonly string[];
 }
 
 export interface ReviewProgress {
@@ -1061,26 +1063,28 @@ export function carryProgress(progress: ReviewProgress | null, next: ReviewPlan,
   const steps: Record<string, StepProgress> = Object.fromEntries(Object.entries(progress.steps).filter(([id]) => ids.has(id)));
   const reading: Record<string, number> = Object.fromEntries(Object.entries(progress.reading ?? {}).filter(([id]) => ids.has(id)));
   let current = progress.current !== null && ids.has(progress.current) ? progress.current : null;
-  if (previous !== null && previous.id === progress.planId) {
-    const nextSignatures = next.steps.map((step) => ({ step, signatures: new Set(step.signatures) }));
-    for (const old of previous.steps) {
-      if (ids.has(old.id)) continue;
-      const mark = progress.steps[old.id];
-      let successor: ReviewStep | null = null;
-      let shared = 0;
-      for (const candidate of nextSignatures) {
-        const count = old.signatures.filter((signature) => candidate.signatures.has(signature)).length;
-        if (count > shared) {
-          successor = candidate.step;
-          shared = count;
-        }
+  const before = previous !== null && previous.id === progress.planId ? new Map(previous.steps.map((step) => [step.id, step.signatures] as const)) : new Map<string, readonly string[]>();
+  const nextSignatures = next.steps.map((step) => ({ step, signatures: new Set(step.signatures) }));
+  const orphans = new Set([...Object.keys(progress.steps), ...Object.keys(progress.reading ?? {}), ...(progress.current === null ? [] : [progress.current])].filter((id) => !ids.has(id)));
+  for (const id of orphans) {
+    const mark = progress.steps[id];
+    // The mark's own signatures first: the plan it was made under may be gone (a reload after a second push).
+    const signatures = mark?.signatures ?? before.get(id);
+    if (signatures === undefined) continue;
+    let successor: ReviewStep | null = null;
+    let shared = 0;
+    for (const candidate of nextSignatures) {
+      const count = signatures.filter((signature) => candidate.signatures.has(signature)).length;
+      if (count > shared) {
+        successor = candidate.step;
+        shared = count;
       }
-      if (successor === null) continue;
-      if (mark !== undefined && steps[successor.id] === undefined) steps[successor.id] = mark;
-      const ms = progress.reading?.[old.id] ?? 0;
-      if (ms > 0) reading[successor.id] = (reading[successor.id] ?? 0) + ms;
-      if (current === null && progress.current === old.id) current = successor.id;
     }
+    if (successor === null) continue;
+    if (mark !== undefined && steps[successor.id] === undefined) steps[successor.id] = mark;
+    const ms = progress.reading?.[id] ?? 0;
+    if (ms > 0) reading[successor.id] = (reading[successor.id] ?? 0) + ms;
+    if (current === null && progress.current === id) current = successor.id;
   }
   return { planId: next.id, steps, current, ...(Object.keys(reading).length === 0 ? {} : { reading }) };
 }

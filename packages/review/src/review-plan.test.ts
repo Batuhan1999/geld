@@ -248,6 +248,10 @@ describe('progress', () => {
     expect(carried.reading).toEqual({ 's-edited': 4000 });
     // Without the plan the marks were kept for, nothing can be followed.
     expect(carryProgress(progress, next).steps).toEqual({});
+    // Unless the mark kept its step's hunks: then it finds the step again with no plan to go by (a reload after a second push).
+    const kept: ReviewProgress = { ...progress, steps: { [first.id]: { state: 'accepted', at: 'now', fingerprint: first.fingerprint, signatures: first.signatures } } };
+    expect(carryProgress(kept, next).steps['s-edited']?.state).toBe('accepted');
+    expect(stepDisplayState(edited, carryProgress(kept, next))).toBe('changed');
   });
 });
 
