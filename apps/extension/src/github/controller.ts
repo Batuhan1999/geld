@@ -22,6 +22,7 @@ import type { ResolvedRepoConfig } from './repo-config-source';
 import { RepoConfigSource, validConfigs } from './repo-config-source';
 import { createElement, isOwnElement, OWN_UI_ATTRIBUTE, queryAll, restoreManagedText, svgFromString, writeAttribute } from './dom';
 import { conversationHeadSha, detectHeadSha, fetchHeadSha, shaFromCommitUrl, watchFilesRefresh } from './head-sha';
+import { applyQuickReview, reassertStatusPills, removeQuickReview } from './quick-review';
 import type { HeaderStatGroup } from './header-stats';
 import { applyHeaderStats, findHeaderStatGroups, holdsHeaderStats, isSrOnlyText, restoreHeaderStats } from './header-stats';
 import type { DiffEntry, DiffView, TreeFileNode } from './model';
@@ -407,6 +408,8 @@ export class GeldController {
       // Likewise before paint: chips whose row GitHub just re-rendered come
       // straight back from the in-memory diff states, so no frame lacks them.
       if (chipRemoved(records)) this.applyListChips();
+      // The status pill too: a header GitHub (re)rendered shows Geld's pill in its first frame.
+      if (this.settings.quickReview && this.mayDressPage()) reassertStatusPills();
       this.schedule(false);
     });
     this.observer.observe(document.documentElement, {
@@ -898,6 +901,7 @@ export class GeldController {
     const { view, breakdown: hidden, expanded, renderedEntryCount } = this.lastFiles;
 
     const header = phase('header', () => this.applyHeaderTotals(page, url, matcher, view, renderedEntryCount, hidden));
+    this.placeQuickReview(page, url);
     const headerHidden = header.hidden;
     const allTotals = header.all;
     if (this.virtualSection !== null) this.renderVirtualSection(page.stateKey, matcher, this.virtualSection, headerHidden ?? hidden ?? EMPTY_BREAKDOWN, expanded);
@@ -1630,6 +1634,13 @@ export class GeldController {
     const groups = this.currentPage === null ? findHeaderStatGroups() : this.headerGroupsFor(this.currentPage);
     if (groups.length === 0) return;
     this.applyHeader(groups, settled.hidden, settled.categories, settled.files);
+    // The remounted header took the review button with it.
+    if (this.currentPage !== null) this.placeQuickReview(this.currentPage, new URL(window.location.href));
+  }
+
+  /** The tab bar's "Submit review", before the line counts on every pull request tab (quick-review.ts). */
+  private placeQuickReview(page: PageInfo, url: URL): void {
+    applyQuickReview(this.settings.quickReview, { page, groups: this.headerGroupsFor(page), headSha: () => this.headShaFor(page, url), digest: this.settings.prOverview });
   }
 
   private publish(state: TabState): void {
@@ -1668,6 +1679,13 @@ export class GeldController {
     onReviewBeforeMatch(event, this.settings);
   };
 
+  /** What a pass checks before touching the page, for the work done before paint between passes. */
+  private mayDressPage(): boolean {
+    if (!this.settings.enabled || !extensionAlive() || isSignInInterstitial()) return false;
+    const repo = repoFromPathname(window.location.pathname);
+    return repo === null || decideRepo(this.repoRules, repo).allowed;
+  }
+
   private teardown(): void {
     this.settledHeader = null;
     this.headerGroups = [];
@@ -1676,6 +1694,7 @@ export class GeldController {
     this.teardownView();
     teardownReviewOverview();
     removeReviewTab();
+    removeQuickReview();
     removePrListStats();
     removeCommitHover();
     removeAuthorHiding();

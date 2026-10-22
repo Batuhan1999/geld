@@ -1,0 +1,203 @@
+import type { MergeBox, MergeOffer, StatusAction } from './merge-actions';
+import { METHOD_LABEL } from './merge-actions';
+import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
+import { ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRIANGLE_DOWN } from './ui/icons';
+
+/**
+ * The pull request's status pill in GitHub's header ("Open", "Draft",
+ * "Merged", "Closed") as a menu of the statuses the reader may switch to.
+ * GitHub's label is React's (or the classic page's) and is never touched
+ * beyond being hidden: a button of Geld's, dressed in the label's own
+ * classes and `data-status`/`data-size` (Primer's StateLabel keys its look on
+ * them), stands right after it with a caret. Both the header's pill and the
+ * sticky header's are swapped.
+ */
+
+export type PullStatus = 'open' | 'draft' | 'merged' | 'closed';
+
+export interface StatusOption {
+  readonly status: PullStatus;
+  /** What choosing it does; null for the status the pull request has now. */
+  readonly action: StatusAction | null;
+  /** GitHub's words for the action, under the status's name. */
+  readonly note: string;
+}
+
+export const STATUS_INFO: { readonly [S in PullStatus]: { readonly label: string; readonly icon: string } } = {
+  open: { label: 'Open', icon: ICON_GIT_PULL_REQUEST },
+  draft: { label: 'Draft', icon: ICON_GIT_PULL_REQUEST_DRAFT },
+  merged: { label: 'Merged', icon: ICON_GIT_MERGE },
+  closed: { label: 'Closed', icon: ICON_GIT_PULL_REQUEST_CLOSED },
+};
+
+/** Open, draft, merged, then closed, always last. */
+const STATUS_ORDER: readonly PullStatus[] = ['open', 'draft', 'merged', 'closed'];
+
+export function statusOf(box: MergeBox): PullStatus | null {
+  if (box.state === 'MERGED') return 'merged';
+  if (box.state === 'CLOSED') return 'closed';
+  if (box.state === 'OPEN') return box.draft ? 'draft' : 'open';
+  return null;
+}
+
+/**
+ * The menu: the status the pull request has, checked, and each status the
+ * reader may switch it to, in `STATUS_ORDER`. A draft can be marked ready or
+ * closed, not merged; an open one turned into a draft, merged (when GitHub
+ * would take it, or only past the rules for an admin) or closed; a closed
+ * one reopened (GitHub gives no reopen permission of its own: whoever may
+ * close may reopen). Pull requests have one way to close: the close reasons
+ * ("not planned", "duplicate") are issues'. Empty when there is nothing to
+ * switch to, a merged pull request always.
+ */
+export function statusOptions(box: MergeBox, offer: MergeOffer): readonly StatusOption[] {
+  const current = statusOf(box);
+  if (current === null || current === 'merged') return [];
+  const method = box.methods[0] ?? 'SQUASH';
+  const moves: { [S in PullStatus]?: StatusOption } = {};
+  if (current === 'draft' && box.canMarkReady) moves.open = { status: 'open', action: 'ready', note: 'Ready for review' };
+  if (current === 'closed' && box.canClose) moves.open = { status: 'open', action: 'reopen', note: 'Reopen pull request' };
+  if (current === 'open' && box.canConvertToDraft) moves.draft = { status: 'draft', action: 'draft', note: 'Convert to draft' };
+  if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: offer === 'bypass' ? 'Bypass rules and merge' : METHOD_LABEL[method] };
+  if (current !== 'closed' && box.canClose) moves.closed = { status: 'closed', action: 'close', note: 'Close pull request' };
+  if (Object.keys(moves).length === 0) return [];
+  return STATUS_ORDER.flatMap((status) => (status === current ? [{ status, action: null, note: 'Current status' }] : (moves[status] ?? [])));
+}
+
+const GITHUB_PILLS = '[data-component="PageHeader"] [data-component="StateLabel"], .gh-header-meta .State, .gh-header-sticky .State';
+const ATTR_HIDDEN = 'data-geld-status-hidden';
+const ATTR_PILL = 'data-geld-status-pill';
+
+/** The words a pill was last dressed from, so a pass rewrites it only when GitHub's label changed. */
+const dressedFrom = new WeakMap<HTMLElement, string>();
+
+function labelKey(label: Element): string {
+  return [label.className, label.getAttribute('data-status'), label.getAttribute('data-size'), label.getAttribute('title'), label.textContent].join('|');
+}
+
+function dress(pill: HTMLButtonElement, label: Element): void {
+  const key = labelKey(label);
+  if (dressedFrom.get(pill) === key) return;
+  dressedFrom.set(pill, key);
+  pill.className = `${label.className} geld-status-pill`;
+  for (const name of ['data-status', 'data-size', 'title']) {
+    const value = label.getAttribute(name);
+    if (value === null) pill.removeAttribute(name);
+    else pill.setAttribute(name, value);
+  }
+  const glyph = label.querySelector('svg');
+  pill.replaceChildren(
+    ...(glyph === null ? [] : [glyph.cloneNode(true)]),
+    createElement('span', { class: 'geld-status-pill__label' }, [(label.textContent ?? '').trim()]),
+    createElement('span', { class: 'geld-status-pill__caret', 'aria-hidden': 'true' }, [svgFromString(ICON_TRIANGLE_DOWN)]),
+    // The 1-click merge's face, laid over the pill while the instant key is held, so the pill keeps its width.
+    createElement('span', { class: 'geld-status-pill__merge', 'aria-hidden': 'true' }, [svgFromString(ICON_GIT_MERGE), 'Merge']),
+  );
+}
+
+export const ATTR_INSTANT_MERGE = 'data-geld-instant-merge';
+
+/**
+ * The pills as GitHub draws a merged pull request's, the moment a merge went
+ * through (the page reloads to GitHub's own after): Primer's StateLabel keys
+ * its look on `data-status`, the classic label on its `State--merged` class.
+ */
+export function showMergedPills(pills: readonly HTMLButtonElement[]): void {
+  for (const pill of pills) {
+    pill.removeAttribute(ATTR_INSTANT_MERGE);
+    pill.removeAttribute('aria-haspopup');
+    if (pill.hasAttribute('data-status')) pill.setAttribute('data-status', 'pullMerged');
+    for (const token of [...pill.classList]) if (/^State--(?:open|draft|closed)$/.test(token)) pill.classList.replace(token, 'State--merged');
+    if (pill.hasAttribute('title')) pill.setAttribute('title', 'Status: Merged');
+    pill.replaceChildren(svgFromString(ICON_GIT_MERGE), createElement('span', { class: 'geld-status-pill__label' }, ['Merged']));
+  }
+}
+
+/**
+ * Put Geld's pill in place of each of GitHub's header pills (or put GitHub's
+ * back, with `on` false), and return Geld's. `onOpen` runs on a click with
+ * the pill clicked.
+ */
+export function syncStatusPills(on: boolean, onOpen: (pill: HTMLButtonElement, click: MouseEvent) => void): readonly HTMLButtonElement[] {
+  const pills: HTMLButtonElement[] = [];
+  for (const label of document.querySelectorAll<HTMLElement>(GITHUB_PILLS)) {
+    if (label.closest(`[${OWN_UI_ATTRIBUTE}]`) !== null) continue;
+    const next = label.nextElementSibling;
+    const existing = next instanceof HTMLButtonElement && next.hasAttribute(ATTR_PILL) ? next : null;
+    if (!on) {
+      existing?.remove();
+      label.removeAttribute(ATTR_HIDDEN);
+      continue;
+    }
+    const pill = existing ?? createPill(onOpen);
+    dress(pill, label);
+    if (existing === null) label.after(pill);
+    if (!label.hasAttribute(ATTR_HIDDEN)) label.setAttribute(ATTR_HIDDEN, '');
+    pills.push(pill);
+  }
+  return pills;
+}
+
+function createPill(onOpen: (pill: HTMLButtonElement, click: MouseEvent) => void): HTMLButtonElement {
+  const pill = createElement('button', { type: 'button', [ATTR_PILL]: '', [OWN_UI_ATTRIBUTE]: '', 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
+  pill.addEventListener('click', (click) => onOpen(pill, click));
+  return pill;
+}
+
+export function removeStatusPills(): void {
+  syncStatusPills(false, () => undefined);
+}
+
+/**
+ * Whether the reader could change the status the last time a pull request of
+ * this repository was read, so the pill is swapped from the first paint (the
+ * caret widens it: swapping only once the merge box answered moved the
+ * header's words). In the page's own storage, as the whitespace redirect's
+ * guard is: it must be read synchronously, before paint.
+ */
+const HINT_KEY = 'geld:status-menu';
+const HINT_CAP = 200;
+
+let hintMemo: Record<string, boolean> | null = null;
+
+function readHints(): Record<string, boolean> {
+  if (hintMemo !== null) return hintMemo;
+  hintMemo = readStoredHints();
+  return hintMemo;
+}
+
+function readStoredHints(): Record<string, boolean> {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(HINT_KEY) ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [repo, value] of Object.entries(parsed)) if (typeof value === 'boolean') out[repo] = value;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Forget the hints read into memory (tests, and nothing else, need to). */
+export function resetStatusHints(): void {
+  hintMemo = null;
+}
+
+export function statusHint(repo: string): boolean | null {
+  return readHints()[repo] ?? null;
+}
+
+export function rememberStatusHint(repo: string, can: boolean): void {
+  if (readHints()[repo] === can) return;
+  // Read afresh: another tab may have written since this page first read the hints.
+  const hints = readStoredHints();
+  delete hints[repo];
+  hints[repo] = can;
+  hintMemo = hints;
+  const entries = Object.entries(hints);
+  try {
+    window.localStorage.setItem(HINT_KEY, JSON.stringify(Object.fromEntries(entries.slice(Math.max(0, entries.length - HINT_CAP)))));
+  } catch {
+    // Storage full or blocked: the pill then waits for the merge box, as on a first visit.
+  }
+}

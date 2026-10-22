@@ -11,7 +11,7 @@ import type { BotVerdictRecord, CommentLane, GeldPrMeta, RawCheckRun, ReviewItem
 import { botAppAvatar, botById, botTitle, checkReporterAvatar, clusterComments, firstSentence, isOpenStatus, isReviewShaped, isStatusLineComment, isTriggerComment, latestPreviews, latestReports, mergeCheckRuns, parseBotBody, parsePreviews, refusalReason, REPORT_GRACE_MS, reportsFrom, reportsFromChecks, rerunTriggerFor, resolveBotId, verdictsFrom } from '@geld/review';
 import type { Preview } from '@geld/review';
 import { detectHeadSha } from '../head-sha';
-import { describePage } from '../page';
+import { describePage, pullRequestStateWords } from '../page';
 import { phase, phaseSince } from '../../lib/perf';
 import { persist } from '../../lib/context';
 import { settingsItem } from '../../lib/storage';
@@ -2512,11 +2512,6 @@ function pullRequestClosed(): boolean {
 /** GitHub's state label reads "Draft" while the pull request is one. */
 function pullRequestDraft(): boolean {
   return /^(?:status:\s*)?draft$/i.test(pullRequestStateWords());
-}
-
-function pullRequestStateWords(): string {
-  const label = document.querySelector('[data-component="StateLabel"], .gh-header-meta .State, .State[title]');
-  return (label?.getAttribute('title') ?? label?.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function subjectOf(): MarkdownSubject | null {

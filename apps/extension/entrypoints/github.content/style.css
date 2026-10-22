@@ -714,6 +714,819 @@
 }
 
 /* ------------------------------------------------------------------------ */
+/* Submit review in the tab bar (quick-review.ts)                            */
+/* ------------------------------------------------------------------------ */
+
+/* The one Submit review on the page: GitHub's own (React Files changed toolbar, classic "Review changes") gives way. */
+html[data-geld-quick-review] [class*='ReviewMenuButton'],
+html[data-geld-quick-review] details.js-reviews-container {
+  display: none !important;
+}
+
+.geld-quick-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  /*
+   * Primer's group floats its buttons, so its min-content is one button wide: a flex row sized from min-content (the
+   * sticky toolbar's) then shrank below the group and its last buttons ran past the toolbar's edge.
+   */
+  min-width: max-content;
+  /* A 26px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
+  margin: -4px 12px -4px 0;
+  white-space: nowrap;
+}
+
+/* In the Files changed tab's stuck toolbar, where GitHub's own button would be: the toolbar's row spaces it, at its 28px. */
+.geld-quick-review[data-geld-place] {
+  margin: 0;
+}
+
+/* At the end of the other tabs' compact header's title row, right of the title, which gives way to it. */
+.geld-quick-review[data-geld-place='header'] {
+  /* Primer's header row orders its parts with `order`; the group comes last. */
+  order: 99;
+  align-self: center;
+  margin-left: auto;
+  padding-left: 16px;
+}
+
+.geld-quick-review[data-geld-place] .geld-quick-review__segment.btn {
+  height: 28px;
+}
+
+/*
+ * GitHub floats the counts right of the tabs and drops their line with 12px of top padding. Holding the button too,
+ * the box is the tab bar's height instead (TabNav, a 40px row) with both centred on the tabs, as the tabs' own labels are.
+ */
+[class*='rightContentWrapper'][data-geld-quick-review-host] {
+  box-sizing: border-box;
+  height: 40px;
+  padding-top: 0 !important;
+  align-items: center;
+}
+
+/*
+ * [✓ | ✗ | 💬]: a Primer button group dressed as the Files changed toolbar's own default buttons (Merge status, the
+ * settings gear): their surface, border and resting shadow, from the same tokens.
+ */
+.geld-quick-review__segment.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  min-width: 28px;
+  padding: 0 6px;
+  border-color: var(--button-default-borderColor-rest, #d1d9e0);
+  background: var(--button-default-bgColor-rest, #f6f8fa);
+  box-shadow: var(--button-default-shadow-resting, 0 1px 0 0 rgba(31, 35, 40, 0.04));
+  transition: none;
+}
+
+.geld-quick-review__glyph {
+  display: flex;
+}
+
+/* A block, and coloured on the svg itself: inline it sat on the text line, and Primer's `.btn .octicon` colours the icon directly. */
+.geld-quick-review__glyph > svg {
+  display: block;
+  color: var(--fgColor-muted, #59636e);
+  transition: none;
+}
+
+/* Every glyph wears its hover colour at rest too, so each button says what it does before the pointer reaches it. */
+.geld-quick-review__segment[data-event='approve'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__segment[data-event='request changes'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-default, #1f2328);
+}
+
+/* The comment octicon's bubble fills y 1 to 12 of 16, its tail below: centred by its box it reads high beside ✓ and ✗. */
+.geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph {
+  transform: translateY(1px);
+}
+
+.geld-quick-review__segment.btn:hover {
+  border-color: var(--button-default-borderColor-hover, #d1d9e0);
+  background: var(--button-default-bgColor-hover, #eff2f5);
+}
+
+.geld-quick-review__segment.btn:hover .geld-quick-review__glyph > svg,
+.geld-quick-review__segment[aria-expanded='true'] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-default, #1f2328);
+}
+
+/* The segment whose comment box is open reads as pressed. */
+.geld-quick-review__segment.btn[aria-expanded='true'] {
+  background: var(--button-default-bgColor-active, #e6eaef);
+}
+
+/*
+ * ✓ and ✗ under the pointer, and only there, tint that surface with the theme's own success and danger (the muted
+ * surface laid over it at 70%, so the grey still shows through), its border with the muted border of the same colour
+ * (about the grey border's lightness, only tinted) and colour the icon. Theme variables only, no fixed green
+ * or red: colour-blind and high-contrast themes redefine these.
+ */
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-success-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-success-muted);
+}
+
+.geld-quick-review__segment.btn[data-event='approve']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover {
+  background: linear-gradient(color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent), color-mix(in srgb, var(--bgColor-danger-muted) 70%, transparent)) var(--button-default-bgColor-rest, #f6f8fa);
+  border-color: var(--borderColor-danger-muted);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes']:not([aria-expanded='true']):hover .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger);
+}
+
+/* Primer draws a group's dividers as each next button's left border: a hovered button's right edge is its neighbour's, tinted with it. */
+.geld-quick-review__segment.btn[data-event='approve']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-success-muted);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes']:hover + .geld-quick-review__segment.btn {
+  border-left-color: var(--borderColor-danger-muted);
+}
+
+/*
+ * The reader's standing verdict: ✓ or ✗ pressed in (Primer's selected surface, an inner shadow) with its glyph in the
+ * verdict's colour. Still a button: pressing it again leaves a new review.
+ */
+.geld-quick-review__segment.btn[data-current] {
+  background: var(--button-default-bgColor-selected, var(--button-default-bgColor-active, #e6eaef));
+  box-shadow: inset 0 1px 2px rgba(31, 35, 40, 0.15);
+}
+
+.geld-quick-review__segment.btn[data-event='approve'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-success);
+}
+
+.geld-quick-review__segment.btn[data-event='request changes'][data-current] .geld-quick-review__glyph > svg {
+  color: var(--fgColor-danger);
+}
+
+/* ⌘ (Ctrl) held: ✓ and ✗ now send on a click, and their glyphs gain an arrow to say so. */
+.geld-quick-review__glyph--instant,
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([data-event='comment']) .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant),
+.geld-quick-review[data-instant][data-pending] .geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph:has(+ .geld-quick-review__glyph--instant) {
+  display: none;
+}
+
+/* 💬 sends at once only with comments pending (it submits them): its arrow shows only then. */
+.geld-quick-review[data-instant] .geld-quick-review__segment:not([data-event='comment']) .geld-quick-review__glyph--instant,
+.geld-quick-review[data-instant][data-pending] .geld-quick-review__segment[data-event='comment'] .geld-quick-review__glyph--instant {
+  display: flex;
+}
+
+.geld-quick-review[aria-busy='true'] .geld-quick-review__segment {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* Not drawn until what the reader may do is read: close and merge arriving later would push the group aside. */
+.geld-quick-review[data-loading] {
+  display: none !important;
+}
+
+/*
+ * "3 ✓ 1 ✗ 3 💬": how the reviews stand, muted counts with each glyph in its verdict's colour on a subtle surface. A link to
+ * the reviews on the conversation; resting on it shows who reviewed (the snapshot card).
+ */
+.geld-quick-review__tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12));
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.geld-quick-review__tally:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  color: var(--fgColor-default, #1f2328);
+  text-decoration: none;
+}
+
+.geld-quick-review__tally[hidden] {
+  display: none;
+}
+
+.geld-quick-review__tally-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.geld-quick-review__tally-part > svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.geld-quick-review__tally-part[data-tone='approved'] > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__tally-part[data-tone='changes'] > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__tally-part[data-tone='commented'] > svg {
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The snapshot card under the tally: one line per reviewer, a link to their review. */
+.geld-quick-review__snapshot {
+  position: fixed;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 12px;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+  box-shadow: var(--shadow-floating-small, 0 1px 1px rgba(31, 35, 40, 0.06), 0 6px 12px rgba(31, 35, 40, 0.12));
+}
+
+.geld-quick-review__snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.geld-quick-review__snapshot-row:is(:hover, :focus-visible) {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  text-decoration: none;
+}
+
+.geld-quick-review__snapshot-avatar {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12));
+}
+
+.geld-quick-review__snapshot-avatar--bot {
+  border-radius: 4px;
+}
+
+.geld-quick-review__snapshot-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-quick-review__snapshot-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.geld-quick-review__snapshot-state > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.geld-quick-review__snapshot-state[data-tone='approved'] > svg {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.geld-quick-review__snapshot-state[data-tone='changes'] > svg {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+/* "Approved", "Submitting…": a moment's word beside the group, nothing when idle. */
+.geld-quick-review__status {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.geld-quick-review__status:empty {
+  display: none;
+}
+
+/* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */
+.Overlay.geld-quick-review__panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  right: auto;
+  bottom: auto;
+  z-index: 100;
+  width: min(424px, calc(100vw - 32px));
+  max-height: none;
+  animation: none;
+}
+
+/* A small box: the words, any pending comments, then the buttons with no rule between. */
+.Overlay.geld-quick-review__panel .Overlay-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 12px 0;
+  overflow-y: auto;
+}
+
+.geld-quick-review__body {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.geld-quick-review__error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.Overlay-footer.geld-quick-review__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 0;
+  box-shadow: none;
+}
+
+/* Slimmer than Primer's small button: 24px, tighter padding, 12px words. */
+.geld-quick-review__footer .btn-sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+/* Cancel and Discard are words with a grey surface on hover, in the text's colour rather than Primer's link blue. */
+.geld-quick-review__footer .btn.btn-invisible {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* Its trash can stands in the pending rows' glyph column: the rows' hover surface overhangs 8px the same way. */
+  margin-left: -8px;
+  padding-left: 8px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* As Primer's `btn-octicon-danger` (GitHub's trash cans in branch and file lists): muted at rest, the danger colour to act, never a surface. */
+.geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard:is(:hover, :focus-visible, :active) {
+  background: transparent;
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.geld-quick-review__discard > svg {
+  margin: 0;
+  color: inherit;
+}
+
+/*
+ * "Request changes" in red, as "Approve" is in Primer's green: the danger button's solid look, from the theme. No shadow:
+ * the danger tokens' only one is an inset line, which read as a second border inside the first.
+ */
+.geld-quick-review__submit--danger.btn {
+  border-color: var(--button-danger-borderColor-hover, var(--borderColor-danger-emphasis, #cf222e));
+  background: var(--button-danger-bgColor-hover, var(--bgColor-danger-emphasis, #cf222e));
+  color: var(--button-danger-fgColor-hover, var(--fgColor-onEmphasis, #ffffff));
+  box-shadow: none;
+}
+
+.geld-quick-review__submit--danger.btn:hover:not(:disabled) {
+  border-color: var(--button-danger-borderColor-active, var(--borderColor-danger-emphasis, #cf222e));
+  background: var(--button-danger-bgColor-active, #a40e26);
+  color: var(--button-danger-fgColor-active, var(--fgColor-onEmphasis, #ffffff));
+}
+
+/* Disabled as Primer's green is: the same red washed halfway into the page, its words a faded white (no danger token is). */
+.geld-quick-review__submit--danger.btn:disabled {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--bgColor-danger-emphasis, #cf222e) 50%, var(--bgColor-default, #ffffff));
+  color: var(--button-primary-fgColor-disabled, color-mix(in srgb, var(--fgColor-onEmphasis, #ffffff) 80%, transparent));
+}
+
+/* The pending count as a badge on the group's top-right corner, ringed in the page colour so it reads over the outline. */
+.geld-quick-review__badged {
+  position: relative;
+  display: inline-flex;
+}
+
+.geld-quick-review__count {
+  position: absolute;
+  /* Above the group's buttons, which Primer lifts to z-index 1 when focused, pressed or hovered. */
+  z-index: 2;
+  top: -7px;
+  right: -7px;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--bgColor-accent-emphasis, #0969da);
+  box-shadow: 0 0 0 2px var(--bgColor-default, #ffffff);
+  color: var(--fgColor-onEmphasis, #ffffff);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.geld-quick-review__count[hidden] {
+  display: none;
+}
+
+/* 💬's box posts a comment or a review: a split submit button, the choice in a small menu over its caret. */
+.geld-quick-review__submit-group {
+  display: inline-flex;
+}
+
+.geld-quick-review__footer .btn.geld-quick-review__kind-toggle {
+  padding: 0 6px;
+}
+
+.geld-quick-review__kind-toggle > svg {
+  margin: 0;
+}
+
+.geld-quick-review__menu {
+  position: fixed;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 12px;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+  box-shadow: var(--shadow-floating-small, 0 1px 1px rgba(31, 35, 40, 0.06), 0 6px 12px rgba(31, 35, 40, 0.12));
+}
+
+.geld-quick-review__menu[hidden] {
+  display: none;
+}
+
+.geld-quick-review__menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-quick-review__menu-item:is(:hover, :focus-visible) {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  outline: none;
+}
+
+.geld-quick-review__menu-visual,
+.geld-quick-review__menu-check {
+  display: flex;
+  flex: 0 0 auto;
+  padding-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.geld-quick-review__menu-check {
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.geld-quick-review__menu-item[aria-checked='true'] .geld-quick-review__menu-check {
+  visibility: visible;
+}
+
+.geld-quick-review__menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.geld-quick-review__menu-label {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.geld-quick-review__menu-note {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* The merge box: the method, the commit GitHub would write (editable), and GitHub's bypass checkbox when that is the only way. */
+.geld-quick-review__method[hidden],
+.geld-quick-review__commit[hidden],
+.geld-quick-review__bypass[hidden] {
+  display: none;
+}
+
+.geld-quick-review__method {
+  align-self: flex-start;
+}
+
+.geld-quick-review__commit-body {
+  font-size: 12px;
+}
+
+.geld-quick-review__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.geld-quick-review__stack-note {
+  margin: 0;
+  font-size: 12px;
+}
+
+.geld-quick-review__bypass {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.geld-quick-review__bypass > input {
+  margin-top: 2px;
+}
+
+/* The close box is only its buttons (and GitHub's reason after a refusal): as wide as they are. */
+.Overlay.geld-quick-review__panel.geld-quick-review__panel--compact {
+  width: auto;
+  max-width: min(424px, calc(100vw - 32px));
+}
+
+.geld-quick-review__panel--compact .Overlay-body:has(> .geld-quick-review__error[hidden]:only-child) {
+  display: none;
+}
+
+.geld-quick-review__panel--compact .Overlay-footer.geld-quick-review__footer {
+  padding-top: 12px;
+}
+
+/* GitHub's Close pull request and Ready for review: default buttons, the glyph in its state's colour. */
+.geld-quick-review__footer .btn.geld-quick-review__confirm-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.geld-quick-review__confirm-submit[data-action='close'] > svg {
+  color: var(--fgColor-closed, #d1242f);
+}
+
+.geld-quick-review__confirm-submit:is([data-action='ready'], [data-action='reopen']) > svg {
+  color: var(--fgColor-open, #1a7f37);
+}
+
+.geld-quick-review__confirm-submit[data-action='draft'] > svg {
+  color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
+}
+
+/*
+ * The header's status pill as a menu of the statuses the reader may switch to: GitHub's label hidden, Geld's button
+ * beside it in the label's own classes and data-status (Primer's StateLabel keys its look on them), a caret added.
+ * The button's own resets are `:where()`, so GitHub's class rules (not the user agent's button look) win.
+ */
+[data-geld-status-hidden] {
+  display: none !important;
+}
+
+:where(button.geld-status-pill) {
+  margin: 0;
+  border: 0;
+  font-family: inherit;
+}
+
+button.geld-status-pill {
+  position: relative;
+  cursor: pointer;
+}
+
+/*
+ * ⌘ (Ctrl) held on an approved pull request GitHub would merge now: the pill is a 1-click merge, "Merge" in GitHub's
+ * merge colour on no fill, ringed in it. The merge face lies over the usual one, which keeps its room, so the pill's
+ * width (and the header's words after it) never move. `!important` over Primer's StateLabel fill for its status.
+ */
+.geld-status-pill__merge {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.geld-status-pill__merge > svg {
+  fill: currentColor;
+}
+
+button.geld-status-pill[data-geld-instant-merge] > :not(.geld-status-pill__merge) {
+  visibility: hidden;
+}
+
+button.geld-status-pill[data-geld-instant-merge] .geld-status-pill__merge {
+  display: inline-flex;
+}
+
+button.geld-status-pill[data-geld-instant-merge] {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--borderColor-done-emphasis, var(--fgColor-done, #8250df));
+  color: var(--fgColor-done, #8250df) !important;
+  filter: none;
+}
+
+button.geld-status-pill[data-geld-instant-merge]:hover {
+  background: var(--bgColor-done-muted, rgba(171, 125, 248, 0.15)) !important;
+  filter: none;
+}
+
+button.geld-status-pill:is(:hover, [aria-expanded='true']) {
+  filter: brightness(0.92);
+}
+
+button.geld-status-pill[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.geld-status-pill__caret {
+  display: inline-flex;
+  margin-left: 2px;
+  margin-right: -4px;
+}
+
+.geld-status-pill__caret > svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+/* Each status in the menu wears GitHub's colour for it, which accessible themes redefine. */
+.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='open'] .geld-quick-review__menu-visual {
+  color: var(--fgColor-open, #1a7f37);
+}
+
+.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='draft'] .geld-quick-review__menu-visual {
+  color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
+}
+
+.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='merged'] .geld-quick-review__menu-visual {
+  color: var(--fgColor-done, #8250df);
+}
+
+.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='closed'] .geld-quick-review__menu-visual {
+  color: var(--fgColor-closed, #d1242f);
+}
+
+/* The status the pull request has: checked, not a choice. */
+.geld-quick-review__status-menu .geld-quick-review__menu-item:disabled {
+  cursor: default;
+}
+
+.geld-quick-review__status-menu .geld-quick-review__menu-item:disabled:hover {
+  background: transparent;
+}
+
+/* "Pending comments N", as GitHub's dialog lists them under the choices. */
+.geld-quick-review__pending-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.geld-quick-review__pending-toggle > svg {
+  color: var(--fgColor-muted, #59636e);
+  transition: transform 120ms ease-in-out;
+}
+
+.geld-quick-review__pending-toggle[aria-expanded='false'] > svg {
+  transform: rotate(-90deg);
+}
+
+.geld-quick-review__pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 192px;
+  /* The rows' hover surface overhangs by its padding, so their glyphs stand in the words' column. */
+  margin: 4px -8px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* One line per pending comment, as the digest lists threads: its words, then where it is, leading to it. */
+.geld-quick-review__pending-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.geld-quick-review__pending-row:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  text-decoration: none;
+}
+
+.geld-quick-review__pending-glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.geld-quick-review__pending-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-quick-review__pending-text code {
+  font-size: 0.875em;
+}
+
+/* The file keeps its name whole where it can: the words give way first, the file only past 40% of the line. */
+.geld-quick-review__pending-where {
+  flex: 0 0 auto;
+  max-width: 40%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-quick-review__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Header line counts + hover breakdown                                      */
 /* ------------------------------------------------------------------------ */
 

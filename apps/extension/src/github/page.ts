@@ -82,3 +82,14 @@ export function describePage(url: URL): PageInfo {
 export function isSignInInterstitial(doc: Document = document): boolean {
   return doc.body?.classList.contains('session-authentication') === true;
 }
+
+/**
+ * The pull request's state as the header's label says it ("Status: Draft",
+ * "Open", "Merged"): the React header's `[data-component="StateLabel"]`, the
+ * classic `.State`. GitHub rewrites it in place when the pull request is
+ * converted to a draft, marked ready, merged, closed or reopened.
+ */
+export function pullRequestStateWords(doc: Document = document): string {
+  const label = doc.querySelector('[data-component="StateLabel"], .gh-header-meta .State, .State[title]');
+  return (label?.getAttribute('title') ?? label?.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
