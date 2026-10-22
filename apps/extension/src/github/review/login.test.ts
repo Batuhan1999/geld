@@ -18,6 +18,8 @@ describe('loginOfLink', () => {
     expect(loginOfLink(link('<span data-hovercard-url="/users/sandy081/hovercard">Sandeep Somavarapu (sandy081)</span>'))).toBe('sandy081');
     expect(loginOfLink(link('<span>Sandeep Somavarapu (sandy081)</span>'))).toBe('sandy081');
     expect(loginOfLink(link('<a href="/orgs/acme/teams/core">acme/core</a>'))).toBe('acme/core');
+    // An App, by the same rule as a comment's author, so its name gets Geld's App card.
+    expect(loginOfLink(link('<a class="author" href="/apps/dependabot">dependabot</a>'))).toBe('dependabot[bot]');
   });
 
   it('gives a comment its author’s login, as the sidebar names them, so one reviewer is one person', () => {

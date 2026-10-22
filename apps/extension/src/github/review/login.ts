@@ -5,11 +5,17 @@ import { onRestore } from './teleport';
  * shows full names (an account setting, and some organisations' default),
  * the link reads "Connor Peet (connor4312)": the login is the profile the link
  * leads to (`/connor4312`), the user hovercard it carries
- * (`/users/connor4312/hovercard`), or the parenthesis after the name. Null
- * for a link that names nobody (an App's is read by its own rule).
+ * (`/users/connor4312/hovercard`), or the parenthesis after the name; an
+ * App's as its name with `[bot]`. Null for a link that names nobody.
  */
 export function loginOfLink(link: Element): string | null {
   const href = link.getAttribute('href') ?? '';
+  // An App's link names the App (`/apps/dependabot`, "dependabot"): its login is the name with `[bot]`, as `authorOf` has it.
+  const app = /^(?:https?:\/\/[^/]+)?\/apps\/([^/?#]+)/.exec(href)?.[1];
+  if (app !== undefined) {
+    const name = (link.textContent ?? '').replace(/\s+/g, ' ').trim().replace(/^@/, '') || app;
+    return /\[bot\]$/i.test(name) ? name : `${name}[bot]`;
+  }
   const profile = /^(?:https?:\/\/[^/]+)?\/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/?$/.exec(href)?.[1];
   if (profile !== undefined) return profile;
   const card = /^\/users\/([^/?#]+)\/hovercard/.exec(link.getAttribute('data-hovercard-url') ?? '')?.[1];

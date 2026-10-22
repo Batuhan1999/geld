@@ -753,13 +753,13 @@ function foldRowEl(fold: FoldRow, model: PanelModel, handlers: PanelHandlers): H
   const mainChildren: Node[] =
     fold.closure !== undefined
       ? [
-          createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(fold.author ?? '', false) }, [fold.author ?? '']),
+          createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(fold.author ?? '', /\[bot\]$/i.test(fold.author ?? '')) }, [fold.author ?? '']),
           createElement('span', { class: 'geld-sr-only' }, [` ${fold.closure.kind} this `]),
           ...(fold.closure.preview === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__preview` }, inlineText(fold.closure.preview))]),
         ]
       : headline !== undefined
         ? [
-            ...(headline.actor === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(headline.actor, false) }, [headline.actor])]),
+            ...(headline.actor === '' ? [] : [createElement('span', { class: `${PANEL_CLASS}__name`, ...whoAttributes(headline.actor, /\[bot\]$/i.test(headline.actor)) }, [headline.actor])]),
             createElement('span', { class: `${PANEL_CLASS}__preview ${PANEL_CLASS}__preview--verdict` }, [headlineText(headline)]),
             createElement('span', { class: `${PANEL_CLASS}__preview ${PANEL_CLASS}__preview--count` }, [fold.label]),
           ]
