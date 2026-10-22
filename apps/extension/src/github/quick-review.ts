@@ -539,20 +539,24 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   for (const event of SEGMENT_ORDER) {
     segments[event].addEventListener('click', (click) => {
       if (state.sending) return;
-      if (state.panel !== null && state.opener === event) {
+      // The instant key wins over the open box: the arrow and the tooltip promised a send.
+      const instant = isInstantClick(event, click, MAC);
+      if (!instant && state.panel !== null && state.opener === event) {
         closePanel(true);
         return;
       }
-      if (!isInstantClick(event, click, MAC)) {
+      if (!instant) {
         // Another verdict while the box is open: the box stays, words and all, and takes the new verdict.
         if (state.panel !== null && state.retarget !== null) state.retarget(event);
         else openComposer(state, event, null);
         return;
       }
       closePanel();
+      const sentFrom = state.pullPath;
       void sendReview(state, event, '').then((failure) => {
-        // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason.
-        if (failure !== null) openComposer(state, event, failure);
+        // GitHub may want words for this one (a request for changes with nothing pending): ask for them, with its reason,
+        // unless the reader has moved on (another pull request, or no controls): that box would review the wrong one.
+        if (failure !== null && mounted === state && state.pullPath === sentFrom) openComposer(state, event, failure);
       });
     });
   }
@@ -788,7 +792,8 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
       const payload: unknown = await response.json().catch(() => null);
       return reviewErrorText(response.status, payload);
     }
-    drafts.delete(pullPath);
+    // An instant send leaves words saved in the box out on purpose: they stay for the next box.
+    if (body !== '') drafts.delete(pullPath);
     if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
       window.location.reload();
       return null;
