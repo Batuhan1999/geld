@@ -686,15 +686,31 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   window.clearTimeout(state.mergeTimer);
   state.mergeRead += 1;
   const read = state.mergeRead;
-  const [actions, reviewers] = await Promise.all([readMergeActions(pullPath), fetchReviewers(pullPath)]);
-  if (mounted !== state || state.pullPath !== pullPath || state.mergeRead !== read) return null;
+  const current = (): boolean => mounted === state && state.pullPath === pullPath && state.mergeRead === read;
+  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close. The control is drawn once both are in.
+  let waiting = 2;
+  const settle = (): void => {
+    waiting -= 1;
+    if (waiting === 0) ready(state);
+  };
+  let sidebar: readonly SidebarReviewer[] | null = null;
+  const showReviewers = (): void => {
+    if (sidebar === null) return;
+    state.reviewers = standingReviewers(sidebar, state.mergeActions?.box.verdicts ?? []);
+    showTally(state, tallyOf(state.reviewers));
+  };
+  void fetchReviewers(pullPath).then((reviewers) => {
+    if (!current()) return;
+    sidebar = reviewers;
+    showReviewers();
+    settle();
+  });
+  const actions = await readMergeActions(pullPath);
+  if (!current()) return null;
   if (actions !== null) state.mergeActions = actions;
   showActions(state);
-  if (reviewers !== null) {
-    state.reviewers = standingReviewers(reviewers, state.mergeActions?.box.verdicts ?? []);
-    showTally(state, tallyOf(state.reviewers));
-  }
-  ready(state);
+  showReviewers();
+  settle();
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
