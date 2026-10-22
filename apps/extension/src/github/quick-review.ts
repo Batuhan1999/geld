@@ -326,7 +326,9 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     hideSnapshot(mounted);
     mounted.pullPath = pullPath;
     mounted.tally.href = `${pullPath}${REVIEWS_HASH}`;
+    // The last pull request's merge and close are not this one's: none until this one's merge box is read.
     mounted.mergeActions = null;
+    showActions(mounted);
     // The last pull request's pending comments are not this one's: none until this one's are read.
     mounted.pending = null;
     // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
