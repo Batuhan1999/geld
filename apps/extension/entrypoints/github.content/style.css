@@ -1498,6 +1498,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
 }
 
+.geld-quick-review__confirm-submit[data-action='auto'] > svg {
+  color: var(--fgColor-done, #8250df);
+}
+
 .geld-quick-review__confirm-submit[data-action='queue'] > svg {
   color: var(--fgColor-attention, #9a6700);
 }

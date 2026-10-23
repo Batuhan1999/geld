@@ -38,6 +38,8 @@ export interface MergeBox {
   readonly stacked: boolean;
   /** Whether the reader may add it to the repository's merge queue now (GitHub's "Merge when ready"); false once it is in. */
   readonly canQueue: boolean;
+  /** Whether GitHub offers "Enable auto-merge": the repository allows it and the pull request cannot merge yet; false once it is on. */
+  readonly canAutoMerge: boolean;
 }
 
 export interface ReviewVerdict {
@@ -47,8 +49,11 @@ export interface ReviewVerdict {
   readonly id: number | null;
 }
 
-/** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), a place in the merge queue, or none. */
-export type MergeOffer = 'merge' | 'bypass' | 'queue' | null;
+/**
+ * What the controls offer: a merge, a merge only past the rules (GitHub's bypass), a place in the merge queue, a merge
+ * once the requirements are met (auto-merge), or none.
+ */
+export type MergeOffer = 'merge' | 'bypass' | 'queue' | 'auto' | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -104,6 +109,7 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     authorEmail: email === '' ? null : email,
     stacked,
     canQueue: queue?.allowableStatus === 'ALLOWED' && pull.isInMergeQueue !== true,
+    canAutoMerge: pull.viewerCanEnableAutoMerge === true && !isRecord(pull.autoMergeRequest),
   };
 }
 
@@ -113,13 +119,17 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
  * past the rules (`asBypass` is the same box read with
  * `bypass_requirements=true`); else a place in the merge queue where the
  * repository merges through one and the reader may add it (the queue waits
- * for the checks itself, so it is offered whatever they say).
+ * for the checks itself, so it is offered whatever they say); else
+ * auto-merge where GitHub offers it (a pull request still waiting on checks
+ * or reviews in a repository that allows it), in the order GitHub's merge box
+ * picks its button.
  */
 export function mergeOffer(box: MergeBox, asBypass: MergeBox | null): MergeOffer {
   if (!box.open || box.draft) return null;
   if (box.methods.length > 0 && box.mergeable) return 'merge';
   if (box.methods.length > 0 && box.canBypass && asBypass?.mergeable === true) return 'bypass';
   if (box.canQueue) return 'queue';
+  if (box.methods.length > 0 && box.canAutoMerge) return 'auto';
   return null;
 }
 
@@ -186,6 +196,16 @@ export function queueRequest(pullPath: string, nonce: string): { readonly url: s
   return { url: `${pullPath}/page_data/enable_auto_merge`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, true), body: JSON.stringify({ mergeMethod: 'GROUP' }) } };
 }
 
+/**
+ * What GitHub's merge box sends for "Enable auto-merge": `enable_auto_merge` with the method and the commit GitHub
+ * would write, which it then merges with once the requirements are met.
+ */
+export function autoMergeRequest(pullPath: string, submission: Pick<MergeSubmission, 'method' | 'commitTitle' | 'commitMessage' | 'authorEmail'>, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  const body: Record<string, string> = { mergeMethod: submission.method, commitTitle: submission.commitTitle, commitMessage: submission.commitMessage };
+  if (submission.authorEmail !== null) body.authorEmail = submission.authorEmail;
+  return { url: `${pullPath}/page_data/enable_auto_merge`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, true), body: JSON.stringify(body) } };
+}
+
 /** What GitHub sends to reopen a closed pull request: nothing but the request. */
 export function reopenRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
   return { url: `${pullPath}/page_data/reopen_pull_request`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
@@ -229,11 +249,12 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
 }
 
 /** The reason a merge or close failed, in GitHub's words when it gave any. */
-export type StatusAction = 'merge' | 'queue' | 'close' | 'ready' | 'draft' | 'reopen';
+export type StatusAction = 'merge' | 'queue' | 'auto' | 'close' | 'ready' | 'draft' | 'reopen';
 
 const ACTION_VERB: { readonly [A in StatusAction]: string } = {
   merge: 'merge the pull request',
   queue: 'add the pull request to the merge queue',
+  auto: 'enable auto-merge',
   close: 'close the pull request',
   ready: 'mark the pull request ready for review',
   draft: 'convert the pull request to a draft',
