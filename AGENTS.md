@@ -951,7 +951,7 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   a refusal opens the box with GitHub's reason, as for ✓ and ✗.
   **The group rides every tab's sticky header** (`place`, `stickyPlace`), so it is always to hand while reading.
   On Files changed, GitHub's toolbar (`section[class*="stickyHeader"]`, classic `.js-sticky`) holds its own review button and sticks to the viewport's top as the diff scrolls;
-  while it is stuck the group stands just before GitHub's hidden button (`data-geld-place="toolbar"`, 28px as the toolbar's buttons are, `margin-left: -8px` so the 12px the row leaves after its divider is the group's own 4px;
+  while it is stuck the group stands just before GitHub's hidden button (`data-geld-place="toolbar"`, 28px as the toolbar's buttons are, `margin-left: -8px` while the tally shows, so the 12px the row leaves after its divider is the group's own 4px, and none without it, when GitHub's buttons beside the group keep the row's spacing;
   the group is `min-width: max-content`, since Primer's group floats its buttons and so has a one-button min-content, and the toolbar's right-hand row, sized from its children's min-content, shrank below the group and pushed its last buttons past the toolbar's edge).
   Stuck is read **from the toolbar's box on scroll** (`measureToolbarStuck`: its top at its sticky `top`), in a passive `scroll` listener, which runs before the frame is painted: GitHub's `is-stuck__<hash>` class comes from an observer that reports after paint, a frame late (noticeably the first time), so following the class alone showed the stuck toolbar without the group for a moment.
   The reading is cached (`Mounted.toolbarStuck`) and a pass only uses it, since passes must not measure;

@@ -743,8 +743,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   margin: 0;
 }
 
-/* The toolbar's row leaves 12px after its divider: 4px of it here, as between the tally and the group. */
-.geld-quick-review[data-geld-place='toolbar'] {
+/*
+ * The toolbar's row leaves 12px after its divider: 4px of it before the tally, as between the tally and the group. Only
+ * with the tally there: without it the group's own border stands next to GitHub's buttons, which keep the row's spacing.
+ */
+.geld-quick-review[data-geld-place='toolbar']:has(> .geld-quick-review__tally:not([hidden])) {
   margin-left: -8px;
 }
 
