@@ -60,6 +60,7 @@ export function statusOptions(box: MergeBox, offer: MergeOffer): readonly Status
   if (current === 'closed' && box.canClose) moves.open = { status: 'open', action: 'reopen', note: 'Reopen pull request' };
   if (current === 'open' && box.canConvertToDraft) moves.draft = { status: 'draft', action: 'draft', note: 'Convert to draft' };
   if (current === 'open' && offer === 'queue') moves.queued = { status: 'queued', action: 'queue', note: 'Merge when ready' };
+  else if (current === 'open' && offer === 'auto') moves.merged = { status: 'merged', action: 'auto', note: 'Enable auto-merge' };
   else if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: offer === 'bypass' ? 'Bypass rules and merge' : METHOD_LABEL[method] };
   if (current !== 'closed' && box.canClose) moves.closed = { status: 'closed', action: 'close', note: 'Close pull request' };
   return STATUS_ORDER.flatMap((status) => moves[status] ?? []);

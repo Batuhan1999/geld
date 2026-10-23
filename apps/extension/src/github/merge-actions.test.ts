@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import type { MergeSubmission } from './merge-actions';
-import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox, queueRequest, readyRequest, viewerVerdict } from './merge-actions';
+import { actionErrorText, autoMergeRequest, closeRequest, mergeOffer, mergeRequest, parseMergeBox, queueRequest, readyRequest, viewerVerdict } from './merge-actions';
 
 /** A `page_data/merge_box` answer as GitHub gave it on brandonmcconnell/geld#74 (Oct 2026), trimmed. */
-function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean; readonly queue?: string; readonly queued?: boolean } = {}): unknown {
+function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean; readonly queue?: string; readonly queued?: boolean; readonly auto?: boolean; readonly autoOn?: boolean } = {}): unknown {
   return {
     pullRequest: {
       state: 'OPEN',
@@ -13,6 +13,8 @@ function payload(overrides: { readonly state?: string; readonly draft?: boolean;
       viewerCanAdminBypassMergeRequirements: overrides.canBypass ?? false,
       viewerCanMarkReadyForReview: overrides.draft ?? false,
       isInMergeQueue: overrides.queued ?? false,
+      viewerCanEnableAutoMerge: overrides.auto ?? false,
+      autoMergeRequest: overrides.autoOn === true ? { mergeMethod: 'SQUASH' } : null,
       latestOpinionatedReviews: [
         { id: 1, author: { login: 'aeschli' }, state: 'APPROVED' },
         { id: 2, author: { login: 'Alice' }, state: 'CHANGES_REQUESTED' },
@@ -62,6 +64,7 @@ describe('parseMergeBox', () => {
       authorEmail: 'brandon@dreamthinkbuild.com',
       stacked: false,
       canQueue: false,
+      canAutoMerge: false,
     });
     expect(parseMergeBox({ nope: true })).toBeNull();
   });
@@ -91,10 +94,20 @@ describe('mergeOffer', () => {
     expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', state: 'BLOCKED' }), null)).toBe('queue');
     expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', queued: true }), null)).toBeNull();
     expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', draft: true }), null)).toBeNull();
+    // Waiting on its checks or reviews where the repository allows auto-merge: GitHub's Enable auto-merge, until it is on.
+    expect(mergeOffer(read({ state: 'BLOCKED', auto: true }), null)).toBe('auto');
+    expect(mergeOffer(read({ state: 'BLOCKED', auto: true, autoOn: true }), null)).toBeNull();
+    expect(mergeOffer(read({ auto: true }), null)).toBe('merge');
   });
 });
 
 describe('the requests', () => {
+  it('enables auto-merge as GitHub’s merge box does, with the method and the commit it would write', () => {
+    const request = autoMergeRequest('/o/r/pull/7', { method: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c' }, 'n1');
+    expect(request.url).toBe('/o/r/pull/7/page_data/enable_auto_merge');
+    expect(JSON.parse(String(request.init.body))).toEqual({ mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c' });
+  });
+
   it('adds to the merge queue as GitHub’s Merge when ready does', () => {
     const request = queueRequest('/o/r/pull/7', 'n1');
     expect(request.url).toBe('/o/r/pull/7/page_data/enable_auto_merge');

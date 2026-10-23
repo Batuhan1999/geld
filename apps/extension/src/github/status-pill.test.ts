@@ -18,6 +18,7 @@ const box = (over: Partial<MergeBox>): MergeBox => ({
   authorEmail: null,
   stacked: false,
   canQueue: false,
+  canAutoMerge: false,
   ...over,
 });
 
@@ -41,6 +42,13 @@ describe('statusOptions', () => {
     expect(statusOptions(box({ canClose: true, canConvertToDraft: true, methods: [], canQueue: true }), 'queue').map((option) => [option.status, option.action, option.note])).toEqual([
       ['queued', 'queue', 'Merge when ready'],
       ['draft', 'draft', 'Convert to draft'],
+      ['closed', 'close', 'Close pull request'],
+    ]);
+  });
+
+  it('offers auto-merge where a merge would stand while the pull request waits on its requirements', () => {
+    expect(statusOptions(box({ canClose: true, canAutoMerge: true }), 'auto').map((option) => [option.status, option.action, option.note])).toEqual([
+      ['merged', 'auto', 'Enable auto-merge'],
       ['closed', 'close', 'Close pull request'],
     ]);
   });
