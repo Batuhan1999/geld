@@ -7,7 +7,7 @@ import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
 import { detectHeadSha } from './head-sha';
 import type { MergeActions, MergeBox, MergeMethod, StatusAction } from './merge-actions';
-import { actionErrorText, closeRequest, draftRequest, fetchMergeBox, METHOD_CONFIRM, METHOD_LABEL, mergeRequest, readMergeActions, readyRequest, reopenRequest, viewerVerdict } from './merge-actions';
+import { actionErrorText, closeRequest, draftRequest, fetchMergeBox, METHOD_CONFIRM, METHOD_LABEL, mergeRequest, readMergeActions, queueRequest, readyRequest, reopenRequest, viewerVerdict } from './merge-actions';
 import type { PageInfo } from './page';
 import { pullRequestStateWords } from './page';
 import type { PendingComment } from './pending-review';
@@ -19,7 +19,7 @@ import type { ReviewTally } from './review-tally';
 import type { StatusOption } from './status-pill';
 import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
 import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
-import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -1233,8 +1233,8 @@ function closeStatusMenu(state: Mounted): void {
 function chooseStatus(state: Mounted, option: StatusOption): void {
   if (option.action === 'merge') openMergeBox(state);
   // The browser's own confirmation, not a box to click through: closing is undone only by reopening.
-  else if (option.action === 'close') {
-    if (window.confirm('Close this pull request?')) void runStatus(state, 'close');
+  else if (option.action === 'close' || option.action === 'queue') {
+    if (window.confirm(option.action === 'close' ? 'Close this pull request?' : 'Add this pull request to the merge queue?')) void runStatus(state, option.action);
     else if (state.statusOpener?.isConnected === true) state.statusOpener.focus({ preventScroll: true });
   } else void runStatus(state, option.action);
 }
@@ -1242,6 +1242,7 @@ function chooseStatus(state: Mounted, option: StatusOption): void {
 type Request = (pullPath: string, nonce: string) => { readonly url: string; readonly init: RequestInit };
 
 const CONFIRM_INFO: { readonly [A in Exclude<StatusAction, 'merge'>]: { readonly icon: string; readonly label: string; readonly request: Request } } = {
+  queue: { icon: ICON_GIT_MERGE_QUEUE, label: 'Merge when ready', request: queueRequest },
   close: { icon: ICON_GIT_PULL_REQUEST_CLOSED, label: 'Close pull request', request: closeRequest },
   ready: { icon: ICON_GIT_PULL_REQUEST, label: 'Ready for review', request: readyRequest },
   draft: { icon: ICON_GIT_PULL_REQUEST_DRAFT, label: 'Convert to draft', request: draftRequest },
@@ -1792,7 +1793,7 @@ function boxFooter(left: readonly HTMLElement[], cancel: HTMLButtonElement, subm
   return createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [...left, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submit])]);
 }
 
-const ACTION_STATUS: { readonly [K in StatusAction]: string } = { merge: 'Merging…', close: 'Closing…', ready: 'Marking ready…', draft: 'Converting to draft…', reopen: 'Reopening…' };
+const ACTION_STATUS: { readonly [K in StatusAction]: string } = { merge: 'Merging…', queue: 'Adding to merge queue…', close: 'Closing…', ready: 'Marking ready…', draft: 'Converting to draft…', reopen: 'Reopening…' };
 
 /** Send a merge, close or ready for review; on success the page reloads, since every part of it (header, timeline, tabs) changes with the state. */
 async function sendAction(state: Mounted, kind: StatusAction, request: { readonly url: string; readonly init: RequestInit }, done: () => void = () => undefined): Promise<string | null> {

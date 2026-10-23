@@ -6,7 +6,8 @@
  * says whether the reader can merge (directly, or only by bypassing the
  * rules), close and mark a draft ready, and whose verdicts stand; `POST page_data/merge`
  * merges; `POST page_data/close_pull_request` closes; `POST page_data/mark_ready_for_review`
- * takes a draft out of draft. Same origin and session as the page, so they work from any tab.
+ * takes a draft out of draft; `POST page_data/enable_auto_merge` with a merge queue's strategy adds the pull request to
+ * the repository's merge queue ("Merge when ready"). Same origin and session as the page, so they work from any tab.
  */
 
 export type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE';
@@ -35,6 +36,8 @@ export interface MergeBox {
   readonly authorEmail: string | null;
   /** Part of a GitHub stack: GitHub merges it through the stack's own request, `enqueue_stack`, not `merge`. */
   readonly stacked: boolean;
+  /** Whether the reader may add it to the repository's merge queue now (GitHub's "Merge when ready"); false once it is in. */
+  readonly canQueue: boolean;
 }
 
 export interface ReviewVerdict {
@@ -44,8 +47,8 @@ export interface ReviewVerdict {
   readonly id: number | null;
 }
 
-/** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), or none. */
-export type MergeOffer = 'merge' | 'bypass' | null;
+/** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), a place in the merge queue, or none. */
+export type MergeOffer = 'merge' | 'bypass' | 'queue' | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -66,6 +69,8 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
   const requirements = isRecord(payload.mergeRequirements) ? payload.mergeRequirements : {};
   const actions = Array.isArray(pull.viewerMergeActions) ? pull.viewerMergeActions : [];
   const direct = actions.find((action): action is Record<string, unknown> => isRecord(action) && action.name === 'DIRECT_MERGE');
+  // GitHub shows "Merge when ready" when the queue's action is allowed, as it shows its merge button for the direct one.
+  const queue = actions.find((action): action is Record<string, unknown> => isRecord(action) && action.name === 'MERGE_QUEUE');
   const allowed = direct !== undefined && direct.allowableStatus === 'ALLOWED' && Array.isArray(direct.mergeMethods) ? direct.mergeMethods : [];
   const methods = allowed
     .filter((method): method is Record<string, unknown> => isRecord(method) && method.allowableStatus === 'ALLOWED' && isMethod(method.name))
@@ -98,19 +103,23 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     commitMessage: stringOf(requirements.commitMessageBody),
     authorEmail: email === '' ? null : email,
     stacked,
+    canQueue: queue?.allowableStatus === 'ALLOWED' && pull.isInMergeQueue !== true,
   };
 }
 
 /**
- * The merge on offer: none on a draft, a closed pull request or one whose
- * repository allows the reader no direct merge; a plain merge when GitHub
- * would take it now; a bypass when it would take it only past the rules
- * (`asBypass` is the same box read with `bypass_requirements=true`).
+ * The merge on offer: none on a draft or a closed pull request; a plain
+ * merge when GitHub would take it now; a bypass when it would take it only
+ * past the rules (`asBypass` is the same box read with
+ * `bypass_requirements=true`); else a place in the merge queue where the
+ * repository merges through one and the reader may add it (the queue waits
+ * for the checks itself, so it is offered whatever they say).
  */
 export function mergeOffer(box: MergeBox, asBypass: MergeBox | null): MergeOffer {
-  if (!box.open || box.draft || box.methods.length === 0) return null;
-  if (box.mergeable) return 'merge';
-  if (box.canBypass && asBypass?.mergeable === true) return 'bypass';
+  if (!box.open || box.draft) return null;
+  if (box.methods.length > 0 && box.mergeable) return 'merge';
+  if (box.methods.length > 0 && box.canBypass && asBypass?.mergeable === true) return 'bypass';
+  if (box.canQueue) return 'queue';
   return null;
 }
 
@@ -172,6 +181,11 @@ export function draftRequest(pullPath: string, nonce: string): { readonly url: s
   return { url: `${pullPath}/page_data/convert_to_draft`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
 }
 
+/** What GitHub's merge box sends for "Merge when ready": `enable_auto_merge` with the queue's grouped strategy (its "Queue and force solo merge" sends `SOLO`). */
+export function queueRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  return { url: `${pullPath}/page_data/enable_auto_merge`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, true), body: JSON.stringify({ mergeMethod: 'GROUP' }) } };
+}
+
 /** What GitHub sends to reopen a closed pull request: nothing but the request. */
 export function reopenRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
   return { url: `${pullPath}/page_data/reopen_pull_request`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
@@ -215,10 +229,11 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
 }
 
 /** The reason a merge or close failed, in GitHub's words when it gave any. */
-export type StatusAction = 'merge' | 'close' | 'ready' | 'draft' | 'reopen';
+export type StatusAction = 'merge' | 'queue' | 'close' | 'ready' | 'draft' | 'reopen';
 
 const ACTION_VERB: { readonly [A in StatusAction]: string } = {
   merge: 'merge the pull request',
+  queue: 'add the pull request to the merge queue',
   close: 'close the pull request',
   ready: 'mark the pull request ready for review',
   draft: 'convert the pull request to a draft',

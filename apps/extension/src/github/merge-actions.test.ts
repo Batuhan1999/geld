@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import type { MergeSubmission } from './merge-actions';
-import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox, readyRequest, viewerVerdict } from './merge-actions';
+import { actionErrorText, closeRequest, mergeOffer, mergeRequest, parseMergeBox, queueRequest, readyRequest, viewerVerdict } from './merge-actions';
 
 /** A `page_data/merge_box` answer as GitHub gave it on brandonmcconnell/geld#74 (Oct 2026), trimmed. */
-function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean } = {}): unknown {
+function payload(overrides: { readonly state?: string; readonly draft?: boolean; readonly canClose?: boolean; readonly canBypass?: boolean; readonly direct?: string; readonly stacked?: boolean; readonly queue?: string; readonly queued?: boolean } = {}): unknown {
   return {
     pullRequest: {
       state: 'OPEN',
@@ -12,12 +12,13 @@ function payload(overrides: { readonly state?: string; readonly draft?: boolean;
       viewerCanClose: overrides.canClose ?? true,
       viewerCanAdminBypassMergeRequirements: overrides.canBypass ?? false,
       viewerCanMarkReadyForReview: overrides.draft ?? false,
+      isInMergeQueue: overrides.queued ?? false,
       latestOpinionatedReviews: [
         { id: 1, author: { login: 'aeschli' }, state: 'APPROVED' },
         { id: 2, author: { login: 'Alice' }, state: 'CHANGES_REQUESTED' },
       ],
       viewerMergeActions: [
-        { allowableStatus: 'BLOCKED', name: 'MERGE_QUEUE', mergeMethods: [{ allowableStatus: 'BLOCKED', isDefault: true, name: 'MERGE' }] },
+        { allowableStatus: overrides.queue ?? 'BLOCKED', name: 'MERGE_QUEUE', mergeMethods: [{ allowableStatus: overrides.queue ?? 'BLOCKED', isDefault: true, name: 'MERGE' }] },
         {
           allowableStatus: overrides.direct ?? 'ALLOWED',
           name: 'DIRECT_MERGE',
@@ -60,6 +61,7 @@ describe('parseMergeBox', () => {
       commitMessage: '* Submit review from any pull request tab',
       authorEmail: 'brandon@dreamthinkbuild.com',
       stacked: false,
+      canQueue: false,
     });
     expect(parseMergeBox({ nope: true })).toBeNull();
   });
@@ -84,12 +86,22 @@ describe('mergeOffer', () => {
     expect(mergeOffer(read({ state: 'UNMERGEABLE', canBypass: true }), read({ state: 'UNMERGEABLE', canBypass: true }))).toBeNull();
     expect(mergeOffer(read({ state: 'UNMERGEABLE' }), null)).toBeNull();
     expect(mergeOffer(read({ draft: true }), null)).toBeNull();
-    // A repository that only merges through its queue allows no direct merge.
+    // A repository that only merges through its queue allows no direct merge: its queue is offered instead, once.
     expect(mergeOffer(read({ direct: 'BLOCKED' }), null)).toBeNull();
+    expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', state: 'BLOCKED' }), null)).toBe('queue');
+    expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', queued: true }), null)).toBeNull();
+    expect(mergeOffer(read({ direct: 'BLOCKED', queue: 'ALLOWED', draft: true }), null)).toBeNull();
   });
 });
 
 describe('the requests', () => {
+  it('adds to the merge queue as GitHub’s Merge when ready does', () => {
+    const request = queueRequest('/o/r/pull/7', 'n1');
+    expect(request.url).toBe('/o/r/pull/7/page_data/enable_auto_merge');
+    expect(request.init.method).toBe('POST');
+    expect(JSON.parse(String(request.init.body))).toEqual({ mergeMethod: 'GROUP' });
+  });
+
   const commit: MergeSubmission = { method: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: 'Body', authorEmail: 'a@b.c', bypass: false, stacked: false };
   it('merges as GitHub’s merge box does, through the stack’s request for a stacked pull request', () => {
     const plain = mergeRequest('/o/r/pull/7', commit, 'n1');
