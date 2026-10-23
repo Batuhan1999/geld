@@ -1069,6 +1069,69 @@ html[data-geld-quick-review] details.js-reviews-container {
   resize: vertical;
 }
 
+/*
+ * GitHub's writer, borrowed into the box, reads as the box's own: no frame of its own (its root is a Primer `Box`, whose
+ * border is a utility's), no grey header behind its toolbar, Write and Preview as quiet pills on the box's surface, the
+ * field flush with the box's padding. `!important` where GitHub's rules on the same element are.
+ */
+.geld-quick-review__panel .js-previewable-comment-form.CommentBox {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.geld-quick-review__panel .CommentBox .comment-form-head,
+.geld-quick-review__panel .CommentBox-header {
+  align-items: center;
+  margin: 0 0 4px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.geld-quick-review__panel .CommentBox .tabnav-tabs {
+  gap: 2px;
+  margin: 0 !important;
+}
+
+.geld-quick-review__panel .CommentBox .tabnav-tab {
+  margin: 0;
+  padding: 3px 10px;
+  border: 0 !important;
+  border-radius: var(--borderRadius-medium, 6px) !important;
+  background: transparent;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.geld-quick-review__panel .CommentBox .tabnav-tab:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(208, 215, 222, 0.32));
+  color: var(--fgColor-default, #1f2328);
+}
+
+.geld-quick-review__panel .CommentBox .tabnav-tab:is(.selected, [aria-selected='true']) {
+  background: var(--control-transparent-bgColor-selected, rgba(208, 215, 222, 0.24));
+  color: var(--fgColor-default, #1f2328);
+  font-weight: 600;
+}
+
+.geld-quick-review__panel .CommentBox .CommentBox-toolbar {
+  margin-right: 0;
+}
+
+.geld-quick-review__panel .CommentBox .CommentBox-container {
+  width: 100%;
+  margin: 0;
+}
+
+.geld-quick-review__panel .CommentBox :is(.write-content, .preview-content) {
+  margin: 0;
+}
+
 .geld-quick-review__error {
   margin: 0;
   font-size: 12px;
