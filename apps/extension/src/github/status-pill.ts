@@ -29,8 +29,8 @@ export const STATUS_INFO: { readonly [S in PullStatus]: { readonly label: string
   closed: { label: 'Closed', icon: ICON_GIT_PULL_REQUEST_CLOSED },
 };
 
-/** Open, draft, merged, then closed, always last. */
-const STATUS_ORDER: readonly PullStatus[] = ['open', 'draft', 'merged', 'closed'];
+/** Forward first: ready for review or reopened, then merged, then back to a draft, and closed always last. */
+const STATUS_ORDER: readonly PullStatus[] = ['open', 'merged', 'draft', 'closed'];
 
 export function statusOf(box: MergeBox): PullStatus | null {
   if (box.state === 'MERGED') return 'merged';

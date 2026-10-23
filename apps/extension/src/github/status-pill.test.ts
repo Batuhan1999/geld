@@ -21,10 +21,10 @@ const box = (over: Partial<MergeBox>): MergeBox => ({
 });
 
 describe('statusOptions', () => {
-  it('lists the statuses the reader may switch to, closed last, in GitHub’s words', () => {
+  it('lists the statuses the reader may switch to, forward first and closed last, in GitHub’s words', () => {
     expect(statusOptions(box({ canClose: true, canConvertToDraft: true }), 'bypass').map((option) => [option.status, option.action, option.note])).toEqual([
-      ['draft', 'draft', 'Convert to draft'],
       ['merged', 'merge', 'Bypass rules and merge'],
+      ['draft', 'draft', 'Convert to draft'],
       ['closed', 'close', 'Close pull request'],
     ]);
     expect(statusOptions(box({ canClose: true }), 'merge').map((option) => option.note)).toEqual(['Create a merge commit', 'Close pull request']);
