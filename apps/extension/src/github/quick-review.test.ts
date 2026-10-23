@@ -580,6 +580,44 @@ describe('the tab bar button', () => {
     expect(window.localStorage.getItem('geld:status-menu')).toBeNull();
   });
 
+  it('offers a merge queue’s Merge when ready where a merge would stand, and queues after the browser’s confirmation', async () => {
+    window.localStorage.clear();
+    resetStatusHints();
+    const queueBox = JSON.stringify({
+      pullRequest: {
+        state: 'OPEN',
+        isDraft: false,
+        isInMergeQueue: false,
+        viewerCanClose: true,
+        viewerCanConvertToDraft: false,
+        viewerCanMarkReadyForReview: false,
+        latestOpinionatedReviews: [],
+        viewerCanAdminBypassMergeRequirements: false,
+        viewerMergeActions: [
+          { name: 'MERGE_QUEUE', allowableStatus: 'ALLOWED', mergeMethods: [{ name: 'MERGE', allowableStatus: 'ALLOWED', isDefault: true }] },
+          { name: 'DIRECT_MERGE', allowableStatus: 'BLOCKED', mergeMethods: [{ name: 'SQUASH', allowableStatus: 'BLOCKED', isDefault: true }] },
+        ],
+      },
+      mergeRequirements: { state: 'BLOCKED', conditions: [], commitMessageHeadline: '', commitMessageBody: '' },
+    });
+    const sent = stubBox(() => queueBox);
+    withLabel('Open', 'pullOpened');
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    pill()?.click();
+    expect(menuRows()).toEqual([
+      ['queued', 'Merge when ready'],
+      ['closed', 'Close pull request'],
+    ]);
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    vi.stubGlobal('location', { ...window.location, reload: vi.fn(), pathname: window.location.pathname, hash: '', search: '' });
+    document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="queued"]')?.click();
+    expect(confirm).toHaveBeenCalledWith('Add this pull request to the merge queue?');
+    await settle();
+    expect(sent).toEqual(['enable_auto_merge']);
+  });
+
   it('opens GitHub’s reason when converting to a draft is refused', async () => {
     window.localStorage.clear();
     resetStatusHints();

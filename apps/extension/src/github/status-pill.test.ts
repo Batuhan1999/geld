@@ -17,6 +17,7 @@ const box = (over: Partial<MergeBox>): MergeBox => ({
   commitMessage: '',
   authorEmail: null,
   stacked: false,
+  canQueue: false,
   ...over,
 });
 
@@ -34,6 +35,14 @@ describe('statusOptions', () => {
     expect(statusOptions(box({}), null)).toEqual([]);
     expect(statusOptions(box({ state: 'MERGED', open: false, canClose: true }), null)).toEqual([]);
     expect(statusOptions(box({ state: null }), 'merge')).toEqual([]);
+  });
+
+  it('offers a merge queue’s Merge when ready where a merge would stand, before a draft and closing', () => {
+    expect(statusOptions(box({ canClose: true, canConvertToDraft: true, methods: [], canQueue: true }), 'queue').map((option) => [option.status, option.action, option.note])).toEqual([
+      ['queued', 'queue', 'Merge when ready'],
+      ['draft', 'draft', 'Convert to draft'],
+      ['closed', 'close', 'Close pull request'],
+    ]);
   });
 
   it('never offers a draft a merge', () => {

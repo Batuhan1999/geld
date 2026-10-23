@@ -1,7 +1,7 @@
 import type { MergeBox, MergeOffer, StatusAction } from './merge-actions';
 import { METHOD_LABEL } from './merge-actions';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
-import { ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRIANGLE_DOWN } from './ui/icons';
+import { ICON_GIT_MERGE, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRIANGLE_DOWN } from './ui/icons';
 
 /**
  * The pull request's status pill in GitHub's header ("Open", "Draft",
@@ -13,7 +13,8 @@ import { ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, IC
  * Both the header's pill and the sticky header's are swapped.
  */
 
-export type PullStatus = 'open' | 'draft' | 'merged' | 'closed';
+/** `queued` is only ever a choice (GitHub's "Merge when ready"), never what `statusOf` reads. */
+export type PullStatus = 'open' | 'draft' | 'queued' | 'merged' | 'closed';
 
 export interface StatusOption {
   readonly status: PullStatus;
@@ -25,12 +26,13 @@ export interface StatusOption {
 export const STATUS_INFO: { readonly [S in PullStatus]: { readonly label: string; readonly icon: string } } = {
   open: { label: 'Open', icon: ICON_GIT_PULL_REQUEST },
   draft: { label: 'Draft', icon: ICON_GIT_PULL_REQUEST_DRAFT },
+  queued: { label: 'Queued', icon: ICON_GIT_MERGE_QUEUE },
   merged: { label: 'Merged', icon: ICON_GIT_MERGE },
   closed: { label: 'Closed', icon: ICON_GIT_PULL_REQUEST_CLOSED },
 };
 
 /** Forward first: ready for review or reopened, then merged, then back to a draft, and closed always last. */
-const STATUS_ORDER: readonly PullStatus[] = ['open', 'merged', 'draft', 'closed'];
+const STATUS_ORDER: readonly PullStatus[] = ['open', 'queued', 'merged', 'draft', 'closed'];
 
 export function statusOf(box: MergeBox): PullStatus | null {
   if (box.state === 'MERGED') return 'merged';
@@ -57,7 +59,8 @@ export function statusOptions(box: MergeBox, offer: MergeOffer): readonly Status
   if (current === 'draft' && box.canMarkReady) moves.open = { status: 'open', action: 'ready', note: 'Ready for review' };
   if (current === 'closed' && box.canClose) moves.open = { status: 'open', action: 'reopen', note: 'Reopen pull request' };
   if (current === 'open' && box.canConvertToDraft) moves.draft = { status: 'draft', action: 'draft', note: 'Convert to draft' };
-  if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: offer === 'bypass' ? 'Bypass rules and merge' : METHOD_LABEL[method] };
+  if (current === 'open' && offer === 'queue') moves.queued = { status: 'queued', action: 'queue', note: 'Merge when ready' };
+  else if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: offer === 'bypass' ? 'Bypass rules and merge' : METHOD_LABEL[method] };
   if (current !== 'closed' && box.canClose) moves.closed = { status: 'closed', action: 'close', note: 'Close pull request' };
   return STATUS_ORDER.flatMap((status) => moves[status] ?? []);
 }

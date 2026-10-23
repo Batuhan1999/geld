@@ -1498,6 +1498,10 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
 }
 
+.geld-quick-review__confirm-submit[data-action='queue'] > svg {
+  color: var(--fgColor-attention, #9a6700);
+}
+
 /*
  * The header's status pill as a menu of the statuses the reader may switch to: GitHub's label hidden, Geld's button
  * beside it in the label's own classes and data-status (Primer's StateLabel keys its look on them), a caret added.
@@ -1637,6 +1641,10 @@ button.geld-status-pill:is(:hover, :focus-visible, [aria-expanded='true']) .geld
 
 .geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='draft'] .geld-quick-review__menu-visual {
   color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
+}
+
+.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='queued'] .geld-quick-review__menu-visual {
+  color: var(--fgColor-attention, #9a6700);
 }
 
 .geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='merged'] .geld-quick-review__menu-visual {
