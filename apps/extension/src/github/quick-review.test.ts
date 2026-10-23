@@ -1176,7 +1176,8 @@ describe('the tab bar button', () => {
   const WRITER_HTML = `
     <form id="new_comment_form"><div class="js-previewable-comment-form preview-selected CommentBox">
       <markdown-toolbar for="new_comment_field"><button id="bold-1" data-md-button="bold" data-hotkey-scope="new_comment_field" aria-labelledby="tip-1"></button><tool-tip id="tip-1" for="bold-1">Bold</tool-tip></markdown-toolbar>
-      <textarea id="new_comment_field" class="js-comment-field js-session-resumable" name="comment[body]"></textarea>
+      <file-attachment><textarea id="new_comment_field" class="js-comment-field js-session-resumable" name="comment[body]" required></textarea>
+      <div class="d-flex foot"><a href="https://docs.github.com/github/writing-on-github"><svg></svg> Markdown is supported</a><label><input type="file"><span>Paste, drop, or click to add files</span></label></div></file-attachment>
       <div class="js-preview-body"><p>old preview</p></div>
     </div></form>`;
 
@@ -1194,6 +1195,10 @@ describe('the tab bar button', () => {
     segment('comment').click();
     const box = document.querySelector('.geld-quick-review__panel');
     const writer = box?.querySelector('.js-previewable-comment-form');
+    // Its foot says what the toolbar and the field offer: hidden, the file input still in the page; the form never validates.
+    expect(box?.querySelector('.foot')?.hasAttribute('data-geld-writer-foot')).toBe(true);
+    expect(box?.querySelector('.foot input[type="file"]')).not.toBeNull();
+    expect(box?.querySelector<HTMLFormElement>('form.geld-comment-writer')?.noValidate).toBe(true);
     const field = writer?.querySelector('textarea');
     if (!(field instanceof HTMLTextAreaElement)) throw new Error('no writer');
     expect(writer?.classList.contains('write-selected')).toBe(true);

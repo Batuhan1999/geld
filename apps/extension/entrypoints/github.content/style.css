@@ -1105,13 +1105,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   box-shadow: none !important;
 }
 
-/* Pulled 6px into the box's padding, so the Write tab's corner is concentric with the box's: 6px in, 6px inside 12px. */
+/* At the box's 6px inset, so the Write tab's corner is concentric with the box's: 6px in, 6px inside 12px. */
 .geld-quick-review__panel .CommentBox .comment-form-head,
 .geld-quick-review__panel .CommentBox-header {
   align-items: center;
-  /* GitHub's `width-full` is `!important` too: wider by the 6px it is pulled out on each side. */
-  width: calc(100% + 12px) !important;
-  margin: -6px -6px 6px !important;
+  margin: 0 0 6px !important;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -1165,6 +1163,41 @@ html[data-geld-quick-review] details.js-reviews-container {
   margin: 0;
 }
 
+/*
+ * The comment box keeps everything 6px from its edges, as the Write tab is: the words' field, the pending comments and
+ * the footer's buttons, each corner's 6px radius inside the box's 12px. The pending rows and Discard keep their glyphs
+ * in one column 12px in, their hover surfaces inside the box.
+ */
+.Overlay.geld-quick-review__panel--writer .Overlay-body {
+  padding: 6px 6px 0;
+}
+
+.Overlay.geld-quick-review__panel--writer .Overlay-footer.geld-quick-review__footer {
+  padding: 6px;
+}
+
+.geld-quick-review__panel--writer .geld-quick-review__pending-toggle {
+  padding-left: 6px;
+}
+
+.geld-quick-review__panel--writer .geld-quick-review__pending-list {
+  margin: 4px 0 0;
+}
+
+.geld-quick-review__panel--writer .geld-quick-review__pending-row {
+  padding: 0 6px;
+}
+
+.geld-quick-review__panel--writer .geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard {
+  margin-left: 0;
+  padding-left: 6px;
+}
+
+/* The writer's foot, which repeats what its toolbar and field offer (`hideFoot`). */
+.geld-quick-review__panel [data-geld-writer-foot] {
+  display: none !important;
+}
+
 /* GitHub's writer while it is fetched, in its shape: Write and Preview, the toolbar, then the field. */
 .geld-quick-review__writer-placeholder {
   display: flex;
@@ -1178,7 +1211,6 @@ html[data-geld-quick-review] details.js-reviews-container {
   align-items: center;
   gap: 8px;
   height: 32px;
-  margin: -6px -6px 0;
   padding: 0 6px;
 }
 
@@ -1199,7 +1231,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__writer-field {
-  height: 134px;
+  /* GitHub's field: its 102px input inside a 1px border (its foot row is hidden, `hideFoot`). */
+  height: 104px;
   border-radius: var(--borderRadius-medium, 6px);
 }
 

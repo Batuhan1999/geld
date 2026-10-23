@@ -1557,7 +1557,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const submitGroup = createElement('div', { class: 'geld-quick-review__submit-group' }, [submit]);
   const kindMenu = createElement('div', { class: 'geld-quick-review__menu', role: 'menu', 'aria-label': 'Comment or review', hidden: '' });
   const bodyBox = createElement('div', { class: 'Overlay-body' }, [...(placeholder === null ? [] : [placeholder]), writer?.element ?? body, pendingSection, error]);
-  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
+  const panel = createElement('div', { class: `Overlay ${PANEL_CLASS} ${PANEL_CLASS}--writer`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
     bodyBox,
     createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submitGroup])]),
     kindMenu,
