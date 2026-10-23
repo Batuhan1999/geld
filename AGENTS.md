@@ -949,7 +949,7 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   With comments pending a review is the default (they go with it, as before), without them a comment, until the reader chooses;
   a plain comment needs words and leaves pending comments pending.
   It is GitHub's conversation composer's request (`timelineCommentRequest`: `POST page_data/create_timeline_comment` `{ text }`, read from its bundle;
-  an empty text answers 422 "Comment text is required."), after which the conversation is caught up to show it (`catchUpTimeline`, reloading only where that cannot be done) and every tab says "Commented".
+  an empty text answers 422 "Comment text is required."), after which the conversation is caught up to show it (`catchUpTimeline`, reloading only where that cannot be done) and screen readers hear "Commented".
   ✓ and ✗ open the box with no choice.
   **With comments pending, ⌘-click on 💬 submits them at once** as a comment review with no words (`isInstantClick(…, pending)`, `data-pending` on the group): its glyph gains the arrow while the key is held (`ICON_COMMENT_SEND`, the arrow below the bubble's edge, the bubble where it stands) and its tooltip reads "Comment" over "⌘ 1-click review", or "Submit pending comments" while held;
   a refusal opens the box with GitHub's reason, as for ✓ and ✗.
@@ -986,7 +986,8 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   the `title`, lines joined by a newline, where the page defines no `tool-tip`), placed beside the group, never between its buttons, because Primer rounds the outer corners on `:first-child`/`:last-child`.
   **On their own pull request the author has 💬 alone** (`showAuthor`, `EventInfo.authorMay`): GitHub refuses an author's own approval and request for changes, so ✓ and ✗ leave the group, out of the DOM rather than hidden, since Primer rounds the corners on `:first-child`/`:last-child` (they once stayed, disabled with GitHub's reason as the tooltip, which was clutter for something that can never apply).
   An instant send GitHub refuses (it may want words for a change request with nothing pending) opens the box with that verdict and GitHub's reason;
-  while a send is out the group is `aria-busy`, and "Submitting…", then "Approved" / "Changes requested" / "Review submitted", stands beside it for a moment (`role=status`).
+  **A send freezes the group in place** (`aria-busy`, `data-sending` on the pressed segment): the other segments fade, and the pressed one's glyph gives way to Primer's spinner (`ICON_SPINNER`) in the glyph's own colour, since it sits in a `.geld-quick-review__glyph` like the glyphs the colours key on.
+  "Submitting…", then "Approved" / "Changes requested" / "Review submitted", is said to screen readers only (`role=status`, visually hidden): words beside the group appeared and went with every send and pushed the controls around.
   **The words are written in GitHub's own comment writer** (`comment-writer.ts`): the conversation's "Add a comment" box (`form#new_comment_form .js-previewable-comment-form`), with Write and Preview, the Markdown toolbar, mentions, references, saved replies and uploads, all driven by GitHub's own behaviours, which run on every pull request tab (verified Oct 2026 on Files changed).
   It is server-rendered into the conversation page with its preview and upload tokens and has no partial of its own, so on this pull request's conversation the page's box is copied, and elsewhere the conversation's HTML (about 480 KB) is fetched once per pull request when the reader heads for a review segment (`prefetchWriter` on the review group's `pointerenter`/`focusin`, never the merge, close or ready actions) and kept for the page's life;
   a box opened before it lands shows a placeholder in the writer's shape (`writerPlaceholder`: Write, Preview and toolbar bars over a field-sized block, shimmering, static under reduced motion), focused so Escape still closes the box, and at the width the last writer was fitted to (`writerWidth`), never a plain field that the writer then replaces;
@@ -1020,7 +1021,7 @@ a git-ignored `apps/extension/web-ext.config.ts` with `disabled: false` brings t
   **On success the review is shown at once and held** (`showOwnReview`, `heldReview`, `OWN_REVIEW_HOLD_MS` 90 s): ✓ or ✗ pressed in and the tally counting the reader's review (`withOwnReview`;
   a comment leaves a standing verdict standing), over GitHub's merge box and Reviewers partial, which answer from before the review for some seconds and took both back;
   only Files changed with pending comments just published reloads (its view still draws them as pending), after the review is shown;
-  elsewhere the status beside the group says what was sent ("Approved", "Changes requested", "Review submitted") for a moment, the pending count goes to none when they went with it, and the conversation is caught up (`catchUpTimeline`) so the review shows without a reload.
+  elsewhere screen readers hear what was sent ("Approved", "Changes requested", "Review submitted"), the pending count goes to none when they went with it, and the conversation is caught up (`catchUpTimeline`) so the review shows without a reload.
   Verified on brandonmcconnell/geld#68 with the harness answering the request itself (`block` command), so nothing was posted;
   the success response's body was not seen.
   In the tab bar GitHub floats the counts right and drops their line with 12px of top padding;

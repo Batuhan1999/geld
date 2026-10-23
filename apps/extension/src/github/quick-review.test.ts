@@ -308,6 +308,25 @@ describe('the tab bar button', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
+  it('freezes the group while a review is on its way, the pressed segment’s glyph giving way to a spinner', async () => {
+    let answer: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => (String(input).endsWith('/submit_review') ? new Promise<Response>((resolve) => { answer = resolve; }) : Promise.resolve(new Response('{}', { status: 404 })))));
+    mount();
+    segment('approve').dispatchEvent(new MouseEvent('click', instant));
+    await settle();
+    expect(segment('approve').hasAttribute('data-sending')).toBe(true);
+    expect(segment('approve').querySelector('.geld-quick-review__glyph--sending .geld-spinner')).not.toBeNull();
+    expect(segment('request changes').hasAttribute('data-sending')).toBe(false);
+    expect(document.querySelector('.geld-quick-review')?.getAttribute('aria-busy')).toBe('true');
+    if (answer === null) throw new Error('no request');
+    const resolve: (response: Response) => void = answer;
+    resolve(new Response('{}', { status: 200 }));
+    await settle();
+    await settle();
+    expect(segment('approve').hasAttribute('data-sending')).toBe(false);
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+  });
+
   it('opens the box with the verdict instead of sending when words wait in it', async () => {
     const sent: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

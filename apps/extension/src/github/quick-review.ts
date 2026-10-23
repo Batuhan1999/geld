@@ -19,7 +19,7 @@ import type { ReviewTally } from './review-tally';
 import type { StatusOption } from './status-pill';
 import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
 import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
-import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_SPINNER, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -85,6 +85,8 @@ const SUBMITTED_MS = 3000;
 const ATTR_INSTANT = 'data-instant';
 /** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
 const ATTR_PENDING = 'data-pending';
+/** On the segment whose review is on its way: its glyph gives way to a spinner in the same colour. */
+const ATTR_SENDING = 'data-sending';
 /** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
 const ATTR_KIND = 'data-kind';
 
@@ -527,6 +529,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       [
         createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
         ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
+        // In the glyph's place, in its colour, while this segment's review is on its way.
+        createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--sending' }, [svgFromString(ICON_SPINNER)]),
       ],
     );
   };
@@ -1402,6 +1406,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
   const { url, init } = submitReviewRequest(pullPath, { body, event, headSha }, fetchNonce());
   state.sending = true;
   state.root.setAttribute('aria-busy', 'true');
+  state.segments[event].setAttribute(ATTR_SENDING, '');
   window.clearTimeout(state.submittedTimer);
   state.status.textContent = 'Submitting…';
   try {
@@ -1441,6 +1446,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     state.sending = false;
     state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
+    state.segments[event].removeAttribute(ATTR_SENDING);
     if (state.status.textContent === 'Submitting…') state.status.textContent = '';
   }
 }
@@ -1455,6 +1461,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
   const { url, init } = timelineCommentRequest(pullPath, text, fetchNonce());
   state.sending = true;
   state.root.setAttribute('aria-busy', 'true');
+  state.segments.comment.setAttribute(ATTR_SENDING, '');
   window.clearTimeout(state.submittedTimer);
   state.status.textContent = 'Posting…';
   try {
@@ -1481,6 +1488,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
     state.sending = false;
     state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
+    state.segments.comment.removeAttribute(ATTR_SENDING);
     if (state.status.textContent === 'Posting…') state.status.textContent = '';
   }
 }

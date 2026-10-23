@@ -275,6 +275,10 @@ export const ICON_CROSS_REFERENCE = octicon(
   'octicon-cross-reference',
 );
 
+/** Primer's Spinner as its buttons show it while they work: a faint full track and a quarter arc that turns. */
+export const ICON_SPINNER =
+  '<svg class="octicon geld-spinner" viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-opacity="0.25" stroke-width="2" vector-effect="non-scaling-stroke"></circle><path d="M15 8a7.002 7.002 0 00-7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg>';
+
 /** Primer's Spinner, as GitHub's checks list draws an in-progress check: a faint full track and a quarter arc that turns. */
 /** GitHub's in-progress check glyph: Primer's spinner ring with the 8px filled dot the check rows put at its centre. */
 export const ICON_IN_PROGRESS =
