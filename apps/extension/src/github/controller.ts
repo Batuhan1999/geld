@@ -1596,7 +1596,10 @@ export class GeldController {
    */
   private reassertHeader(): void {
     const settled = this.settledHeader;
-    if (settled === null || this.currentPage?.stateKey !== settled.stateKey || this.currentPage.diffUrl !== settled.diffUrl) return;
+    if (settled === null || this.currentPage?.stateKey !== settled.stateKey) return;
+    // The live URL, not `currentPage`: this runs before paint, and after a move from one narrowed diff to another the
+    // pass that updates `currentPage` has not run yet, so the settled counts would land in the new view's header.
+    if (describePage(new URL(window.location.href)).diffUrl !== settled.diffUrl) return;
     const stale = this.headerGroups.some(
       ({ group, additionsText }) => !group.host.isConnected || (group.additions !== null && group.additions.textContent !== additionsText),
     );
