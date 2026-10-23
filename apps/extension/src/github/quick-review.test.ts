@@ -1083,13 +1083,13 @@ describe('the tab bar button', () => {
     expect(JSON.parse(String(request.init.body))).toEqual({ text: 'Hello' });
   });
 
-  it('draws the control once the reviews are read, so the tally never pushes it aside', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/page_data/merge_box') ? new Response(mergeBox('MERGEABLE', true), { status: 200 }) : new Response('{}', { status: 404 }))));
+  it('draws the group at once, before GitHub has answered anything, with the tally arriving to its left later', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
     mount();
     const root = document.querySelector('.geld-quick-review');
-    expect(root?.hasAttribute('data-loading')).toBe(true);
-    for (let i = 0; i < 4; i += 1) await settle();
     expect(root?.hasAttribute('data-loading')).toBe(false);
+    expect(root?.isConnected).toBe(true);
+    expect(document.querySelector<HTMLElement>('.geld-quick-review__tally')?.hidden).toBe(true);
   });
 
   it('links the tally to the reviews and shows who reviewed on it, each a link to their review', async () => {

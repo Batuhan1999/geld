@@ -83,8 +83,6 @@ type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
-/** On the group until what the reader may do is read: it is not drawn meanwhile. */
-const ATTR_LOADING = 'data-loading';
 /** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
 const ATTR_PENDING = 'data-pending';
 /** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
@@ -259,8 +257,6 @@ interface Mounted {
   /** The snapshot card while it shows, and the timer that shows or hides it. */
   snapshot: HTMLElement | null;
   snapshotTimer: number;
-  /** Until the first reading of what the reader may do lands (or `READY_WAIT_MS` passes), the control is not drawn. */
-  loadingTimer: number;
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
@@ -344,7 +340,6 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
     mounted.reviewers = [];
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
-    holdUntilReady(mounted);
   }
   mounted.context = context;
   followReviewHash(context);
@@ -481,7 +476,6 @@ export function removeQuickReview(): void {
   closeStatusMenu(mounted);
   window.clearTimeout(mounted.submittedTimer);
   window.clearTimeout(mounted.mergeTimer);
-  window.clearTimeout(mounted.loadingTimer);
   hideSnapshot(mounted);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
@@ -542,7 +536,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, INSTANT_KEY)) ?? []);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   // Drawn once the reviews are read: the tally arriving later would push the group aside.
-  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '', [ATTR_LOADING]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
   const stickyWatch = new MutationObserver(() => {
     if (mounted !== state) return;
@@ -566,7 +560,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     ownReview: null,
     snapshot: null,
     snapshotTimer: 0,
-    loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
     mergeRead: 0,
@@ -603,7 +596,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     showInstantMerge(state);
   });
   armSnapshot(state);
-  holdUntilReady(state);
   // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for a review segment, not before.
   for (const type of ['pointerenter', 'focusin']) state.group.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
   // The tally's link from this very tab changes only the hash: resolve it there and then.
@@ -789,12 +781,7 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   state.mergeRead += 1;
   const read = state.mergeRead;
   const current = (): boolean => mounted === state && state.pullPath === pullPath && state.mergeRead === read;
-  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close. The control is drawn once both are in.
-  let waiting = 2;
-  const settle = (): void => {
-    waiting -= 1;
-    if (waiting === 0) ready(state);
-  };
+  // Each answer shows when it lands: a slow Reviewers read must not hold back the verdict or the status pill.
   let sidebar: readonly SidebarReviewer[] | null = null;
   const showReviewers = (): void => {
     if (sidebar === null) return;
@@ -805,35 +792,16 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
     if (!current()) return;
     sidebar = reviewers;
     showReviewers();
-    settle();
   });
   const actions = await readMergeActions(pullPath);
   if (!current()) return null;
   if (actions !== null) state.mergeActions = actions;
   showStatus(state);
   showReviewers();
-  settle();
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
   return actions;
-}
-
-const READY_WAIT_MS = 1500;
-
-/** Keep the control undrawn until what the reader may do is read, or for `READY_WAIT_MS` at most. */
-function holdUntilReady(state: Mounted): void {
-  state.root.setAttribute(ATTR_LOADING, '');
-  window.clearTimeout(state.loadingTimer);
-  state.loadingTimer = window.setTimeout(() => ready(state), READY_WAIT_MS);
-}
-
-function ready(state: Mounted): void {
-  window.clearTimeout(state.loadingTimer);
-  if (state.root.hasAttribute(ATTR_LOADING)) {
-    state.root.removeAttribute(ATTR_LOADING);
-    positionPanel();
-  }
 }
 
 const TALLY_PARTS: ReadonlyArray<{ readonly key: keyof ReviewTally; readonly icon: string; readonly tone: string }> = [
