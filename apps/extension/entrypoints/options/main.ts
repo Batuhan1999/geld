@@ -473,6 +473,16 @@ async function main(): Promise<void> {
     return card;
   }
 
+  /**
+   * Focus is in a category's pattern editor: its textarea, or its Save button
+   * (Chrome focuses a clicked button). Rebuilding then would eat typed input
+   * or the "Saved" status the click is about to show.
+   */
+  function isEditingPatterns(): boolean {
+    const active = document.activeElement;
+    return active !== null && active.closest('.options__categories .options__editor') !== null;
+  }
+
   /** Rebuild both category lists from the current settings, keeping open disclosures open. */
   function renderAll(): void {
     const wasOpen = new Set(
@@ -1241,7 +1251,7 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (!(document.activeElement instanceof HTMLTextAreaElement && document.activeElement.closest('.options__categories') !== null)) renderAll();
+    if (!isEditingPatterns()) renderAll();
     runTester();
   }
   catalogItem.watch(applyCatalog);
@@ -1257,8 +1267,8 @@ async function main(): Promise<void> {
     for (const { field, set } of reviewSwitches) set(next[field.key]);
     for (const show of choiceSetters) show(next);
     const signature = categorySignature(next);
-    // Rebuilding while someone types in a pattern box would eat their input.
-    if (signature !== lastSignature && !(document.activeElement instanceof HTMLTextAreaElement && document.activeElement.closest('.options__categories') !== null)) {
+    // Rebuilding while someone types in a pattern box (or has just clicked its Save) would eat their input or the Saved status.
+    if (signature !== lastSignature && !isEditingPatterns()) {
       lastSignature = signature;
       renderAll();
     }
