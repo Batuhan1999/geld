@@ -1747,6 +1747,19 @@ function fitWriter(panel: HTMLElement, bodyBox: HTMLElement, writer: HTMLElement
   const chrome = panel.offsetWidth - panel.clientWidth + parseFloat(box.paddingLeft) + parseFloat(box.paddingRight);
   writerWidth = Math.round(natural + chrome + WRITER_CUSHION);
   fitWidth(panel, writerWidth);
+  // GitHub's toolbar can measure narrower than it lays out (its buttons are sized by its own scripts once in the page):
+  // whatever still reaches past the row's edge widens the box by that much, so no button runs off it.
+  const row = writer.querySelector('.CommentBox-header');
+  if (row === null) return;
+  const edge = row.getBoundingClientRect().right;
+  const reach = [...row.querySelectorAll<HTMLElement>('button, a[href], summary')].reduce((far, control) => {
+    const rect = control.getBoundingClientRect();
+    return rect.width > 0 ? Math.max(far, rect.right) : far;
+  }, edge);
+  const over = Math.ceil(reach - edge);
+  if (over <= 0) return;
+  writerWidth += over;
+  fitWidth(panel, writerWidth);
 }
 
 function fitWidth(panel: HTMLElement, width: number): void {
