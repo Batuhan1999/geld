@@ -1057,14 +1057,27 @@ html[data-geld-quick-review] details.js-reviews-container {
   animation: none;
 }
 
-/* A small box: the words, any pending comments, then the buttons with no rule between. */
+/*
+ * A small box: the words, any pending comments, then the buttons with no rule between. Its body overflows rather than
+ * scrolls, so GitHub's suggestion lists (slash commands, mentions, saved replies) hang past the box instead of being cut
+ * off by it and scrolling it; only a box fixed under a sticky header keeps to the room below it and scrolls its body,
+ * and even there a list that is open overflows.
+ */
 .Overlay.geld-quick-review__panel .Overlay-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
   padding: 12px 12px 0;
+  overflow: visible;
+}
+
+.Overlay.geld-quick-review__panel[data-geld-fixed] .Overlay-body {
   overflow-y: auto;
+}
+
+.Overlay.geld-quick-review__panel[data-geld-fixed]:has(.CommentBox :is([role='listbox'], .suggester, details[open] > details-menu)) .Overlay-body {
+  overflow: visible;
 }
 
 .geld-quick-review__body {
@@ -1084,14 +1097,23 @@ html[data-geld-quick-review] details.js-reviews-container {
   box-shadow: none !important;
 }
 
+/* Pulled 6px into the box's padding, so the Write tab's corner is concentric with the box's: 6px in, 6px inside 12px. */
 .geld-quick-review__panel .CommentBox .comment-form-head,
 .geld-quick-review__panel .CommentBox-header {
   align-items: center;
-  margin: 0 0 4px !important;
+  /* GitHub's `width-full` is `!important` too: wider by the 6px it is pulled out on each side. */
+  width: calc(100% + 12px) !important;
+  margin: -6px -6px 6px !important;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
+}
+
+/* The tabs and the toolbar share one 32px row: no padding of their own above or below to push the tabs down. */
+.geld-quick-review__panel .CommentBox-header > * {
+  margin-block: 0 !important;
+  padding-block: 0 !important;
 }
 
 .geld-quick-review__panel .CommentBox .tabnav-tabs {
@@ -1101,9 +1123,9 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__panel .CommentBox .tabnav-tab {
   margin: 0;
-  padding: 3px 10px;
+  padding: 6px 12px;
   border: 0 !important;
-  border-radius: var(--borderRadius-medium, 6px) !important;
+  border-radius: calc(var(--borderRadius-large, 12px) - 6px) !important;
   background: transparent;
   color: var(--fgColor-muted, #59636e);
   font-size: 14px;
@@ -1133,6 +1155,51 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__panel .CommentBox :is(.write-content, .preview-content) {
   margin: 0;
+}
+
+/* GitHub's writer while it is fetched, in its shape: Write and Preview, the toolbar, then the field. */
+.geld-quick-review__writer-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  outline: none;
+}
+
+.geld-quick-review__writer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: -6px -6px 0;
+  padding: 0 6px;
+}
+
+.geld-quick-review__writer-gap {
+  flex: 1;
+}
+
+.geld-quick-review__writer-bar {
+  height: 12px;
+  border-radius: 6px;
+}
+
+.geld-quick-review__writer-bar,
+.geld-quick-review__writer-field {
+  background: linear-gradient(90deg, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 25%, color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 40%, transparent) 50%, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 75%);
+  background-size: 200% 100%;
+  animation: geld-shimmer 1.8s linear infinite;
+}
+
+.geld-quick-review__writer-field {
+  height: 134px;
+  border-radius: var(--borderRadius-medium, 6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .geld-quick-review__writer-bar,
+  .geld-quick-review__writer-field {
+    animation: none;
+  }
 }
 
 .geld-quick-review__error {
@@ -1179,9 +1246,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-danger, #d1242f);
 }
 
-.geld-quick-review__discard > svg {
+/* Over Primer's `.btn .octicon` muted colour, so the can turns red with the words. */
+.geld-quick-review__footer .btn.geld-quick-review__discard > svg {
   margin: 0;
   color: inherit;
+  fill: currentColor;
 }
 
 /*

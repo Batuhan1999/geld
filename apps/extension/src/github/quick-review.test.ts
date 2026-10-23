@@ -1179,7 +1179,7 @@ describe('the tab bar button', () => {
     expect(sent).toEqual([JSON.stringify({ text: 'Ship it.' })]);
   });
 
-  it('fetches the writer off the conversation, on intent, and swaps it in keeping the words', async () => {
+  it('fetches the writer off the conversation, on intent, and shows it in place of a placeholder', async () => {
     const asked: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1190,24 +1190,39 @@ describe('the tab bar button', () => {
     applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/11' }, groups: [groupAt(counts())], headSha: () => SHA });
     expect(asked).not.toContain('/acme/widgets/pull/11');
     segment('comment').click();
+    // A placeholder in the writer's shape holds its place, focused so Escape still closes the box; no plain field shows first.
+    const placeholder = document.querySelector<HTMLElement>('.geld-quick-review__panel .geld-quick-review__writer-placeholder');
     const stand = document.querySelector<HTMLTextAreaElement>('.geld-quick-review__panel textarea');
-    if (stand === null) throw new Error('no box');
-    expect(stand.closest('.js-previewable-comment-form')).toBeNull();
-    stand.value = 'Halfway';
-    stand.dispatchEvent(new Event('input', { bubbles: true }));
+    if (placeholder === null || stand === null) throw new Error('no box');
+    expect(stand.hidden).toBe(true);
+    expect(document.activeElement).toBe(placeholder);
     await settle();
     await settle();
     expect(asked.filter((url) => url === '/acme/widgets/pull/11')).toHaveLength(1);
     const field = document.querySelector('.geld-quick-review__panel .js-previewable-comment-form textarea');
     if (!(field instanceof HTMLTextAreaElement)) throw new Error('no writer');
-    expect(field.value).toBe('Halfway');
+    expect(placeholder.isConnected).toBe(false);
     expect(stand.isConnected).toBe(false);
+    expect(document.activeElement).toBe(field);
     // The next box has the writer at once, from the same fetch.
     document.querySelector<HTMLButtonElement>('.geld-quick-review__panel .btn-invisible:not(.geld-quick-review__discard)')?.click();
     document.querySelector('.geld-quick-review__group[aria-label="Submit review"]')?.dispatchEvent(new Event('pointerenter'));
     segment('comment').click();
     expect(document.querySelector('.geld-quick-review__panel .js-previewable-comment-form textarea')).not.toBeNull();
     expect(asked.filter((url) => url === '/acme/widgets/pull/11')).toHaveLength(1);
+  });
+
+  it('falls back to a plain field when the writer cannot be read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    window.history.replaceState(null, '', '/acme/widgets/pull/12/changes');
+    applyQuickReview(true, { page: { kind: 'pull-files', diffUrl: null, stateKey: '/acme/widgets/pull/12' }, groups: [groupAt(counts())], headSha: () => SHA });
+    segment('comment').click();
+    await settle();
+    await settle();
+    const stand = document.querySelector<HTMLTextAreaElement>('.geld-quick-review__panel textarea');
+    expect(document.querySelector('.geld-quick-review__panel .geld-quick-review__writer-placeholder')).toBeNull();
+    expect(stand?.hidden).toBe(false);
+    expect(document.activeElement).toBe(stand);
   });
 
   it('reads the pull request path', () => {

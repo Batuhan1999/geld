@@ -63,6 +63,8 @@ const ATTR_ACTIVE = 'data-geld-quick-review';
 const ATTR_HOST = 'data-geld-quick-review-host';
 /** On the group while it rides a sticky header: `toolbar` (Files changed, where GitHub's own button would be) or `header` (every other tab). */
 const ATTR_PLACE = 'data-geld-place';
+/** On a box fixed under a sticky header, which then keeps to the room below it: only there does its body scroll. */
+const ATTR_PANEL_FIXED = 'data-geld-fixed';
 /** GitHub's own review control, React's Files changed view or the classic one; hidden while the group is mounted. */
 const GITHUB_REVIEW_CONTROL = '[class*="ReviewMenuButton"], details.js-reviews-container';
 /** The toolbar that holds it and sticks to the top of the viewport as the diff scrolls. */
@@ -1281,6 +1283,7 @@ function positionPanel(): void {
   const width = mounted.panel.offsetWidth;
   const left = Math.max(16, Math.min(pill === null ? rect.right - width : rect.left, document.documentElement.clientWidth - width - 16));
   mounted.panel.style.position = fixed ? 'fixed' : '';
+  mounted.panel.toggleAttribute(ATTR_PANEL_FIXED, fixed);
   mounted.panel.style.top = `${Math.round(rect.bottom + (fixed ? 0 : window.scrollY) + 4)}px`;
   mounted.panel.style.left = `${Math.round(left + (fixed ? 0 : window.scrollX))}px`;
   // Fixed under a sticky header, scrolling the page cannot reach what overflows the window: the box keeps to the room
@@ -1469,9 +1472,13 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const allowed = (event: ReviewEvent): ReviewEvent => (isAuthorViewing() && !EVENT_INFO[event].authorMay ? 'comment' : event);
   draft.event = allowed(initial);
 
-  // GitHub's own writer when it is at hand; a plain field stands in while it is fetched, or for good when it cannot be.
+  // GitHub's own writer when it is at hand; while it is fetched a placeholder in its shape holds its place, and a plain
+  // field stands in only if it cannot be had, so the reader never types into one editor that another then replaces.
   const writer = writerNow(pullPath, draft.body);
   let body = writer?.field ?? plainField(draft.body);
+  const placeholder = writer === null ? writerPlaceholder() : null;
+  body.hidden = placeholder !== null;
+  const focusBody = (): void => (placeholder?.isConnected === true ? placeholder : body).focus({ preventScroll: true });
   const pendingSection = createElement('div', { class: 'geld-quick-review__pending' });
   const error = createElement('p', { class: 'geld-quick-review__error color-fg-danger', role: 'alert', hidden: '' });
   if (failure !== null) {
@@ -1485,7 +1492,7 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
   const kindToggle = createElement('button', { type: 'button', class: 'btn btn-sm BtnGroup-item geld-quick-review__kind-toggle', 'aria-label': 'Comment or review', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, [svgFromString(ICON_TRIANGLE_DOWN)]);
   const submitGroup = createElement('div', { class: 'geld-quick-review__submit-group' }, [submit]);
   const kindMenu = createElement('div', { class: 'geld-quick-review__menu', role: 'menu', 'aria-label': 'Comment or review', hidden: '' });
-  const bodyBox = createElement('div', { class: 'Overlay-body' }, [writer?.element ?? body, pendingSection, error]);
+  const bodyBox = createElement('div', { class: 'Overlay-body' }, [...(placeholder === null ? [] : [placeholder]), writer?.element ?? body, pendingSection, error]);
   const panel = createElement('div', { class: `Overlay ${PANEL_CLASS}`, [OWN_UI_ATTRIBUTE]: '', role: 'dialog' }, [
     bodyBox,
     createElement('div', { class: 'Overlay-footer geld-quick-review__footer' }, [discard, createElement('div', { class: 'geld-quick-review__actions' }, [cancel, submitGroup])]),
@@ -1659,26 +1666,44 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     error.hidden = true;
     showVerdict();
     refresh();
-    body.focus({ preventScroll: true });
+    focusBody();
   };
   showVerdict();
   refresh();
-  body.focus({ preventScroll: true });
   if (writer !== null) fitWriter(panel, bodyBox, writer.element);
-  else
+  else if (writerWidth !== null) fitWidth(panel, writerWidth);
+  focusBody();
+  if (writer === null) {
+    const showPlain = (): void => {
+      if (placeholder === null || !placeholder.isConnected) return;
+      const focused = document.activeElement === placeholder;
+      placeholder.remove();
+      body.hidden = false;
+      if (focused) body.focus({ preventScroll: true });
+    };
+    const patience = window.setTimeout(showPlain, WRITER_PATIENCE_MS);
     void loadWriter(pullPath, body.value).then((loaded) => {
-      if (loaded === null || state.panel !== panel || !body.isConnected) return;
+      window.clearTimeout(patience);
+      if (state.panel !== panel || !body.isConnected) return;
+      if (loaded === null) {
+        showPlain();
+        return;
+      }
       const plain = body;
-      const focused = document.activeElement === plain;
+      const waited = placeholder?.isConnected === true;
+      const focused = document.activeElement === (waited ? placeholder : plain);
       loaded.field.value = plain.value;
+      placeholder?.remove();
       plain.replaceWith(loaded.element);
       body = loaded.field;
       fitWriter(panel, bodyBox, loaded.element);
       if (focused) {
         body.focus({ preventScroll: true });
-        body.setSelectionRange(plain.selectionStart, plain.selectionEnd, plain.selectionDirection);
+        if (waited) body.setSelectionRange(body.value.length, body.value.length);
+        else body.setSelectionRange(plain.selectionStart, plain.selectionEnd, plain.selectionDirection);
       }
     });
+  }
   // Comments the reader left with "Start a review" go out with this review, words or not; read them afresh.
   void loadPending(state).then(() => {
     if (state.panel !== panel) return;
@@ -1686,6 +1711,21 @@ function openComposer(state: Mounted, initial: ReviewEvent, failure: string | nu
     showVerdict();
     refresh();
   });
+}
+
+/** How long the box waits for GitHub's writer before the plain field takes its place. */
+const WRITER_PATIENCE_MS = 5000;
+
+/** The width the last writer was fitted to, so a box waiting for the next one opens at that width. */
+let writerWidth: number | null = null;
+
+/** The writer's shape (Write and Preview, the toolbar, the field) while it is fetched; focusable, so Escape still closes the box. */
+function writerPlaceholder(): HTMLElement {
+  const bar = (width: number): HTMLElement => createElement('span', { class: 'geld-quick-review__writer-bar', style: `width: ${width}px` });
+  return createElement('div', { class: 'geld-quick-review__writer-placeholder', tabindex: '-1', role: 'status', 'aria-label': 'Loading the comment editor' }, [
+    createElement('div', { class: 'geld-quick-review__writer-head' }, [bar(56), bar(64), createElement('span', { class: 'geld-quick-review__writer-gap' }), bar(120), bar(96)]),
+    createElement('div', { class: 'geld-quick-review__writer-field' }),
+  ]);
 }
 
 function plainField(text: string): HTMLTextAreaElement {
@@ -1704,7 +1744,12 @@ function fitWriter(panel: HTMLElement, bodyBox: HTMLElement, writer: HTMLElement
   writer.style.width = '';
   const box = getComputedStyle(bodyBox);
   const chrome = panel.offsetWidth - panel.clientWidth + parseFloat(box.paddingLeft) + parseFloat(box.paddingRight);
-  panel.style.width = `${Math.round(Math.min(natural + chrome + WRITER_CUSHION, document.documentElement.clientWidth - 32))}px`;
+  writerWidth = Math.round(natural + chrome + WRITER_CUSHION);
+  fitWidth(panel, writerWidth);
+}
+
+function fitWidth(panel: HTMLElement, width: number): void {
+  panel.style.width = `${Math.min(width, document.documentElement.clientWidth - 32)}px`;
   // Measured once: a window narrowed (or zoomed) afterwards still keeps the box, and its buttons, inside it.
   panel.style.maxWidth = 'calc(100vw - 32px)';
   positionPanel();
