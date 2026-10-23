@@ -482,9 +482,12 @@ async function main(): Promise<void> {
     const active = document.activeElement;
     return active !== null && active.closest('.options__categories .options__editor') !== null;
   }
+  /** A rebuild was skipped because someone was editing; it runs once focus moves on (see the focusin listener below). */
+  let renderDeferred = false;
 
   /** Rebuild both category lists from the current settings, keeping open disclosures open. */
   function renderAll(): void {
+    renderDeferred = false;
     const wasOpen = new Set(
       Array.from(document.querySelectorAll<HTMLDetailsElement>('details.options__category[open]')).map((card) => card.dataset.categoryId ?? ''),
     );
@@ -1251,7 +1254,8 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (!isEditingPatterns()) renderAll();
+    if (isEditingPatterns()) renderDeferred = true;
+    else renderAll();
     runTester();
   }
   catalogItem.watch(applyCatalog);
@@ -1268,15 +1272,27 @@ async function main(): Promise<void> {
     for (const show of choiceSetters) show(next);
     const signature = categorySignature(next);
     // Rebuilding while someone types in a pattern box (or has just clicked its Save) would eat their input or the Saved status.
-    if (signature !== lastSignature && !isEditingPatterns()) {
-      lastSignature = signature;
-      renderAll();
+    if (signature !== lastSignature) {
+      if (isEditingPatterns()) renderDeferred = true;
+      else {
+        lastSignature = signature;
+        renderAll();
+      }
     }
     if (document.activeElement !== rulesArea) rulesArea.value = next.repoRules.join('\n');
     if (document.activeElement !== authorsArea) authorsArea.value = next.hiddenAuthors.join('\n');
     if (reviewBotsArea !== null && document.activeElement !== reviewBotsArea) reviewBotsArea.value = next.reviewBots.join('\n');
     if (document.activeElement !== hostsArea) hostsArea.value = next.enterpriseHosts.join('\n');
     runTester();
+  });
+  // Catch up on a skipped rebuild once focus lands outside the category lists.
+  // Not inside them: focus moves on mousedown, so rebuilding then would pull
+  // the control being clicked (another card's switch or Save) out from under the click.
+  document.addEventListener('focusin', (event) => {
+    if (!renderDeferred) return;
+    if (event.target instanceof Element && event.target.closest('.options__categories') !== null) return;
+    lastSignature = categorySignature(settings);
+    renderAll();
   });
 }
 
