@@ -726,7 +726,7 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
   /*
    * Primer's group floats its buttons, so its min-content is one button wide: a flex row sized from min-content (the
@@ -734,7 +734,7 @@ html[data-geld-quick-review] details.js-reviews-container {
    */
   min-width: max-content;
   /* A 26px group in an 18px line: overhang it rather than grow the line, which shifted the bar and crossed its border. */
-  margin: -4px 12px -4px 0;
+  margin: -4px 8px -4px 0;
   white-space: nowrap;
 }
 
@@ -908,9 +908,11 @@ html[data-geld-quick-review] details.js-reviews-container {
  */
 .geld-quick-review__tally {
   display: inline-flex;
+  /* As tall as the group beside it, whichever height its place gives the group. */
+  align-self: stretch;
   align-items: center;
   gap: 6px;
-  height: 22px;
+  box-sizing: border-box;
   padding: 0 7px;
   border-radius: 6px;
   background: transparent;
@@ -922,7 +924,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__tally:is(:hover, :focus-visible) {
-  background: var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12));
+  /* Half the neutral surface's contrast, in either scheme: the tally is a quiet link, not a button. */
+  background: color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 50%, transparent);
   color: var(--fgColor-default, #1f2328);
   text-decoration: none;
 }
