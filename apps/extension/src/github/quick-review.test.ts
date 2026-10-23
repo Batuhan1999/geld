@@ -501,6 +501,8 @@ describe('the tab bar button', () => {
     expect(confirm).toHaveBeenCalledWith('Close this pull request?');
     await settle();
     expect(sent).toEqual([]);
+    // Declined, the reader carries on from the pill: the menu item that had focus is gone.
+    expect(document.activeElement).toBe(pill());
     confirm.mockReturnValue(true);
     vi.stubGlobal('location', { ...window.location, reload: vi.fn(), pathname: window.location.pathname, hash: '', search: '' });
     pill()?.click();

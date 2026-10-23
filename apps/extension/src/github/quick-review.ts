@@ -1219,6 +1219,7 @@ function chooseStatus(state: Mounted, option: StatusOption): void {
   // The browser's own confirmation, not a box to click through: closing is undone only by reopening.
   else if (option.action === 'close') {
     if (window.confirm('Close this pull request?')) void runStatus(state, 'close');
+    else if (state.statusOpener?.isConnected === true) state.statusOpener.focus({ preventScroll: true });
   } else void runStatus(state, option.action);
 }
 
