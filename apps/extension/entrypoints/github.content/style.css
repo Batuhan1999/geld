@@ -743,6 +743,14 @@ html[data-geld-quick-review] details.js-reviews-container {
   margin: 0;
 }
 
+/*
+ * The toolbar's row leaves 12px after its divider: 4px of it before the tally, as between the tally and the group. Only
+ * with the tally there: without it the group's own border stands next to GitHub's buttons, which keep the row's spacing.
+ */
+.geld-quick-review[data-geld-place='toolbar']:has(> .geld-quick-review__tally:not([hidden])) {
+  margin-left: -8px;
+}
+
 /* At the end of the other tabs' compact header's title row, right of the title, which gives way to it. */
 .geld-quick-review[data-geld-place='header'] {
   /* Primer's header row orders its parts with `order`; the group comes last. */
@@ -892,14 +900,37 @@ html[data-geld-quick-review] details.js-reviews-container {
   display: flex;
 }
 
+/*
+ * A review on its way freezes the group: the segments that were not pressed fade, and the pressed one's glyph gives way
+ * to Primer's spinner in the glyph's own colour (it sits in a `.geld-quick-review__glyph`, which the colours key on).
+ * Nothing beside the group appears or goes, so nothing moves.
+ */
 .geld-quick-review[aria-busy='true'] .geld-quick-review__segment {
   cursor: progress;
+}
+
+.geld-quick-review[aria-busy='true'] .geld-quick-review__segment:not([data-sending]) {
   opacity: 0.6;
 }
 
-/* Not drawn until what the reader may do is read: close and merge arriving later would push the group aside. */
-.geld-quick-review[data-loading] {
+.geld-quick-review__glyph--sending,
+.geld-quick-review .geld-quick-review__segment[data-sending] .geld-quick-review__glyph:not(.geld-quick-review__glyph--sending) {
   display: none !important;
+}
+
+.geld-quick-review .geld-quick-review__segment[data-sending] .geld-quick-review__glyph--sending {
+  display: flex !important;
+}
+
+.geld-spinner,
+.geld-spinner circle,
+.geld-spinner path {
+  fill: none !important;
+}
+
+.geld-spinner {
+  transform-origin: center;
+  animation: geld-spin 1s linear infinite;
 }
 
 /*
@@ -924,8 +955,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__tally:is(:hover, :focus-visible) {
-  /* Half the neutral surface's contrast, in either scheme: the tally is a quiet link, not a button. */
-  background: color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 50%, transparent);
+  /* Three quarters of the neutral surface's contrast, in either scheme: the tally is a quiet link, not a button. */
+  background: color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 75%, transparent);
   color: var(--fgColor-default, #1f2328);
   text-decoration: none;
 }
@@ -1034,14 +1065,14 @@ html[data-geld-quick-review] details.js-reviews-container {
   color: var(--fgColor-danger, #d1242f);
 }
 
-/* "Approved", "Submitting…": a moment's word beside the group, nothing when idle. */
+/* "Approved", "Submitting…": said to screen readers only, so no word beside the group pushes the controls around. */
 .geld-quick-review__status {
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
-}
-
-.geld-quick-review__status:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Both classes: Primer's own `.Overlay` (width, position) comes later in the cascade and would win a tie. */

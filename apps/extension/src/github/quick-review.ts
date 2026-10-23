@@ -1,4 +1,7 @@
 import { firstSentence } from '@geld/review';
+import { fetchNonce, pullPathOf, timelineCommentRequest } from './timeline-comment';
+
+export { pullPathOf, timelineCommentRequest };
 import { loadWriter, prefetchWriter, writerNow } from './comment-writer';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
 import type { HeaderStatGroup } from './header-stats';
@@ -10,12 +13,13 @@ import { pullRequestStateWords } from './page';
 import type { PendingComment } from './pending-review';
 import { discardPendingReview, fetchPendingComments, linkOnFilesTab, pendingCountOnPage } from './pending-review';
 import { inlineText } from './review/inline-text';
-import type { SidebarReviewer } from './review/crawler';
+import type { SidebarReviewer, SidebarReviewerState } from './review/crawler';
+import { catchUpTimeline } from './review/timeline-catchup';
 import type { ReviewTally } from './review-tally';
 import type { StatusOption } from './status-pill';
 import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
 import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
-import { ICON_ALERT_FILL_12, ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_MERGE, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
+import { ICON_ALERT_FILL_12, ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_MERGE, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_SPINNER, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
 /**
  * The review controls in the pull request's tab bar, left of the line
@@ -79,10 +83,10 @@ type Place = 'toolbar' | 'header';
 const SUBMITTED_MS = 3000;
 /** On the group while the instant key is held: ✓ and ✗ then send on a click, and the stylesheet swaps their glyphs for the sending ones. */
 const ATTR_INSTANT = 'data-instant';
-/** On the group until what the reader may do is read: it is not drawn meanwhile. */
-const ATTR_LOADING = 'data-loading';
 /** On the group while comments are pending: ⌘-click on 💬 then submits them, and its glyph says so while the key is held. */
 const ATTR_PENDING = 'data-pending';
+/** On the segment whose review is on its way: its glyph gives way to a spinner in the same colour. */
+const ATTR_SENDING = 'data-sending';
 /** On 💬: the kind its box will post (`comment` or `review`), which its glyph shows. */
 const ATTR_KIND = 'data-kind';
 
@@ -149,11 +153,6 @@ export function segmentHint(event: ReviewEvent, instantKey: string, held = false
   return [info.label, `${instantKey} 1-click review`];
 }
 
-/** `/owner/repo/pull/N` for a pull request page, else null. */
-export function pullPathOf(pathname: string): string | null {
-  return /^\/[^/]+\/[^/]+\/pull\/\d+/.exec(pathname)?.[0] ?? null;
-}
-
 /** What GitHub's review dialog sends, from the page's own origin and session. */
 export function submitReviewRequest(pullPath: string, submission: ReviewSubmission, nonce: string): { readonly url: string; readonly init: RequestInit } {
   const headers: Record<string, string> = {
@@ -167,13 +166,6 @@ export function submitReviewRequest(pullPath: string, submission: ReviewSubmissi
     url: `${pullPath}/page_data/submit_review`,
     init: { method: 'PUT', credentials: 'same-origin', headers, body: JSON.stringify({ body: submission.body, event: submission.event, headSha: submission.headSha }) },
   };
-}
-
-/** What GitHub's conversation composer sends to post a comment on the pull request (`create_timeline_comment`, its `text`; verified Oct 2026). */
-export function timelineCommentRequest(pullPath: string, text: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
-  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json', 'GitHub-Verified-Fetch': 'true', 'X-Requested-With': 'XMLHttpRequest' };
-  if (nonce !== '') headers['X-Fetch-Nonce'] = nonce;
-  return { url: `${pullPath}/page_data/create_timeline_comment`, init: { method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify({ text }) } };
 }
 
 /** An approval needs no words; a comment or a request for changes needs them, unless pending comments go with it. */
@@ -213,10 +205,6 @@ function authorLogin(): string | null {
   const legacy = document.querySelector<HTMLAnchorElement>('.gh-header-meta a.author');
   const login = (react ?? legacy)?.textContent?.trim().replace(/^@/, '') ?? '';
   return login === '' ? null : login;
-}
-
-function fetchNonce(): string {
-  return document.querySelector<HTMLMetaElement>('meta[name="fetch-nonce"]')?.content ?? '';
 }
 
 /** The tab bar's line counts: the group in the pull request header (not a diff's, not Geld's narrow mirror). */
@@ -266,11 +254,11 @@ interface Mounted {
   readonly tally: HTMLAnchorElement;
   /** The reviewers the tally counts, for its snapshot card. */
   reviewers: readonly SidebarReviewer[];
+  /** The review the reader just sent, held over GitHub's reads until `OWN_REVIEW_HOLD_MS` has passed (`heldReview`). */
+  ownReview: OwnReview | null;
   /** The snapshot card while it shows, and the timer that shows or hides it. */
   snapshot: HTMLElement | null;
   snapshotTimer: number;
-  /** Until the first reading of what the reader may do lands (or `READY_WAIT_MS` passes), the control is not drawn. */
-  loadingTimer: number;
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
@@ -295,6 +283,7 @@ interface Mounted {
   submittedTimer: number;
   /** The pending comments last read for {@link pendingFor}; null until read (or when GitHub could not say). */
   pending: readonly PendingComment[] | null;
+  /** The pull request and tab they were read on (`pendingKey`): a tab switched to reads them again, since another may have changed them. */
   pendingFor: string | null;
   /** Stops following the instant key. */
   readonly keys: AbortController;
@@ -353,11 +342,10 @@ export function applyQuickReview(enabled: boolean, context: QuickReviewContext):
     // Another pull request's counts (and the reviewers behind them) never stand in for this one's: nothing until its reviews are read.
     mounted.reviewers = [];
     showTally(mounted, { approved: 0, changesRequested: 0, commented: 0 });
-    holdUntilReady(mounted);
   }
   mounted.context = context;
   followReviewHash(context);
-  if (mounted.pendingFor !== pullPath) void loadPending(mounted);
+  if (mounted.pendingFor !== pendingKey(mounted)) void loadPending(mounted);
   // GitHub turns a draft ready (and back), merges and closes in place: what the reader may do changes with the label.
   const stateWords = pullRequestStateWords();
   const stateChanged = stateWords !== '' && mounted.stateWords !== null && mounted.stateWords !== stateWords;
@@ -490,7 +478,6 @@ export function removeQuickReview(): void {
   closeStatusMenu(mounted);
   window.clearTimeout(mounted.submittedTimer);
   window.clearTimeout(mounted.mergeTimer);
-  window.clearTimeout(mounted.loadingTimer);
   hideSnapshot(mounted);
   mounted.host?.removeAttribute(ATTR_HOST);
   mounted.keys.abort();
@@ -542,6 +529,8 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
       [
         createElement('span', { class: 'geld-quick-review__glyph' }, [svgFromString(info.icon)]),
         ...(info.instantIcon === null ? [] : [createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--instant' }, [svgFromString(info.instantIcon)])]),
+        // In the glyph's place, in its colour, while this segment's review is on its way.
+        createElement('span', { class: 'geld-quick-review__glyph geld-quick-review__glyph--sending' }, [svgFromString(ICON_SPINNER)]),
       ],
     );
   };
@@ -551,7 +540,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   const tips = SEGMENT_ORDER.flatMap((event) => describe(segments[event], segmentHint(event, INSTANT_KEY)) ?? []);
   // The count is a badge on the group's corner, outside it: inside, Primer's `:last-child` rounding would land on it.
   // Drawn once the reviews are read: the tally arriving later would push the group aside.
-  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '', [ATTR_LOADING]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
+  const root = createElement('span', { class: GROUP_CLASS, [OWN_UI_ATTRIBUTE]: '' }, [tally, status, createElement('span', { class: 'geld-quick-review__badged' }, [group, counter]), ...tips]);
   const keys = new AbortController();
   const stickyWatch = new MutationObserver(() => {
     if (mounted !== state) return;
@@ -572,9 +561,9 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     statusMenuKeys: null,
     tally,
     reviewers: [],
+    ownReview: null,
     snapshot: null,
     snapshotTimer: 0,
-    loadingTimer: 0,
     mergeActions: null,
     mergeFor: null,
     mergeRead: 0,
@@ -611,7 +600,6 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     showInstantMerge(state);
   });
   armSnapshot(state);
-  holdUntilReady(state);
   // Off the conversation GitHub's writer is fetched (the conversation's HTML): when the reader heads for a review segment, not before.
   for (const type of ['pointerenter', 'focusin']) state.group.addEventListener(type, () => prefetchWriter(state.pullPath), { signal: keys.signal });
   // The tally's link from this very tab changes only the hash: resolve it there and then.
@@ -629,7 +617,10 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
   document.addEventListener(
     'visibilitychange',
     () => {
-      if (mounted === state && !document.hidden) void loadMergeActions(state);
+      if (mounted !== state || document.hidden) return;
+      void loadMergeActions(state);
+      // Pending comments added or discarded in another tab while this one was away.
+      void loadPending(state);
     },
     { signal: keys.signal },
   );
@@ -732,6 +723,61 @@ function showVerdict(state: Mounted, verdict: 'APPROVED' | 'CHANGES_REQUESTED' |
 }
 
 /**
+ * The reader's own review, shown the moment GitHub accepts it and held over
+ * GitHub's reads for a while: the merge box and the Reviewers partial answer
+ * from before the review for some seconds after it went through, and read
+ * then they took the pressed segment and the tally's count back.
+ */
+interface OwnReview {
+  readonly pullPath: string;
+  /** The standing verdict it leaves: the review's own, or for a comment the verdict held before it. */
+  readonly verdict: 'APPROVED' | 'CHANGES_REQUESTED' | null;
+  readonly at: number;
+}
+
+const OWN_REVIEW_HOLD_MS = 90_000;
+
+const OWN_VERDICT: { readonly [E in ReviewEvent]: 'APPROVED' | 'CHANGES_REQUESTED' | null } = { approve: 'APPROVED', 'request changes': 'CHANGES_REQUESTED', comment: null };
+
+function ownState(verdict: 'APPROVED' | 'CHANGES_REQUESTED' | null): SidebarReviewerState {
+  return verdict === 'APPROVED' ? 'approved' : verdict === 'CHANGES_REQUESTED' ? 'changes_requested' : 'commented';
+}
+
+function heldReview(state: Mounted): OwnReview | null {
+  const own = state.ownReview;
+  return own !== null && own.pullPath === state.pullPath && Date.now() - own.at < OWN_REVIEW_HOLD_MS ? own : null;
+}
+
+/** The verdict the reader just sent, while it is held; a comment leaves the standing verdict to GitHub's read. */
+function heldVerdict(state: Mounted): 'APPROVED' | 'CHANGES_REQUESTED' | null {
+  return heldReview(state)?.verdict ?? null;
+}
+
+/** The reviewers with the reader's held review in place of (or beside) what GitHub's read said of them. */
+function withOwnReview(state: Mounted, reviewers: readonly SidebarReviewer[]): readonly SidebarReviewer[] {
+  const held = heldReview(state);
+  const login = viewerLogin();
+  if (held === null || login === '') return reviewers;
+  const wanted = ownState(held.verdict);
+  const mine = reviewers.find((reviewer) => reviewer.login.toLowerCase() === login.toLowerCase());
+  // A comment leaves a standing approval or request for changes standing, as GitHub counts reviews.
+  if (mine !== undefined && (mine.state === wanted || (wanted === 'commented' && (mine.state === 'approved' || mine.state === 'changes_requested')))) return reviewers;
+  const avatar = document.querySelector<HTMLImageElement>(`img.avatar[alt="@${CSS.escape(login)}" i]`)?.src ?? null;
+  const entry: SidebarReviewer = { login: mine?.login ?? login, avatarSrc: mine?.avatarSrc ?? avatar, state: wanted, bot: false };
+  return mine === undefined ? [...reviewers, entry] : reviewers.map((reviewer) => (reviewer === mine ? entry : reviewer));
+}
+
+/** Hold the review GitHub just accepted and show it now: the verdict pressed in, the tally counting it. */
+function showOwnReview(state: Mounted, event: ReviewEvent): void {
+  // A comment leaves the standing verdict standing, a held one included: a stale read must not take it back meanwhile.
+  const verdict = OWN_VERDICT[event] ?? heldVerdict(state);
+  state.ownReview = { pullPath: state.pullPath, verdict, at: Date.now() };
+  if (verdict !== null) showVerdict(state, verdict);
+  state.reviewers = withOwnReview(state, state.reviewers);
+  showTally(state, tallyOf(state.reviewers));
+}
+
+/**
  * Read what the reader may do from the merge box (once per pull request and
  * again each minute while the tab is shown, since checks and reviews land
  * meanwhile), then show it.
@@ -743,51 +789,27 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
   state.mergeRead += 1;
   const read = state.mergeRead;
   const current = (): boolean => mounted === state && state.pullPath === pullPath && state.mergeRead === read;
-  // Each answer shows when it lands: a slow Reviewers read must not hold back merge and close. The control is drawn once both are in.
-  let waiting = 2;
-  const settle = (): void => {
-    waiting -= 1;
-    if (waiting === 0) ready(state);
-  };
+  // Each answer shows when it lands: a slow Reviewers read must not hold back the verdict or the status pill.
   let sidebar: readonly SidebarReviewer[] | null = null;
   const showReviewers = (): void => {
     if (sidebar === null) return;
-    state.reviewers = standingReviewers(sidebar, state.mergeActions?.box.verdicts ?? []);
+    state.reviewers = withOwnReview(state, standingReviewers(sidebar, state.mergeActions?.box.verdicts ?? []));
     showTally(state, tallyOf(state.reviewers));
   };
   void fetchReviewers(pullPath).then((reviewers) => {
     if (!current()) return;
     sidebar = reviewers;
     showReviewers();
-    settle();
   });
   const actions = await readMergeActions(pullPath);
   if (!current()) return null;
   if (actions !== null) state.mergeActions = actions;
   showStatus(state);
   showReviewers();
-  settle();
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
   }, MERGE_REFRESH_MS);
   return actions;
-}
-
-const READY_WAIT_MS = 1500;
-
-/** Keep the control undrawn until what the reader may do is read, or for `READY_WAIT_MS` at most. */
-function holdUntilReady(state: Mounted): void {
-  state.root.setAttribute(ATTR_LOADING, '');
-  window.clearTimeout(state.loadingTimer);
-  state.loadingTimer = window.setTimeout(() => ready(state), READY_WAIT_MS);
-}
-
-function ready(state: Mounted): void {
-  window.clearTimeout(state.loadingTimer);
-  if (state.root.hasAttribute(ATTR_LOADING)) {
-    state.root.removeAttribute(ATTR_LOADING);
-    positionPanel();
-  }
 }
 
 const TALLY_PARTS: ReadonlyArray<{ readonly key: keyof ReviewTally; readonly icon: string; readonly tone: string }> = [
@@ -1014,7 +1036,7 @@ let hashSince: { readonly hash: string; readonly at: number } | null = null;
  */
 function showStatus(state: Mounted): void {
   const actions = state.mergeActions;
-  if (actions !== null) showVerdict(state, viewerVerdict(actions.box, viewerLogin()));
+  if (actions !== null) showVerdict(state, heldVerdict(state) ?? viewerVerdict(actions.box, viewerLogin()));
   const repo = repoOf(state.pullPath);
   const options = actions === null ? null : statusOptions(actions.box, actions.offer, actions.bypass);
   // A merged pull request has nothing to switch to whoever reads it: it says nothing about the reader's rights.
@@ -1330,7 +1352,7 @@ let pendingRead = 0;
 /** Read the reader's pending comments for the button's pull request, once per visit and again when the box opens. */
 async function loadPending(state: Mounted): Promise<readonly PendingComment[] | null> {
   const pullPath = state.pullPath;
-  state.pendingFor = pullPath;
+  state.pendingFor = pendingKey(state);
   pendingRead += 1;
   const read = pendingRead;
   const pending = await fetchPendingComments(pullPath);
@@ -1340,8 +1362,15 @@ async function loadPending(state: Mounted): Promise<readonly PendingComment[] | 
   return pending;
 }
 
+function pendingKey(state: Mounted): string {
+  return `${state.pullPath} ${state.context.page.kind}`;
+}
+
 function pendingCount(state: Mounted): number {
-  return pendingCountOnPage() ?? state.pending?.length ?? 0;
+  const onPage = pendingCountOnPage();
+  // GitHub's button is live on Files changed (its missing counter means none); a copy elsewhere would not follow a submit.
+  if (onPage !== null && state.context.page.kind === 'pull-files') return onPage;
+  return state.pending?.length ?? 0;
 }
 
 /** GitHub's own count (live on the Files changed tab, where its hidden button tracks new comments), else the last read. */
@@ -1397,6 +1426,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
   const { url, init } = submitReviewRequest(pullPath, { body, event, headSha }, fetchNonce());
   state.sending = true;
   state.root.setAttribute('aria-busy', 'true');
+  state.segments[event].setAttribute(ATTR_SENDING, '');
   window.clearTimeout(state.submittedTimer);
   state.status.textContent = 'Submitting…';
   try {
@@ -1411,14 +1441,23 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     // The controls may still name it while the browser already shows the next one (the controller's route pass is debounced).
     if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
     showCommentKind(state);
-    if (state.context.page.kind === 'pull-files' || pendingCount(state) > 0) {
+    // A new verdict replaces the reader's standing one, as GitHub counts reviews; a comment leaves it standing.
+    showOwnReview(state, event);
+    const published = pendingCount(state) > 0;
+    // Files changed still draws the comments just published as pending until it reloads; nothing else needs a reload.
+    if (published && state.context.page.kind === 'pull-files') {
       window.location.reload();
       return null;
     }
     showDone(state, EVENT_INFO[event].done);
-    // A new verdict replaces the reader's standing one, as GitHub counts reviews; a comment leaves it standing.
-    if (event === 'approve') showVerdict(state, 'APPROVED');
-    else if (event === 'request changes') showVerdict(state, 'CHANGES_REQUESTED');
+    if (published) {
+      // They went with the review: none are pending now, and a read already on its way must not bring them back.
+      pendingRead += 1;
+      state.pending = [];
+      showCount(state);
+    }
+    // The review in the conversation as GitHub's live update would put it there (a no-op off the classic conversation).
+    void catchUpTimeline();
     void loadMergeActions(state);
     return null;
   } catch {
@@ -1427,6 +1466,7 @@ async function sendReview(state: Mounted, event: ReviewEvent, body: string): Pro
     state.sending = false;
     state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
+    state.segments[event].removeAttribute(ATTR_SENDING);
     if (state.status.textContent === 'Submitting…') state.status.textContent = '';
   }
 }
@@ -1441,6 +1481,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
   const { url, init } = timelineCommentRequest(pullPath, text, fetchNonce());
   state.sending = true;
   state.root.setAttribute('aria-busy', 'true');
+  state.segments.comment.setAttribute(ATTR_SENDING, '');
   window.clearTimeout(state.submittedTimer);
   state.status.textContent = 'Posting…';
   try {
@@ -1453,11 +1494,13 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
     clearDraft(pullPath, text);
     if (state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return null;
     showCommentKind(state);
-    if (state.context.page.kind === 'pull-conversation') {
-      window.location.reload();
-      return null;
-    }
     showDone(state, 'Commented');
+    // The comment in the conversation as GitHub's live update would put it there; a reload where that cannot be done.
+    if (state.context.page.kind === 'pull-conversation') {
+      void catchUpTimeline().then((caught) => {
+        if (!caught && pullPathOf(window.location.pathname) === pullPath) window.location.reload();
+      });
+    }
     return null;
   } catch {
     return 'GitHub could not post the comment.';
@@ -1465,6 +1508,7 @@ async function sendComment(state: Mounted, text: string): Promise<string | null>
     state.sending = false;
     state.panelRefresh?.();
     state.root.removeAttribute('aria-busy');
+    state.segments.comment.removeAttribute(ATTR_SENDING);
     if (state.status.textContent === 'Posting…') state.status.textContent = '';
   }
 }
