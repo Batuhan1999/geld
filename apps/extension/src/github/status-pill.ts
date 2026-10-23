@@ -1,7 +1,7 @@
 import type { MergeBox, MergeOffer, StatusAction } from './merge-actions';
 import { METHOD_LABEL } from './merge-actions';
 import { createElement, OWN_UI_ATTRIBUTE, svgFromString } from './dom';
-import { ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRIANGLE_DOWN } from './ui/icons';
+import { ICON_GIT_MERGE, ICON_GIT_MERGE_QUEUE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRIANGLE_DOWN } from './ui/icons';
 
 /**
  * The pull request's status pill in GitHub's header ("Open", "Draft",
@@ -9,29 +9,32 @@ import { ICON_GIT_MERGE, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, IC
  * GitHub's label is React's (or the classic page's) and is never touched
  * beyond being hidden: a button of Geld's, dressed in the label's own
  * classes and `data-status`/`data-size` (Primer's StateLabel keys its look on
- * them), stands right after it with a caret. Both the header's pill and the
- * sticky header's are swapped.
+ * them), stands right after it, its caret in its glyph's place while hovered.
+ * Both the header's pill and the sticky header's are swapped.
  */
 
-export type PullStatus = 'open' | 'draft' | 'merged' | 'closed';
+/** `queued` is only ever a choice (GitHub's "Merge when ready"), never what `statusOf` reads. */
+export type PullStatus = 'open' | 'draft' | 'queued' | 'merged' | 'closed';
 
 export interface StatusOption {
   readonly status: PullStatus;
-  /** What choosing it does; null for the status the pull request has now. */
-  readonly action: StatusAction | null;
-  /** GitHub's words for the action, under the status's name. */
+  readonly action: StatusAction;
+  /** A merge past the rules (GitHub's bypass checkbox), which its merge box opens with the checkbox to tick. */
+  readonly bypass?: boolean;
+  /** GitHub's words for the action, the menu item's label. */
   readonly note: string;
 }
 
 export const STATUS_INFO: { readonly [S in PullStatus]: { readonly label: string; readonly icon: string } } = {
   open: { label: 'Open', icon: ICON_GIT_PULL_REQUEST },
   draft: { label: 'Draft', icon: ICON_GIT_PULL_REQUEST_DRAFT },
+  queued: { label: 'Queued', icon: ICON_GIT_MERGE_QUEUE },
   merged: { label: 'Merged', icon: ICON_GIT_MERGE },
   closed: { label: 'Closed', icon: ICON_GIT_PULL_REQUEST_CLOSED },
 };
 
-/** Open, draft, merged, then closed, always last. */
-const STATUS_ORDER: readonly PullStatus[] = ['open', 'draft', 'merged', 'closed'];
+/** Forward first: ready for review or reopened, then merged, then back to a draft, and closed always last. */
+const STATUS_ORDER: readonly PullStatus[] = ['open', 'queued', 'merged', 'draft', 'closed'];
 
 export function statusOf(box: MergeBox): PullStatus | null {
   if (box.state === 'MERGED') return 'merged';
@@ -41,8 +44,8 @@ export function statusOf(box: MergeBox): PullStatus | null {
 }
 
 /**
- * The menu: the status the pull request has, checked, and each status the
- * reader may switch it to, in `STATUS_ORDER`. A draft can be marked ready or
+ * The menu: each status the reader may switch the pull request to, in
+ * `STATUS_ORDER`. A draft can be marked ready or
  * closed, not merged; an open one turned into a draft, merged (when GitHub
  * would take it, or only past the rules for an admin) or closed; a closed
  * one reopened (GitHub gives no reopen permission of its own: whoever may
@@ -50,18 +53,22 @@ export function statusOf(box: MergeBox): PullStatus | null {
  * ("not planned", "duplicate") are issues'. Empty when there is nothing to
  * switch to, a merged pull request always.
  */
-export function statusOptions(box: MergeBox, offer: MergeOffer): readonly StatusOption[] {
+export function statusOptions(box: MergeBox, offer: MergeOffer, bypass = false): readonly StatusOption[] {
   const current = statusOf(box);
   if (current === null || current === 'merged') return [];
   const method = box.methods[0] ?? 'SQUASH';
   const moves: { [S in PullStatus]?: StatusOption } = {};
+  // A bypass beside the queue or auto-merge: a second way forward, merging now past the rules, right after it.
+  const beside: StatusOption | null = current === 'open' && bypass ? { status: 'merged', action: 'merge', note: 'Bypass rules and merge', bypass: true } : null;
   if (current === 'draft' && box.canMarkReady) moves.open = { status: 'open', action: 'ready', note: 'Ready for review' };
   if (current === 'closed' && box.canClose) moves.open = { status: 'open', action: 'reopen', note: 'Reopen pull request' };
   if (current === 'open' && box.canConvertToDraft) moves.draft = { status: 'draft', action: 'draft', note: 'Convert to draft' };
-  if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: offer === 'bypass' ? 'Bypass rules and merge' : METHOD_LABEL[method] };
+  if (current === 'open' && offer === 'queue') moves.queued = { status: 'queued', action: 'queue', note: 'Merge when ready' };
+  else if (current === 'open' && offer === 'auto') moves.merged = { status: 'merged', action: 'auto', note: 'Enable auto-merge' };
+  else if (current === 'open' && offer === 'bypass') moves.merged = { status: 'merged', action: 'merge', note: 'Bypass rules and merge', bypass: true };
+  else if (current === 'open' && offer !== null) moves.merged = { status: 'merged', action: 'merge', note: METHOD_LABEL[method] };
   if (current !== 'closed' && box.canClose) moves.closed = { status: 'closed', action: 'close', note: 'Close pull request' };
-  if (Object.keys(moves).length === 0) return [];
-  return STATUS_ORDER.flatMap((status) => (status === current ? [{ status, action: null, note: 'Current status' }] : (moves[status] ?? [])));
+  return STATUS_ORDER.flatMap((status) => [...(moves[status] === undefined ? [] : [moves[status]]), ...(beside !== null && status === 'merged' ? [beside] : [])]);
 }
 
 const GITHUB_PILLS = '[data-component="PageHeader"] [data-component="StateLabel"], .gh-header-meta .State, .gh-header-sticky .State';
@@ -87,9 +94,12 @@ function dress(pill: HTMLButtonElement, label: Element): void {
   }
   const glyph = label.querySelector('svg');
   pill.replaceChildren(
-    ...(glyph === null ? [] : [glyph.cloneNode(true)]),
+    // The caret takes the status glyph's place while the pill is hovered, focused or open, so the pill never widens.
+    createElement('span', { class: 'geld-status-pill__lead' }, [
+      ...(glyph === null ? [] : [glyph.cloneNode(true)]),
+      createElement('span', { class: 'geld-status-pill__caret', 'aria-hidden': 'true' }, [svgFromString(ICON_TRIANGLE_DOWN)]),
+    ]),
     createElement('span', { class: 'geld-status-pill__label' }, [(label.textContent ?? '').trim()]),
-    createElement('span', { class: 'geld-status-pill__caret', 'aria-hidden': 'true' }, [svgFromString(ICON_TRIANGLE_DOWN)]),
     // The 1-click merge's face, laid over the pill while the instant key is held, so the pill keeps its width.
     createElement('span', { class: 'geld-status-pill__merge', 'aria-hidden': 'true' }, [svgFromString(ICON_GIT_MERGE), 'Merge']),
   );
@@ -150,9 +160,9 @@ export function removeStatusPills(): void {
 
 /**
  * Whether the reader could change the status the last time a pull request of
- * this repository was read, so the pill is swapped from the first paint (the
- * caret widens it: swapping only once the merge box answered moved the
- * header's words). In the page's own storage, as the whitespace redirect's
+ * this repository was read, so the pill is swapped from the first paint
+ * (swapping only once the merge box answered showed GitHub's label first).
+ * In the page's own storage, as the whitespace redirect's
  * guard is: it must be read synchronously, before paint.
  */
 const HINT_KEY = 'geld:status-menu';

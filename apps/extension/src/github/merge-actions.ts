@@ -6,7 +6,8 @@
  * says whether the reader can merge (directly, or only by bypassing the
  * rules), close and mark a draft ready, and whose verdicts stand; `POST page_data/merge`
  * merges; `POST page_data/close_pull_request` closes; `POST page_data/mark_ready_for_review`
- * takes a draft out of draft. Same origin and session as the page, so they work from any tab.
+ * takes a draft out of draft; `POST page_data/enable_auto_merge` with a merge queue's strategy adds the pull request to
+ * the repository's merge queue ("Merge when ready"). Same origin and session as the page, so they work from any tab.
  */
 
 export type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE';
@@ -35,6 +36,10 @@ export interface MergeBox {
   readonly authorEmail: string | null;
   /** Part of a GitHub stack: GitHub merges it through the stack's own request, `enqueue_stack`, not `merge`. */
   readonly stacked: boolean;
+  /** Whether the reader may add it to the repository's merge queue now (GitHub's "Merge when ready"); false once it is in. */
+  readonly canQueue: boolean;
+  /** Whether GitHub offers "Enable auto-merge": the repository allows it and the pull request cannot merge yet; false once it is on. */
+  readonly canAutoMerge: boolean;
 }
 
 export interface ReviewVerdict {
@@ -44,8 +49,11 @@ export interface ReviewVerdict {
   readonly id: number | null;
 }
 
-/** What the controls offer: a merge, a merge only past the rules (GitHub's bypass), or none. */
-export type MergeOffer = 'merge' | 'bypass' | null;
+/**
+ * What the controls offer: a merge, a merge only past the rules (GitHub's bypass), a place in the merge queue, a merge
+ * once the requirements are met (auto-merge), or none.
+ */
+export type MergeOffer = 'merge' | 'bypass' | 'queue' | 'auto' | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -59,6 +67,17 @@ function isMethod(value: unknown): value is MergeMethod {
   return value === 'MERGE' || value === 'SQUASH' || value === 'REBASE';
 }
 
+/**
+ * Whether GitHub would merge it now, as its merge box decides: `MERGEABLE`, or `MERGEABLE_IF_STATUSES_PASS` once the
+ * statuses do pass. The box reads those from its separate status query; the pull request's `mergeStateStatus` says
+ * the same in one word (`CLEAN`: mergeable with passing commit status, `HAS_HOOKS`: the same with pre-receive hooks),
+ * where `BEHIND`, `BLOCKED`, `UNSTABLE` and the rest are not ready.
+ */
+export function mergeableNow(requirementsState: unknown, mergeStateStatus: unknown): boolean {
+  if (requirementsState === 'MERGEABLE') return true;
+  return requirementsState === 'MERGEABLE_IF_STATUSES_PASS' && (mergeStateStatus === 'CLEAN' || mergeStateStatus === 'HAS_HOOKS');
+}
+
 /** A `page_data/merge_box` answer, or null when it is not one. */
 export function parseMergeBox(payload: unknown): MergeBox | null {
   if (!isRecord(payload) || !isRecord(payload.pullRequest)) return null;
@@ -66,6 +85,8 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
   const requirements = isRecord(payload.mergeRequirements) ? payload.mergeRequirements : {};
   const actions = Array.isArray(pull.viewerMergeActions) ? pull.viewerMergeActions : [];
   const direct = actions.find((action): action is Record<string, unknown> => isRecord(action) && action.name === 'DIRECT_MERGE');
+  // GitHub shows "Merge when ready" when the queue's action is allowed, as it shows its merge button for the direct one.
+  const queue = actions.find((action): action is Record<string, unknown> => isRecord(action) && action.name === 'MERGE_QUEUE');
   const allowed = direct !== undefined && direct.allowableStatus === 'ALLOWED' && Array.isArray(direct.mergeMethods) ? direct.mergeMethods : [];
   const methods = allowed
     .filter((method): method is Record<string, unknown> => isRecord(method) && method.allowableStatus === 'ALLOWED' && isMethod(method.name))
@@ -91,27 +112,51 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     canMarkReady: pull.viewerCanMarkReadyForReview === true,
     canConvertToDraft: pull.viewerCanConvertToDraft === true,
     verdicts,
-    mergeable: requirements.state === 'MERGEABLE',
+    mergeable: mergeableNow(requirements.state, pull.mergeStateStatus),
     canBypass: pull.viewerCanAdminBypassMergeRequirements === true,
     methods,
     commitTitle: stringOf(requirements.commitMessageHeadline),
     commitMessage: stringOf(requirements.commitMessageBody),
     authorEmail: email === '' ? null : email,
     stacked,
+    canQueue: queue?.allowableStatus === 'ALLOWED' && pull.isInMergeQueue !== true,
+    canAutoMerge: pull.viewerCanEnableAutoMerge === true && !isRecord(pull.autoMergeRequest),
   };
 }
 
 /**
- * The merge on offer: none on a draft, a closed pull request or one whose
- * repository allows the reader no direct merge; a plain merge when GitHub
- * would take it now; a bypass when it would take it only past the rules
- * (`asBypass` is the same box read with `bypass_requirements=true`).
+ * The merge on offer: none on a draft or a closed pull request; a plain
+ * merge when GitHub would take it now; a bypass when it would take it only
+ * past the rules (`asBypass` is the same box read with
+ * `bypass_requirements=true`); in the order GitHub's merge box picks its
+ * button: a place in the merge queue wherever the repository merges through
+ * one and the reader may add it (whether or not a direct merge would also go:
+ * GitHub shows the queue, and the queue waits for the checks itself); else a
+ * merge GitHub would take now; else auto-merge where GitHub offers it (a pull
+ * request still waiting on checks or reviews in a repository that allows it);
+ * else a merge only past the rules.
  */
 export function mergeOffer(box: MergeBox, asBypass: MergeBox | null): MergeOffer {
-  if (!box.open || box.draft || box.methods.length === 0) return null;
-  if (box.mergeable) return 'merge';
-  if (box.canBypass && asBypass?.mergeable === true) return 'bypass';
+  if (!box.open || box.draft) return null;
+  if (box.canQueue) return 'queue';
+  if (box.methods.length > 0 && box.mergeable) return 'merge';
+  if (box.methods.length > 0 && box.canAutoMerge) return 'auto';
+  if (bypassMerges(box, asBypass)) return 'bypass';
   return null;
+}
+
+function bypassMerges(box: MergeBox, asBypass: MergeBox | null): boolean {
+  return box.canBypass && asBypass?.mergeable === true && (asBypass.methods.length > 0 || box.methods.length > 0);
+}
+
+/**
+ * Whether an admin's bypass stands beside the offer, as GitHub's "bypass
+ * rules" checkbox does: beside the queue (merging at once, ahead of it) or
+ * beside auto-merge (merging now instead of once the requirements are met),
+ * never beside a merge GitHub would take now.
+ */
+export function bypassBeside(box: MergeBox, asBypass: MergeBox | null, offer: MergeOffer): boolean {
+  return (offer === 'queue' || offer === 'auto') && bypassMerges(box, asBypass);
 }
 
 /** "Squash and merge", the words GitHub's merge box gives each method. */
@@ -172,6 +217,21 @@ export function draftRequest(pullPath: string, nonce: string): { readonly url: s
   return { url: `${pullPath}/page_data/convert_to_draft`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
 }
 
+/** What GitHub's merge box sends for "Merge when ready": `enable_auto_merge` with the queue's grouped strategy (its "Queue and force solo merge" sends `SOLO`). */
+export function queueRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  return { url: `${pullPath}/page_data/enable_auto_merge`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, true), body: JSON.stringify({ mergeMethod: 'GROUP' }) } };
+}
+
+/**
+ * What GitHub's merge box sends for "Enable auto-merge": `enable_auto_merge` with the method and the commit GitHub
+ * would write, which it then merges with once the requirements are met.
+ */
+export function autoMergeRequest(pullPath: string, submission: Pick<MergeSubmission, 'method' | 'commitTitle' | 'commitMessage' | 'authorEmail'>, nonce: string): { readonly url: string; readonly init: RequestInit } {
+  const body: Record<string, string> = { mergeMethod: submission.method, commitTitle: submission.commitTitle, commitMessage: submission.commitMessage };
+  if (submission.authorEmail !== null) body.authorEmail = submission.authorEmail;
+  return { url: `${pullPath}/page_data/enable_auto_merge`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, true), body: JSON.stringify(body) } };
+}
+
 /** What GitHub sends to reopen a closed pull request: nothing but the request. */
 export function reopenRequest(pullPath: string, nonce: string): { readonly url: string; readonly init: RequestInit } {
   return { url: `${pullPath}/page_data/reopen_pull_request`, init: { method: 'POST', credentials: 'same-origin', headers: headers(nonce, false) } };
@@ -200,6 +260,10 @@ export async function fetchMergeBox(pullPath: string, method: MergeMethod, bypas
 export interface MergeActions {
   readonly box: MergeBox;
   readonly offer: MergeOffer;
+  /** An admin's bypass beside the offer (`bypassBeside`): the menu lists it too. */
+  readonly bypass: boolean;
+  /** The direct methods the bypass may use, as the box read past the rules lists them (a queue's repository may allow none otherwise). */
+  readonly bypassMethods: readonly MergeMethod[];
 }
 
 /** What the reader may do now: the merge on offer and whether they may close, read with GitHub's default method. */
@@ -210,15 +274,19 @@ export async function readMergeActions(pullPath: string): Promise<MergeActions |
   // The squash box's commit title and message would be sent under another method: no reading is safer than that.
   const box = method === 'SQUASH' ? first : await fetchMergeBox(pullPath, method, false);
   if (box === null) return null;
-  const asBypass = !box.mergeable && box.canBypass ? await fetchMergeBox(pullPath, method, true) : null;
-  return { box, offer: mergeOffer(box, asBypass) };
+  // Past the rules: where it is not mergeable, or where a queue stands in a direct merge's way.
+  const asBypass = box.canBypass && (!box.mergeable || box.canQueue) ? await fetchMergeBox(pullPath, method, true) : null;
+  const offer = mergeOffer(box, asBypass);
+  return { box, offer, bypass: bypassBeside(box, asBypass, offer), bypassMethods: asBypass?.methods ?? [] };
 }
 
 /** The reason a merge or close failed, in GitHub's words when it gave any. */
-export type StatusAction = 'merge' | 'close' | 'ready' | 'draft' | 'reopen';
+export type StatusAction = 'merge' | 'queue' | 'auto' | 'close' | 'ready' | 'draft' | 'reopen';
 
 const ACTION_VERB: { readonly [A in StatusAction]: string } = {
   merge: 'merge the pull request',
+  queue: 'add the pull request to the merge queue',
+  auto: 'enable auto-merge',
   close: 'close the pull request',
   ready: 'mark the pull request ready for review',
   draft: 'convert the pull request to a draft',
