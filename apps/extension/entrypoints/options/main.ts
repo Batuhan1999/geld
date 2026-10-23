@@ -474,13 +474,15 @@ async function main(): Promise<void> {
   }
 
   /**
-   * Focus is in a category's pattern editor: its textarea, or its Save button
-   * (Chrome focuses a clicked button). Rebuilding then would eat typed input
-   * or the "Saved" status the click is about to show.
+   * Focus is in something being edited: a category's pattern editor (its
+   * textarea, or its Save button, since Chrome focuses a clicked button), or
+   * a custom category's name, count labels and icon picker. Rebuilding then
+   * would eat typed input, an unsaved draft or the "Saved" status the click
+   * is about to show.
    */
-  function isEditingPatterns(): boolean {
+  function isEditingCategory(): boolean {
     const active = document.activeElement;
-    return active !== null && active.closest('.options__categories .options__editor') !== null;
+    return active !== null && active.closest('.options__categories .options__editor, .options__custom-editor') !== null;
   }
   /** A rebuild was skipped because someone was editing; it runs once focus moves on (see the focusin listener below). */
   let renderDeferred = false;
@@ -1254,7 +1256,7 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (isEditingPatterns()) renderDeferred = true;
+    if (isEditingCategory()) renderDeferred = true;
     else renderAll();
     runTester();
   }
@@ -1271,9 +1273,9 @@ async function main(): Promise<void> {
     for (const { field, set } of reviewSwitches) set(next[field.key]);
     for (const show of choiceSetters) show(next);
     const signature = categorySignature(next);
-    // Rebuilding while someone types in a pattern box (or has just clicked its Save) would eat their input or the Saved status.
+    // Rebuilding while someone edits a category would eat their input, draft or Saved status.
     if (signature !== lastSignature) {
-      if (isEditingPatterns()) renderDeferred = true;
+      if (isEditingCategory()) renderDeferred = true;
       else {
         lastSignature = signature;
         renderAll();
