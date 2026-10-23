@@ -1516,7 +1516,16 @@ button.geld-status-pill:is(:hover, :focus-visible, [aria-expanded='true']) .geld
   padding-top: 0;
 }
 
+/* A step up from the comment-kind menu's 16px glyph and 14px words: the statuses are the menu, read at a glance. */
+.geld-quick-review__status-menu .geld-quick-review__menu-visual > svg {
+  width: 18px;
+  height: 18px;
+}
+
 .geld-quick-review__status-menu .geld-quick-review__menu-label {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 22px;
   white-space: nowrap;
 }
 
