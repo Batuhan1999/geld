@@ -20,6 +20,20 @@ describe('catchUpTimeline', () => {
     expect(document.querySelector('#partial-timeline')?.getAttribute('data-url')).toContain('since=2');
   });
 
+  it('counts GitHub’s own refresh landing first as caught up, and puts nothing in twice', async () => {
+    document.body.innerHTML = MARKER('1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        document.body.innerHTML = `<div class="js-timeline-item" id="theirs"></div>${MARKER('2')}`;
+        return new Response(`<div class="js-timeline-item" id="ours"></div>${MARKER('2')}`, { status: 200 });
+      }),
+    );
+    expect(await catchUpTimeline()).toBe(true);
+    expect(document.getElementById('ours')).toBeNull();
+    expect(document.querySelectorAll('#partial-timeline')).toHaveLength(1);
+  });
+
   it('keeps the marker when the answer has none, and does nothing without one', async () => {
     document.body.innerHTML = MARKER('1');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<p>Something else</p>', { status: 200 })));

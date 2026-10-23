@@ -13,7 +13,7 @@ const MARKER = '#partial-timeline.js-timeline-marker';
 
 let inFlight: Promise<boolean> | null = null;
 
-/** Read the timeline since GitHub's marker and put it in place; true when anything was put there. */
+/** Read the timeline since GitHub's marker and put it in place; true when the timeline is now at least as new as that read. */
 export function catchUpTimeline(): Promise<boolean> {
   if (inFlight !== null) return inFlight;
   const marker = document.querySelector<HTMLElement>(MARKER);
@@ -24,7 +24,9 @@ export function catchUpTimeline(): Promise<boolean> {
       const response = await fetch(new URL(src, location.href), { headers: fragmentHeaders(), credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) return false;
       const html = await response.text();
-      // GitHub's own refresh replaced the marker meanwhile: its answer is at least as new as this one.
+      // GitHub's own refresh replaced the marker meanwhile: its answer is at least as new as this one, so nothing is lost.
+      const current = document.querySelector<HTMLElement>(MARKER);
+      if (current !== null && current !== marker && current.getAttribute('data-url') !== src) return true;
       if (!marker.isConnected || marker.getAttribute('data-url') !== src) return false;
       const parsed = new DOMParser().parseFromString(html, 'text/html');
       // Without a marker in the answer the timeline would have nothing to refresh from again: keep the old one.

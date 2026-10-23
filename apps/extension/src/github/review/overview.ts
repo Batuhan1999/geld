@@ -3026,9 +3026,16 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
       reapply();
     },
     onRequest: (botIds) => {
-      const triggers = botIds.map((id) => rerunTriggerFor(id)).filter((trigger): trigger is string => trigger !== null);
-      for (const id of botIds) visit.rerunPending.set(id, Date.now());
-      void postTopLevelComments(triggers).then(() => reapplySoon());
+      const requested = botIds.flatMap((id) => {
+        const trigger = rerunTriggerFor(id);
+        return trigger === null ? [] : [{ id, trigger }];
+      });
+      for (const { id } of requested) visit.rerunPending.set(id, Date.now());
+      void postTopLevelComments(requested.map(({ trigger }) => trigger)).then((posted) => {
+        // The posts stop at the first refusal: the bots after it were never asked and do not read as running.
+        for (const { id } of requested.slice(posted)) visit.rerunPending.delete(id);
+        reapplySoon();
+      });
     },
     onRequestMenuClosed: () => reapplySoon(),
     loadReviewerCandidates: () => reviewerCandidates(),
