@@ -509,8 +509,8 @@ describe('the tab bar button', () => {
     expect(document.querySelector('.geld-quick-review__actions-group')).toBeNull();
     pill()?.click();
     expect(menuRows()).toEqual([
-      ['draft', 'Convert to draft'],
       ['merged', 'Squash and merge'],
+      ['draft', 'Convert to draft'],
       ['closed', 'Close pull request'],
     ]);
     // Merged opens the merge box on GitHub's commit for its default method, under the pill.
