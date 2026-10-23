@@ -444,6 +444,8 @@ export class GeldController {
     window.addEventListener('hashchange', this.onHashChange);
     // Find-in-page reaching into a folded timeline item (`hidden="until-found"`).
     document.addEventListener('beforematch', this.onBeforeMatch, true);
+    // Started in a background tab: the time away counts from now, so the first return can catch up.
+    if (document.hidden) this.hiddenAt = Date.now();
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.apply();
   }

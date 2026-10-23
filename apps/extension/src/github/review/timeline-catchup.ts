@@ -11,15 +11,17 @@ import { fragmentHeaders } from './deeplink';
  */
 const MARKER = '#partial-timeline.js-timeline-marker';
 
-let inFlight: Promise<boolean> | null = null;
+/** The catch-up out now, for one marker and its URL: a pull request moved to in place has a marker of its own. */
+let inFlight: { readonly marker: HTMLElement; readonly src: string; readonly promise: Promise<boolean>; readonly token: object } | null = null;
 
 /** Read the timeline since GitHub's marker and put it in place; true when the timeline is now at least as new as that read. */
 export function catchUpTimeline(): Promise<boolean> {
-  if (inFlight !== null) return inFlight;
   const marker = document.querySelector<HTMLElement>(MARKER);
   const src = marker?.getAttribute('data-url') ?? null;
   if (marker === null || src === null || src === '') return Promise.resolve(false);
-  inFlight = (async (): Promise<boolean> => {
+  if (inFlight !== null && inFlight.marker === marker && inFlight.src === src) return inFlight.promise;
+  const token = {};
+  const promise = (async (): Promise<boolean> => {
     try {
       const response = await fetch(new URL(src, location.href), { headers: fragmentHeaders(), credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) return false;
@@ -36,8 +38,9 @@ export function catchUpTimeline(): Promise<boolean> {
     } catch {
       return false;
     } finally {
-      inFlight = null;
+      if (inFlight?.token === token) inFlight = null;
     }
   })();
-  return inFlight;
+  inFlight = { marker, src, promise, token };
+  return promise;
 }
