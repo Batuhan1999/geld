@@ -21,14 +21,13 @@ const box = (over: Partial<MergeBox>): MergeBox => ({
 });
 
 describe('statusOptions', () => {
-  it('lists the current status and the ones the reader may switch to, closed last, in GitHub’s words', () => {
+  it('lists the statuses the reader may switch to, closed last, in GitHub’s words', () => {
     expect(statusOptions(box({ canClose: true, canConvertToDraft: true }), 'bypass').map((option) => [option.status, option.action, option.note])).toEqual([
-      ['open', null, 'Current status'],
       ['draft', 'draft', 'Convert to draft'],
       ['merged', 'merge', 'Bypass rules and merge'],
       ['closed', 'close', 'Close pull request'],
     ]);
-    expect(statusOptions(box({ canClose: true }), 'merge').map((option) => option.note)).toEqual(['Current status', 'Create a merge commit', 'Close pull request']);
+    expect(statusOptions(box({ canClose: true }), 'merge').map((option) => option.note)).toEqual(['Create a merge commit', 'Close pull request']);
   });
 
   it('offers nothing where the reader may change nothing, and never on a merged pull request', () => {
@@ -38,6 +37,6 @@ describe('statusOptions', () => {
   });
 
   it('never offers a draft a merge', () => {
-    expect(statusOptions(box({ draft: true, canMarkReady: true }), 'merge').map((option) => option.status)).toEqual(['open', 'draft']);
+    expect(statusOptions(box({ draft: true, canMarkReady: true }), 'merge').map((option) => option.status)).toEqual(['open']);
   });
 });

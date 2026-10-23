@@ -862,7 +862,7 @@ function showSnapshot(state: Mounted): void {
           ? createElement('span', { class: 'geld-quick-review__snapshot-avatar', 'aria-hidden': 'true' })
           : createElement('img', { class: `geld-quick-review__snapshot-avatar${reviewer.bot ? ' geld-quick-review__snapshot-avatar--bot' : ''}`, src: reviewer.avatarSrc, alt: '', width: '20', height: '20' }),
         createElement('span', { class: 'geld-quick-review__snapshot-name' }, [reviewer.login]),
-        createElement('span', { class: 'geld-quick-review__snapshot-state', 'data-tone': look.tone }, [svgFromString(look.icon), look.words]),
+        createElement('span', { class: 'geld-quick-review__snapshot-state', 'data-tone': look.tone, role: 'img', 'aria-label': look.words, title: look.words }, [svgFromString(look.icon)]),
       ]);
     }),
   ]);
@@ -1125,11 +1125,11 @@ function toggleStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
 }
 
 /**
- * The status menu, under the pill: the status the pull request has, checked,
- * then the others the reader may switch to (closed last), each with GitHub's
- * words for what it does. Merging opens the merge box and closing asks
- * first; marking ready, converting to a draft and reopening go at once, as
- * from GitHub's own controls.
+ * The status menu, under the pill: each status the reader may switch to
+ * (closed last), named by GitHub's words for what it does, its glyph in the
+ * status's colour. Merging opens the merge box and closing asks first;
+ * marking ready, converting to a draft and reopening go at once, as from
+ * GitHub's own controls.
  */
 function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   const actions = state.mergeActions;
@@ -1137,16 +1137,10 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   if (options.length === 0) return;
   const menu = createElement('div', { class: 'geld-quick-review__menu geld-quick-review__status-menu', [OWN_UI_ATTRIBUTE]: '', role: 'menu', 'aria-label': 'Change status' });
   for (const option of options) {
-    const info = STATUS_INFO[option.status];
-    const item = createElement(
-      'button',
-      { type: 'button', class: 'geld-quick-review__menu-item', role: 'menuitemradio', 'aria-checked': String(option.action === null), 'data-status': option.status, ...(option.action === null ? { disabled: '' } : {}) },
-      [
-        createElement('span', { class: 'geld-quick-review__menu-visual' }, [svgFromString(info.icon)]),
-        createElement('span', { class: 'geld-quick-review__menu-text' }, [createElement('span', { class: 'geld-quick-review__menu-label' }, [info.label]), createElement('span', { class: 'geld-quick-review__menu-note' }, [option.note])]),
-        createElement('span', { class: 'geld-quick-review__menu-check', 'aria-hidden': 'true' }, [svgFromString(ICON_CHECK)]),
-      ],
-    );
+    const item = createElement('button', { type: 'button', class: 'geld-quick-review__menu-item', role: 'menuitem', 'data-status': option.status }, [
+      createElement('span', { class: 'geld-quick-review__menu-visual' }, [svgFromString(STATUS_INFO[option.status].icon)]),
+      createElement('span', { class: 'geld-quick-review__menu-label' }, [option.note]),
+    ]);
     item.addEventListener('click', () => {
       closeStatusMenu(state);
       chooseStatus(state, option);
@@ -1159,7 +1153,7 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   pill.setAttribute('aria-expanded', 'true');
   document.body.append(menu);
   positionStatusMenu(state);
-  const items = (): HTMLButtonElement[] => [...menu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item:not(:disabled)')];
+  const items = (): HTMLButtonElement[] => [...menu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item')];
   items()[0]?.focus({ preventScroll: true });
   menu.addEventListener(
     'keydown',
@@ -1222,8 +1216,10 @@ function closeStatusMenu(state: Mounted): void {
 
 function chooseStatus(state: Mounted, option: StatusOption): void {
   if (option.action === 'merge') openMergeBox(state);
-  else if (option.action === 'close') openCloseBox(state);
-  else if (option.action !== null) void runStatus(state, option.action);
+  // The browser's own confirmation, not a box to click through: closing is undone only by reopening.
+  else if (option.action === 'close') {
+    if (window.confirm('Close this pull request?')) void runStatus(state, 'close');
+  } else void runStatus(state, option.action);
 }
 
 type Request = (pullPath: string, nonce: string) => { readonly url: string; readonly init: RequestInit };
@@ -1235,8 +1231,8 @@ const CONFIRM_INFO: { readonly [A in Exclude<StatusAction, 'merge'>]: { readonly
   reopen: { icon: ICON_GIT_PULL_REQUEST, label: 'Reopen pull request', request: reopenRequest },
 };
 
-/** Mark ready, convert to a draft or reopen at once; a refusal opens the box with GitHub's reason, for another try. */
-async function runStatus(state: Mounted, action: 'ready' | 'draft' | 'reopen'): Promise<void> {
+/** Mark ready, convert to a draft, reopen or (confirmed) close at once; a refusal opens the box with GitHub's reason, for another try. */
+async function runStatus(state: Mounted, action: Exclude<StatusAction, 'merge'>): Promise<void> {
   const failed = await sendAction(state, action, CONFIRM_INFO[action].request(state.pullPath, fetchNonce()));
   if (failed !== null && mounted === state) openConfirmBox(state, action, failed);
 }
@@ -1864,9 +1860,8 @@ function openMergeBox(state: Mounted, failure: string | null = null): void {
 }
 
 /**
- * The close box and the ready-for-review box: GitHub acts at once from its
- * merge box, so here the box is the confirmation, Cancel or the action in
- * GitHub's words.
+ * The box a refused status change opens: GitHub's reason, Cancel and the
+ * action again in GitHub's words.
  */
 function openConfirmBox(state: Mounted, kind: Exclude<StatusAction, 'merge'>, failure: string | null = null): void {
   const pullPath = state.pullPath;
@@ -1904,10 +1899,6 @@ function openConfirmBox(state: Mounted, kind: Exclude<StatusAction, 'merge'>, fa
   submit.addEventListener('click', () => void send());
   showPanel(state, panel, kind);
   submit.focus({ preventScroll: true });
-}
-
-function openCloseBox(state: Mounted): void {
-  openConfirmBox(state, 'close');
 }
 
 /**
