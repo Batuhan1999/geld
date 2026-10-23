@@ -149,7 +149,12 @@ export async function postTopLevelComments(bodies: readonly string[]): Promise<n
     }
     posted += 1;
   }
-  if (posted > 0) await catchUpTimeline();
+  // One more try a moment later: a catch-up that missed (a fetch that failed, GitHub's partial not yet carrying the
+  // new comments) would leave the triggers out of the timeline until GitHub's next live update.
+  if (posted > 0 && !(await catchUpTimeline())) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 800));
+    await catchUpTimeline();
+  }
   return posted;
 }
 

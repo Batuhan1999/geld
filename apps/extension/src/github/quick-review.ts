@@ -730,14 +730,18 @@ function showVerdict(state: Mounted, verdict: 'APPROVED' | 'CHANGES_REQUESTED' |
  */
 interface OwnReview {
   readonly pullPath: string;
-  readonly event: ReviewEvent;
+  /** The standing verdict it leaves: the review's own, or for a comment the verdict held before it. */
+  readonly verdict: 'APPROVED' | 'CHANGES_REQUESTED' | null;
   readonly at: number;
 }
 
 const OWN_REVIEW_HOLD_MS = 90_000;
 
 const OWN_VERDICT: { readonly [E in ReviewEvent]: 'APPROVED' | 'CHANGES_REQUESTED' | null } = { approve: 'APPROVED', 'request changes': 'CHANGES_REQUESTED', comment: null };
-const OWN_STATE: { readonly [E in ReviewEvent]: SidebarReviewerState } = { approve: 'approved', 'request changes': 'changes_requested', comment: 'commented' };
+
+function ownState(verdict: 'APPROVED' | 'CHANGES_REQUESTED' | null): SidebarReviewerState {
+  return verdict === 'APPROVED' ? 'approved' : verdict === 'CHANGES_REQUESTED' ? 'changes_requested' : 'commented';
+}
 
 function heldReview(state: Mounted): OwnReview | null {
   const own = state.ownReview;
@@ -746,8 +750,7 @@ function heldReview(state: Mounted): OwnReview | null {
 
 /** The verdict the reader just sent, while it is held; a comment leaves the standing verdict to GitHub's read. */
 function heldVerdict(state: Mounted): 'APPROVED' | 'CHANGES_REQUESTED' | null {
-  const held = heldReview(state);
-  return held === null ? null : OWN_VERDICT[held.event];
+  return heldReview(state)?.verdict ?? null;
 }
 
 /** The reviewers with the reader's held review in place of (or beside) what GitHub's read said of them. */
@@ -755,7 +758,7 @@ function withOwnReview(state: Mounted, reviewers: readonly SidebarReviewer[]): r
   const held = heldReview(state);
   const login = viewerLogin();
   if (held === null || login === '') return reviewers;
-  const wanted = OWN_STATE[held.event];
+  const wanted = ownState(held.verdict);
   const mine = reviewers.find((reviewer) => reviewer.login.toLowerCase() === login.toLowerCase());
   // A comment leaves a standing approval or request for changes standing, as GitHub counts reviews.
   if (mine !== undefined && (mine.state === wanted || (wanted === 'commented' && (mine.state === 'approved' || mine.state === 'changes_requested')))) return reviewers;
@@ -766,8 +769,9 @@ function withOwnReview(state: Mounted, reviewers: readonly SidebarReviewer[]): r
 
 /** Hold the review GitHub just accepted and show it now: the verdict pressed in, the tally counting it. */
 function showOwnReview(state: Mounted, event: ReviewEvent): void {
-  state.ownReview = { pullPath: state.pullPath, event, at: Date.now() };
-  const verdict = OWN_VERDICT[event];
+  // A comment leaves the standing verdict standing, a held one included: a stale read must not take it back meanwhile.
+  const verdict = OWN_VERDICT[event] ?? heldVerdict(state);
+  state.ownReview = { pullPath: state.pullPath, verdict, at: Date.now() };
   if (verdict !== null) showVerdict(state, verdict);
   state.reviewers = withOwnReview(state, state.reviewers);
   showTally(state, tallyOf(state.reviewers));
@@ -1348,8 +1352,8 @@ function pendingKey(state: Mounted): string {
 
 function pendingCount(state: Mounted): number {
   const onPage = pendingCountOnPage();
-  // GitHub's button is live on Files changed, where its missing counter means none; elsewhere only a count it shows is trusted.
-  if (onPage !== null && (onPage > 0 || state.context.page.kind === 'pull-files')) return onPage;
+  // GitHub's button is live on Files changed (its missing counter means none); a copy elsewhere would not follow a submit.
+  if (onPage !== null && state.context.page.kind === 'pull-files') return onPage;
   return state.pending?.length ?? 0;
 }
 
