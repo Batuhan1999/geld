@@ -283,6 +283,31 @@ describe('the tab bar button', () => {
     expect(segment('request changes').hasAttribute('data-current')).toBe(false);
   });
 
+  it('holds the approval just sent over GitHub’s lagging reads, and brings the conversation up to date without a reload', async () => {
+    document.head.innerHTML = '<meta name="user-login" content="alice">';
+    document.body.insertAdjacentHTML('beforeend', '<div id="partial-timeline" class="js-timeline-marker" data-url="/acme/widgets/pull/7/partials/unread_timeline?since=1"></div>');
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload, pathname: window.location.pathname, hash: '', search: '', href: window.location.href });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/submit_review')) return new Response('{}', { status: 200 });
+      // GitHub answers from before the review for a while: no verdict in the merge box, nobody in the Reviewers block.
+      if (url.includes('/page_data/merge_box')) return new Response(mergeBox('MERGEABLE', true), { status: 200 });
+      if (url.includes('show_partial')) return new Response('<form id="pull-request-reviewers-form-1"></form>', { status: 200 });
+      if (url.includes('unread_timeline')) return new Response('<div class="js-timeline-item" id="new-review"></div><div id="partial-timeline" class="js-timeline-marker" data-url="/acme/widgets/pull/7/partials/unread_timeline?since=2"></div>', { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+    mount();
+    for (let i = 0; i < 4; i += 1) await settle();
+    segment('approve').dispatchEvent(new MouseEvent('click', instant));
+    for (let i = 0; i < 6; i += 1) await settle();
+    expect(segment('approve').hasAttribute('data-current')).toBe(true);
+    expect(document.querySelector('.geld-quick-review__tally')?.getAttribute('aria-label')).toBe('1 approval');
+    expect(document.getElementById('new-review')).not.toBeNull();
+    expect(document.querySelector('#partial-timeline')?.getAttribute('data-url')).toContain('since=2');
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it('opens the box with the verdict instead of sending when words wait in it', async () => {
     const sent: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -869,6 +894,24 @@ describe('the tab bar button', () => {
     document.head.innerHTML = '<meta name="user-login" content="bob">';
     mount();
     expect(chosen()).toBe('Comment');
+  });
+
+  it('follows GitHub’s own count on Files changed, down to none once the pending review is discarded there', async () => {
+    const pending = { id: '1', path: 'src/a.ts', line: 3, isOutdated: false, subject: { diffLines: [] }, commentsData: { comments: [{ id: 'c1', state: 'pending', viewerDidAuthor: true, body: 'Typo.', currentDiffResourcePath: '/acme/widgets/pull/13/files#r1' }] } };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).endsWith('/thread_previews') ? new Response(JSON.stringify([pending]), { status: 200 }) : new Response('{}', { status: 200 }))));
+    window.history.replaceState(null, '', '/acme/widgets/pull/13/changes');
+    const context = { page: { kind: 'pull-files' as const, diffUrl: null, stateKey: '/acme/widgets/pull/13' }, groups: [groupAt(counts())], headSha: () => SHA };
+    const own = document.querySelector('.ReviewMenuButton__x');
+    own?.insertAdjacentHTML('beforeend', '<span data-component="ButtonCounter">1</span>');
+    applyQuickReview(true, context);
+    await settle();
+    applyQuickReview(true, context);
+    const badge = (): string | null | undefined => document.querySelector('.geld-quick-review__badged > .geld-quick-review__count')?.textContent;
+    expect(badge()).toBe('1');
+    // Discarded on Files changed: GitHub drops its counter, and the badge goes with it though the last read said one.
+    own?.querySelector('[data-component="ButtonCounter"]')?.remove();
+    applyQuickReview(true, context);
+    expect(badge()).toBe('');
   });
 
   it('counts the pending comments, lists them and discards the review as GitHub does', async () => {

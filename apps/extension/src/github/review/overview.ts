@@ -3027,7 +3027,8 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
     },
     onRequest: (botIds) => {
       const triggers = botIds.map((id) => rerunTriggerFor(id)).filter((trigger): trigger is string => trigger !== null);
-      void postTopLevelComments(triggers);
+      for (const id of botIds) visit.rerunPending.set(id, Date.now());
+      void postTopLevelComments(triggers).then(() => reapplySoon());
     },
     onRequestMenuClosed: () => reapplySoon(),
     loadReviewerCandidates: () => reviewerCandidates(),

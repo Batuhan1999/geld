@@ -37,8 +37,10 @@ import type { ListSurface } from './list-surfaces';
 import { applySurfaceStyles, removeSurfaceStyles, surfacesOf } from './list-surfaces';
 import { applyAuthorHiding, removeAuthorHiding } from './pr-authors';
 import { applyPrListStats, PR_STAT_CLASS, removePrListStats } from './pr-list';
+import { expireHeadChecks } from './review/check-source';
 import { markCrawlDirty, resetCrawlCache } from './review/crawler';
 import type { RepoBotsHint } from './review/panel-model';
+import { catchUpTimeline } from './review/timeline-catchup';
 import { applyReviewOverview, onReviewBeforeMatch, onReviewHashChange, refreshReviewTimes, reviewSignature, takeReviewDeferred, teardownReviewOverview } from './review/overview';
 import { applyCommentRows, clearCommentRows } from './ui/comment-rows';
 import { removeHiddenSection, renderHiddenSection } from './ui/hidden-section';
@@ -60,6 +62,8 @@ import { legacyAdapter } from './views/legacy';
 import { activateTreeItem, ATTR_WRAP, isSelectedTreeItem, liveEntryRoot, reactAdapter } from './views/react';
 import { activateControl, findViewedControls, rewriteFilesLinksForWhitespace, WhitespaceRedirector } from './whitespace-viewed';
 
+/** Away at least this long and the tab is brought up to date on return (checks read again, the timeline caught up). */
+const CATCH_UP_AFTER_MS = 15_000;
 const ATTR_CONTAINER = 'data-geld-container';
 const ATTR_EXPANDED = 'data-geld-expanded';
 const ATTR_ENTRY = 'data-geld';
@@ -329,6 +333,8 @@ export class GeldController {
   private hiddenDirty = false;
   /** A `reapply` (settings or catalog change) arrived while hidden: the catch-up pass starts from a bare page. */
   private hiddenTeardown = false;
+  /** When the tab was last hidden: back after `CATCH_UP_AFTER_MS`, the page is brought up to date before the pass. */
+  private hiddenAt: number | null = null;
   /**
    * The regions the batches since the last pass touched (`regions.ts`). The
    * debounced pass redoes only the subsystems that read them; `unknown` (or
@@ -621,9 +627,23 @@ export class GeldController {
    * just before the tab went hidden is folded into it.
    */
   private readonly onVisibilityChange = (): void => {
-    if (document.hidden || this.stopped) return;
+    if (this.stopped) return;
+    if (document.hidden) {
+      this.hiddenAt = Date.now();
+      return;
+    }
+    const away = this.hiddenAt === null ? 0 : Date.now() - this.hiddenAt;
+    this.hiddenAt = null;
+    // GitHub's socket goes quiet for a hidden tab and its status timers run late: bots that finished meanwhile still
+    // read as running. Back after a while, the checks are read again and the timeline caught up (`catchUpTimeline`);
+    // what it puts in the page makes passes of its own.
+    const catchUp = away >= CATCH_UP_AFTER_MS;
+    if (catchUp) {
+      expireHeadChecks();
+      void catchUpTimeline();
+    }
     const deferred = takeReviewDeferred();
-    if (!this.hiddenDirty && !deferred) {
+    if (!this.hiddenDirty && !deferred && !catchUp) {
       // Nothing to redo, but the clocks moved on while the tab was away.
       refreshReviewTimes();
       return;
