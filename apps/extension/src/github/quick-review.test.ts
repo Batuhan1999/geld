@@ -344,7 +344,7 @@ describe('the tab bar button', () => {
   };
   const pill = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('button[data-geld-status-pill]');
   const menuRows = (): string[][] =>
-    [...document.querySelectorAll('.geld-quick-review__status-menu .geld-quick-review__menu-item')].map((item) => [item.getAttribute('data-status') ?? '', item.querySelector('.geld-quick-review__menu-label')?.textContent ?? '']);
+    [...document.querySelectorAll('.geld-quick-review__status-menu .geld-quick-review__menu-item')].map((item) => [item.getAttribute('data-status') ?? '', item.getAttribute('title') ?? '']);
   const stubBox = (box: () => string, sent: string[] = []): string[] => {
     vi.stubGlobal(
       'fetch',
@@ -488,6 +488,14 @@ describe('the tab bar button', () => {
       ['merged', 'Squash and merge'],
       ['closed', 'Close pull request'],
     ]);
+    // Each choice is the pill the header will wear: GitHub's label classes, its status key and the status's name.
+    const previews = [...document.querySelectorAll<HTMLElement>('.geld-quick-review__status-menu .geld-status-pill-preview')];
+    expect(previews.map((preview) => [preview.textContent, preview.getAttribute('data-status'), preview.classList.contains('prc-StateLabel-x')])).toEqual([
+      ['Draft', 'draft', true],
+      ['Merged', 'pullMerged', true],
+      ['Closed', 'pullClosed', true],
+    ]);
+    expect(document.querySelector('.geld-quick-review__status-menu [data-status="draft"]')?.getAttribute('aria-label')).toBe('Draft (Convert to draft)');
     // Merged opens the merge box on GitHub's commit for its default method, under the pill.
     document.querySelector<HTMLButtonElement>('.geld-quick-review__status-menu [data-status="merged"]')?.click();
     expect(document.querySelector('.geld-quick-review__status-menu')).toBeNull();

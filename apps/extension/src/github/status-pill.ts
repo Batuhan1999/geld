@@ -62,6 +62,23 @@ export function statusOptions(box: MergeBox, offer: MergeOffer): readonly Status
   return STATUS_ORDER.flatMap((status) => moves[status] ?? []);
 }
 
+/** Primer's StateLabel keys its look on `data-status`, the classic label on a `State--…` class. */
+const REACT_STATUS: { readonly [S in PullStatus]: string } = { open: 'pullOpened', draft: 'draft', merged: 'pullMerged', closed: 'pullClosed' };
+
+/**
+ * A pill as GitHub draws `status`, in the classes and size of `like` (one of
+ * Geld's pills, dressed as the header's label), for the status menu: each
+ * choice shows the pill the header will wear once it is made.
+ */
+export function statusPillFor(like: HTMLElement, status: PullStatus): HTMLElement {
+  const classes = [...like.classList].filter((token) => token !== 'geld-status-pill').map((token) => (/^State--(?:open|draft|merged|closed)$/.test(token) ? `State--${status}` : token));
+  const pill = createElement('span', { class: [...classes, 'geld-status-pill-preview'].join(' ') }, [svgFromString(STATUS_INFO[status].icon), createElement('span', {}, [STATUS_INFO[status].label])]);
+  if (like.hasAttribute('data-status')) pill.setAttribute('data-status', REACT_STATUS[status]);
+  const size = like.getAttribute('data-size');
+  if (size !== null) pill.setAttribute('data-size', size);
+  return pill;
+}
+
 const GITHUB_PILLS = '[data-component="PageHeader"] [data-component="StateLabel"], .gh-header-meta .State, .gh-header-sticky .State';
 const ATTR_HIDDEN = 'data-geld-status-hidden';
 const ATTR_PILL = 'data-geld-status-pill';

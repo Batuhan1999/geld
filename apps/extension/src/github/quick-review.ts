@@ -13,7 +13,7 @@ import { inlineText } from './review/inline-text';
 import type { SidebarReviewer } from './review/crawler';
 import type { ReviewTally } from './review-tally';
 import type { StatusOption } from './status-pill';
-import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, syncStatusPills } from './status-pill';
+import { ATTR_INSTANT_MERGE, rememberStatusHint, removeStatusPills, showMergedPills, STATUS_INFO, statusHint, statusOf, statusOptions, statusPillFor, syncStatusPills } from './status-pill';
 import { fetchReviewers, REVIEW_BY_HASH, REVIEWS_HASH, reviewLink, standingReviewers, tallyOf, tallyWords } from './review-tally';
 import { ICON_CHECK, ICON_CHECK_SEND, ICON_CHEVRON_DOWN, ICON_CODE_REVIEW, ICON_CODE_REVIEW_SEND, ICON_COMMENT, ICON_COMMENT_SEND, ICON_GIT_PULL_REQUEST, ICON_GIT_PULL_REQUEST_CLOSED, ICON_GIT_PULL_REQUEST_DRAFT, ICON_TRASH, ICON_TRIANGLE_DOWN, ICON_X, ICON_X_SEND } from './ui/icons';
 
@@ -1126,8 +1126,8 @@ function toggleStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
 
 /**
  * The status menu, under the pill: each status the reader may switch to
- * (closed last), named by GitHub's words for what it does, its glyph in the
- * status's colour. Merging opens the merge box and closing asks first;
+ * (closed last), as the pill the header will wear once it is chosen, GitHub's
+ * words for what it does in its name and title. Merging opens the merge box and closing asks first;
  * marking ready, converting to a draft and reopening go at once, as from
  * GitHub's own controls.
  */
@@ -1137,9 +1137,9 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   if (options.length === 0) return;
   const menu = createElement('div', { class: 'geld-quick-review__menu geld-quick-review__status-menu', [OWN_UI_ATTRIBUTE]: '', role: 'menu', 'aria-label': 'Change status' });
   for (const option of options) {
-    const item = createElement('button', { type: 'button', class: 'geld-quick-review__menu-item', role: 'menuitem', 'data-status': option.status }, [
-      createElement('span', { class: 'geld-quick-review__menu-visual' }, [svgFromString(STATUS_INFO[option.status].icon)]),
-      createElement('span', { class: 'geld-quick-review__menu-label' }, [option.note]),
+    const name = STATUS_INFO[option.status].label;
+    const item = createElement('button', { type: 'button', class: 'geld-quick-review__menu-item', role: 'menuitem', 'data-status': option.status, 'aria-label': `${name} (${option.note})`, title: option.note }, [
+      statusPillFor(pill, option.status),
     ]);
     item.addEventListener('click', () => {
       closeStatusMenu(state);

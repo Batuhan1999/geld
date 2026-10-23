@@ -1499,41 +1499,33 @@ button.geld-status-pill:is(:hover, :focus-visible, [aria-expanded='true']) .geld
   display: inline-flex;
 }
 
-/* GitHub's action menu: one line per action, its glyph in the status's colour, which accessible themes redefine. */
+/*
+ * The status menu stacks the pills the header would wear, each in GitHub's own StateLabel look for its status (so
+ * accessible themes' colours come through), left-aligned in a row that takes the hover surface.
+ */
 .geld-quick-review__status-menu {
-  gap: 0;
-  min-width: 192px;
-  padding: 8px;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px;
 }
 
 .geld-quick-review__status-menu .geld-quick-review__menu-item {
   align-items: center;
-  min-height: 32px;
-  padding: 6px 8px;
+  padding: 4px 6px;
 }
 
-.geld-quick-review__status-menu .geld-quick-review__menu-visual {
-  padding-top: 0;
-}
-
-.geld-quick-review__status-menu .geld-quick-review__menu-label {
+.geld-status-pill-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
+  pointer-events: none;
 }
 
-.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='open'] .geld-quick-review__menu-visual {
-  color: var(--fgColor-open, #1a7f37);
-}
-
-.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='draft'] .geld-quick-review__menu-visual {
-  color: var(--fgColor-draft, var(--fgColor-muted, #59636e));
-}
-
-.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='merged'] .geld-quick-review__menu-visual {
-  color: var(--fgColor-done, #8250df);
-}
-
-.geld-quick-review__status-menu .geld-quick-review__menu-item[data-status='closed'] .geld-quick-review__menu-visual {
-  color: var(--fgColor-closed, #d1242f);
+.geld-status-pill-preview > svg {
+  flex: 0 0 auto;
+  margin: 0 !important;
+  fill: currentColor;
 }
 
 /* "Pending comments N", as GitHub's dialog lists them under the choices. */
