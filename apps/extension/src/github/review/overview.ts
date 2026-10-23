@@ -3030,10 +3030,12 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
         const trigger = rerunTriggerFor(id);
         return trigger === null ? [] : [{ id, trigger }];
       });
-      for (const { id } of requested) visit.rerunPending.set(id, Date.now());
+      // This visit's map: a move to another pull request while the posts are out gives the new one a map of its own.
+      const rerunPending = visit.rerunPending;
+      for (const { id } of requested) rerunPending.set(id, Date.now());
       void postTopLevelComments(requested.map(({ trigger }) => trigger)).then((posted) => {
         // The posts stop at the first refusal: the bots after it were never asked and do not read as running.
-        for (const { id } of requested.slice(posted)) visit.rerunPending.delete(id);
+        for (const { id } of requested.slice(posted)) rerunPending.delete(id);
         reapplySoon();
       });
     },
