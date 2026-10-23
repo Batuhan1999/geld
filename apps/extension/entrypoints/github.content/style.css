@@ -743,6 +743,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   margin: 0;
 }
 
+/* The toolbar's row leaves 12px after its divider: 4px of it here, as between the tally and the group. */
+.geld-quick-review[data-geld-place='toolbar'] {
+  margin-left: -8px;
+}
+
 /* At the end of the other tabs' compact header's title row, right of the title, which gives way to it. */
 .geld-quick-review[data-geld-place='header'] {
   /* Primer's header row orders its parts with `order`; the group comes last. */
@@ -924,8 +929,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 .geld-quick-review__tally:is(:hover, :focus-visible) {
-  /* Half the neutral surface's contrast, in either scheme: the tally is a quiet link, not a button. */
-  background: color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 50%, transparent);
+  /* Three quarters of the neutral surface's contrast, in either scheme: the tally is a quiet link, not a button. */
+  background: color-mix(in srgb, var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12)) 75%, transparent);
   color: var(--fgColor-default, #1f2328);
   text-decoration: none;
 }
