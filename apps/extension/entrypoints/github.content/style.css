@@ -1089,25 +1089,24 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /*
- * A small box: the words, any pending comments, then the buttons with no rule between. Its body overflows rather than
- * scrolls, so GitHub's suggestion lists (slash commands, mentions, saved replies) hang past the box instead of being cut
- * off by it and scrolling it; only a box fixed under a sticky header keeps to the room below it and scrolls its body,
- * and even there a list that is open overflows.
+ * A small box: the words, any pending comments, then the buttons with no rule between. It keeps to the room below it in
+ * the window (`positionPanel`) and scrolls its body when the words outgrow that, its footer's buttons always in view; a
+ * suggestion list that is open (slash commands, mentions, saved replies) overflows instead, hanging past the box rather
+ * than being cut off by it and scrolling it.
  */
 .Overlay.geld-quick-review__panel .Overlay-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 12px 12px 0;
-  overflow: visible;
-}
-
-.Overlay.geld-quick-review__panel[data-geld-fixed] .Overlay-body {
+  /* GitHub's focus ring on the field is 2px drawn 1px outside it, which a scrolling body (a fixed box) clips at its
+     padding: 2px of bottom padding, taken back by the margin, give the ring room and move nothing. */
+  margin-bottom: -2px;
+  padding: 12px 12px 2px;
   overflow-y: auto;
 }
 
-.Overlay.geld-quick-review__panel[data-geld-fixed]:has(.CommentBox :is([role='listbox'], .suggester, details[open] > details-menu)) .Overlay-body {
+.Overlay.geld-quick-review__panel:has(.CommentBox :is([role='listbox'], .suggester, details[open] > details-menu)) .Overlay-body {
   overflow: visible;
 }
 
@@ -1187,12 +1186,25 @@ html[data-geld-quick-review] details.js-reviews-container {
 }
 
 /*
+ * The preview framed as the field is in Write. GitHub gives the body a `min-height` of the field's framed height, and
+ * the body is border-box, so the frame goes on the body: switching tabs moves nothing.
+ */
+.geld-quick-review__panel .CommentBox :is(.js-preview-panel, .preview-content) {
+  margin: 0;
+}
+
+.geld-quick-review__panel .CommentBox .js-preview-body {
+  border: var(--borderWidth-thin, 1px) solid var(--borderColor-default, #d1d9e0);
+  border-radius: var(--borderRadius-medium, 6px);
+}
+
+/*
  * The comment box keeps everything 6px from its edges, as the Write tab is: the words' field, the pending comments and
  * the footer's buttons, each corner's 6px radius inside the box's 12px. The pending rows and Discard keep their glyphs
  * in one column 12px in, their hover surfaces inside the box.
  */
 .Overlay.geld-quick-review__panel--writer .Overlay-body {
-  padding: 6px 6px 0;
+  padding: 6px 6px 2px;
 }
 
 .Overlay.geld-quick-review__panel--writer .Overlay-footer.geld-quick-review__footer {
@@ -1214,6 +1226,19 @@ html[data-geld-quick-review] details.js-reviews-container {
 .geld-quick-review__panel--writer .geld-quick-review__footer .btn.btn-invisible.geld-quick-review__discard {
   margin-left: 0;
   padding-left: 6px;
+}
+
+/*
+ * Write, Preview and the toolbar stay at the top while a long comment or its preview scrolls, as the footer's buttons
+ * stay at the bottom: stuck over the body's own 6px of top padding, on the box's surface, so nothing shows above them.
+ */
+.geld-quick-review__panel--writer .CommentBox :is(.comment-form-head, .CommentBox-header) {
+  position: sticky !important;
+  top: -6px;
+  z-index: 1;
+  margin-top: -6px !important;
+  padding-top: 6px !important;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff)) !important;
 }
 
 /* The writer's foot, which repeats what its toolbar and field offer (`hideFoot`). */
