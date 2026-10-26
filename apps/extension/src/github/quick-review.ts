@@ -1492,6 +1492,7 @@ function closePanel(restoreFocus = false): void {
   opener?.setAttribute('aria-expanded', 'false');
   document.removeEventListener('pointerdown', onOutsidePointer, true);
   window.removeEventListener('resize', positionPanel);
+  window.removeEventListener('scroll', positionPanel);
   panelResize?.disconnect();
   panelResize = null;
   if (restoreFocus) opener?.focus();
@@ -1526,6 +1527,7 @@ function positionPanel(): void {
   const above = Math.max(0, Math.round(rect.top - 20));
   const up = below < PANEL_ROOM && above > below;
   mounted.panel.style.maxHeight = `${up ? above : below}px`;
+  fitField(mounted.panel, up ? above : below);
   const top = up ? rect.top - 4 - mounted.panel.offsetHeight : rect.bottom + 4;
   mounted.panel.style.position = fixed ? 'fixed' : '';
   mounted.panel.style.top = `${Math.round(top + (fixed ? 0 : window.scrollY))}px`;
@@ -1534,6 +1536,33 @@ function positionPanel(): void {
 
 /** The room under the anchor below which the box opens over it instead, when there is more room there. */
 const PANEL_ROOM = 240;
+
+/** The field's shortest cap: below it the box's body scrolls instead. */
+const FIELD_MIN = 90;
+
+/**
+ * The words' field (or its preview) takes what the box has left once the tabs, the pending comments and the buttons
+ * have theirs, and scrolls inside itself past that. GitHub's sizer grows the field and caps it against the window's
+ * bottom edge, not the box's, so a long comment otherwise outgrew the box and scrolled under the tabs.
+ */
+function fitField(panel: HTMLElement, room: number): void {
+  const body = panel.querySelector<HTMLElement>(':scope > .Overlay-body');
+  const field = [...panel.querySelectorAll<HTMLElement>('textarea, .js-preview-body')].find((el) => el.offsetParent !== null);
+  if (body === null || field === undefined) {
+    panel.style.removeProperty('--geld-field-max');
+    return;
+  }
+  for (const child of body.children) panelResize?.observe(child);
+  const whole = panel.offsetHeight - body.clientHeight + body.scrollHeight;
+  const rest = whole - field.offsetHeight;
+  const cap = Math.max(FIELD_MIN, Math.floor(room - rest));
+  panel.style.setProperty('--geld-field-max', `${cap}px`);
+  // GitHub gives the preview the field's height as an inline `min-height` when Preview opens, which would outrank the
+  // cap once the room shrinks: the stylesheet takes the smaller of the two, GitHub's value left as it wrote it.
+  const previewMin = panel.querySelector<HTMLElement>('.js-preview-body')?.style.minHeight ?? '';
+  if (previewMin === '') panel.style.removeProperty('--geld-preview-min');
+  else panel.style.setProperty('--geld-preview-min', previewMin);
+}
 
 /** Placed again as the box changes size (the writer arriving, a reason shown, pending comments opening): one over its anchor grows upward. */
 let panelResize: ResizeObserver | null = null;
@@ -1545,11 +1574,13 @@ function showPanel(state: Mounted, panel: HTMLElement, opener: Opener): void {
   state.opener = opener;
   buttonFor(state, opener)?.setAttribute('aria-expanded', 'true');
   document.body.append(panel);
+  panelResize = new ResizeObserver(() => positionPanel());
+  panelResize.observe(panel);
   positionPanel();
   document.addEventListener('pointerdown', onOutsidePointer, true);
   window.addEventListener('resize', positionPanel);
-  panelResize = new ResizeObserver(() => positionPanel());
-  panelResize.observe(panel);
+  // Its room is the window's: a page scrolled under a box placed in page coordinates moves the box with it, footer and all.
+  window.addEventListener('scroll', positionPanel, { passive: true });
 }
 
 function isAuthorViewing(): boolean {
