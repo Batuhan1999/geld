@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { HeaderStatGroup } from './header-stats';
 import { resetStatusHints } from './status-pill';
-import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
+import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, reassertStatusPills, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
 
 const SHA = 'a'.repeat(40);
 
@@ -744,12 +744,21 @@ describe('the tab bar button', () => {
     // Through: GitHub's default method and commit, then GitHub's merged pill until the page reloads.
     answer = 200;
     posts.length = 0;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, ctrlKey: true }));
+    expect(pill()?.getAttribute('aria-label')).toBe('Merge now: Squash and merge');
     pill()?.dispatchEvent(new MouseEvent('click', instant));
     for (let i = 0; i < 3; i += 1) await settle();
     expect(posts).toEqual([{ url: 'merge', body: JSON.stringify({ bypassBranchProtections: false, mergeMethod: 'SQUASH', commitTitle: 'Title (#7)', commitMessage: '' }) }]);
     expect(pill()?.getAttribute('data-status')).toBe('pullMerged');
-    expect(pill()?.textContent).toBe('Merged');
+    expect(pill()?.querySelector('.geld-status-pill__label')?.textContent).toBe('Merged');
+    expect(pill()?.hasAttribute('aria-haspopup')).toBe(false);
+    expect(pill()?.hasAttribute('aria-label')).toBe(false);
     expect(reload).toHaveBeenCalled();
+    // A pass before the reload, the key still held, leaves it merged: no Merge face, no "Merge now" name.
+    reassertStatusPills();
+    expect(pill()?.hasAttribute('data-geld-instant-merge')).toBe(false);
+    expect(pill()?.hasAttribute('aria-label')).toBe(false);
+    expect(pill()?.querySelector('.geld-status-pill__label')?.textContent).toBe('Merged');
   });
 
   it('reads GitHub again before a 1-click merge, and merges nothing when the approval was dismissed meanwhile', async () => {

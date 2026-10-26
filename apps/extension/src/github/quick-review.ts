@@ -1040,13 +1040,16 @@ function showStatus(state: Mounted): void {
   // A merged pull request has nothing to switch to whoever reads it: it says nothing about the reader's rights.
   if (options !== null && repo !== null && actions !== null && statusOf(actions.box) !== 'merged') rememberStatusHint(repo, options.length > 0);
   const on = options !== null ? options.length > 0 : repo !== null && statusHint(repo) === true && !/merged/i.test(pullRequestStateWords());
-  state.pills = syncStatusPills(on, openFromPill);
+  // While a merge is out the pills stay, whatever a reading meanwhile says (one may already read it merged): its
+  // success dresses them as merged until the reload.
+  state.pills = syncStatusPills(on || (state.sending && state.pills.length > 0), openFromPill);
   showInstantMerge(state);
   if (state.statusMenu !== null && (state.statusOpener === null || !state.pills.includes(state.statusOpener))) closeStatusMenu(state);
 }
 
 /** Every pill's click: a pill may be put in place before the controls are mounted (`reassertStatusPills`). */
 function openFromPill(pill: HTMLButtonElement, click: MouseEvent): void {
+  if (!pill.hasAttribute('aria-haspopup')) return;
   if (mounted === null) return;
   if (instantMergeReady(mounted) && (MAC ? click.metaKey : click.ctrlKey)) void instantMerge(mounted, pill);
   else toggleStatusMenu(mounted, pill);
@@ -1071,6 +1074,8 @@ function showInstantMerge(state: Mounted): void {
   const on = state.root.hasAttribute(ATTR_INSTANT) && instantMergeReady(state);
   const method = state.mergeActions?.box.methods[0] ?? 'SQUASH';
   for (const pill of state.pills) {
+    // A merged pill (`showMergedPills`) has no menu and nothing left to merge, whatever the last reading said.
+    if (!pill.hasAttribute('aria-haspopup')) continue;
     if (pill.hasAttribute(ATTR_INSTANT_MERGE) === on) continue;
     pill.toggleAttribute(ATTR_INSTANT_MERGE, on);
     if (on) pill.setAttribute('aria-label', `Merge now: ${METHOD_LABEL[method]}`);
@@ -1104,8 +1109,18 @@ async function instantMerge(state: Mounted, pill: HTMLButtonElement): Promise<vo
   const box = fresh.box;
   const method = box.methods[0] ?? 'SQUASH';
   const request = mergeRequest(state.pullPath, { method, commitTitle: box.commitTitle, commitMessage: box.commitMessage, authorEmail: box.authorEmail, bypass: false, stacked: box.stacked }, fetchNonce());
-  const failed = await sendAction(state, 'merge', request, () => showMergedPills(state.pills));
+  const failed = await sendAction(state, 'merge', request, () => showMerged(state, pullPath));
   if (failed !== null && mounted === state) openMergeBox(state, failed);
+}
+
+/**
+ * The merge of `pullPath` went through: the pills on the page now, whichever GitHub's header re-rendered meanwhile,
+ * shown merged, only while the reader is still on that pull request.
+ */
+function showMerged(state: Mounted, pullPath: string): void {
+  if (mounted !== state || state.pullPath !== pullPath || pullPathOf(window.location.pathname) !== pullPath) return;
+  state.pills = syncStatusPills(true, openFromPill);
+  showMergedPills(state.pills);
 }
 
 /**
@@ -1154,6 +1169,8 @@ function toggleStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
  * GitHub's own controls.
  */
 function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
+  // Merged meanwhile (`showMergedPills`): a merge or a reading that lands after it opens nothing on it.
+  if (!pill.hasAttribute('aria-haspopup')) return;
   const actions = state.mergeActions;
   const options = actions === null ? [] : statusOptions(actions.box, actions.offer, actions.bypass);
   if (options.length === 0) return;
@@ -1948,7 +1965,7 @@ function openMergeBox(state: Mounted, failure: string | null = null, pastRules =
   const send = async (): Promise<void> => {
     if (submit.disabled) return;
     error.hidden = true;
-    const pending = sendAction(state, 'merge', mergeRequest(pullPath, { method, commitTitle: title.value, commitMessage: message.value, authorEmail: box.authorEmail, bypass: bypass && consent.checked, stacked: box.stacked }, fetchNonce()));
+    const pending = sendAction(state, 'merge', mergeRequest(pullPath, { method, commitTitle: title.value, commitMessage: message.value, authorEmail: box.authorEmail, bypass: bypass && consent.checked, stacked: box.stacked }, fetchNonce()), () => showMerged(state, pullPath));
     submit.textContent = 'Merging…';
     refresh();
     const failed = await pending;
