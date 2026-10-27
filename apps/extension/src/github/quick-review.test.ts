@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { HeaderStatGroup } from './header-stats';
 import { resetStatusHints } from './status-pill';
-import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, reassertStatusPills, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
+import { applyQuickReview, canSubmit, isInstantClick, pullPathOf, quickReviewStandBusy, reassertStatusPills, removeQuickReview, reviewErrorText, segmentHint, submitReviewRequest, timelineCommentRequest } from './quick-review';
 
 const SHA = 'a'.repeat(40);
 
@@ -63,6 +63,75 @@ describe('reviewErrorText', () => {
     expect(reviewErrorText(422, { error: 'Review cannot be empty' })).toBe('GitHub could not submit the review: Review cannot be empty');
     expect(reviewErrorText(422, { errors: ['One.', { message: 'Two.' }] })).toBe('GitHub could not submit the review: One. Two.');
     expect(reviewErrorText(500, null)).toBe('GitHub could not submit the review (HTTP 500).');
+  });
+});
+
+describe("the tab bar button while GitHub's counts load", () => {
+  const page = { kind: 'pull-conversation' as const, diffUrl: null, stateKey: '/acme/widgets/pull/7' };
+  const wrapper = (): HTMLElement => {
+    const element = document.querySelector('[class*="rightContentWrapper"]');
+    if (!(element instanceof HTMLElement)) throw new Error('fixture');
+    return element;
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"Not Found"}', { status: 404 })));
+    document.head.innerHTML = '<meta name="user-login" content="alice">';
+    // The tab row as GitHub first renders it: its counts wrapper holds a skeleton (a Suspense fallback) until they load.
+    document.body.innerHTML = `
+      <div data-component="PageHeader">
+        <a class="text-bold" href="/bob">bob</a>
+        <div class="prc-PageHeader-Navigation--uLav">
+          <div class="rightContentWrapper__DE7XPN"><div class="skeleton__c5fLaY"></div></div>
+          <div class="flex-auto"><nav class="TabNav__qHkBGx"><a id="prs-files-anchor-tab" href="/acme/widgets/pull/7/changes">Files changed</a></nav></div>
+        </div>
+      </div>`;
+    window.history.replaceState(null, '', '/acme/widgets/pull/7');
+  });
+
+  afterEach(() => {
+    removeQuickReview();
+    vi.unstubAllGlobals();
+  });
+
+  it('stays out until the counts replace the skeleton, then first appears directly before them', () => {
+    applyQuickReview(true, { page, groups: [], headSha: () => SHA });
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(document.querySelector('.geld-quick-review__mark')).toBeNull();
+    wrapper().innerHTML = '<div class="counts">+3 −1</div>';
+    const counts = wrapper().querySelector<HTMLElement>('.counts');
+    if (counts === null) throw new Error('fixture');
+    applyQuickReview(true, { page, groups: [groupAt(counts)], headSha: () => SHA });
+    expect(counts.previousElementSibling?.classList.contains('geld-quick-review')).toBe(true);
+  });
+
+  it('takes the end of the row once the skeleton resolves to nothing (a change of binary files only)', () => {
+    applyQuickReview(true, { page, groups: [], headSha: () => SHA });
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    wrapper().replaceChildren();
+    applyQuickReview(true, { page, groups: [], headSha: () => SHA });
+    expect(wrapper().querySelector('.geld-quick-review + .geld-quick-review__mark')).not.toBeNull();
+  });
+
+  it('reads its fallback stand as busy the moment the skeleton comes back, and leaves on the pass that asks', () => {
+    wrapper().replaceChildren();
+    applyQuickReview(true, { page, groups: [], headSha: () => SHA });
+    expect(quickReviewStandBusy()).toBe(false);
+    wrapper().insertAdjacentHTML('afterbegin', '<div class="skeleton__c5fLaY"></div>');
+    expect(quickReviewStandBusy()).toBe(true);
+    applyQuickReview(true, { page, groups: [], headSha: () => SHA });
+    expect(document.querySelector('.geld-quick-review')).toBeNull();
+    expect(quickReviewStandBusy()).toBe(false);
+  });
+
+  it('reads nothing busy while the group rides in the compact sticky header, whatever that row holds', () => {
+    wrapper().innerHTML = '<div class="counts">+3 −1</div>';
+    const counts = wrapper().querySelector<HTMLElement>('.counts');
+    if (counts === null) throw new Error('fixture');
+    document.body.insertAdjacentHTML('beforeend', '<div class="PageHeader stickyHeader__x prHeader__y is-stuck"><div class="PageHeader-TitleArea"><h2>Title</h2></div></div>');
+    applyQuickReview(true, { page, groups: [groupAt(counts)], headSha: () => SHA });
+    expect(document.querySelector('.PageHeader-TitleArea > .geld-quick-review')).not.toBeNull();
+    expect(quickReviewStandBusy()).toBe(false);
   });
 });
 
