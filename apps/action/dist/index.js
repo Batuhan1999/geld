@@ -19560,6 +19560,8 @@ function refusalReason(body) {
   }
   const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?(?:automatic\s+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|trigger a|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== void 0 && skipNotice[1].trim() !== "") return skipNotice[1].trim();
+  const failNotice = /^(?:(?:\[!caution\][.\s]*|caution[.\s]+)review failed[.:]?|review failed[.:])\s+(.+?)(?:[.!?](?:\s|$)|$)/i.exec(text);
+  if (failNotice?.[1] !== void 0 && failNotice[1].trim() !== "") return failNotice[1].trim();
   if (text.length > 400) return null;
   const skipped = /^(?:[\w.-]+(?:\[bot\])?\s*[:,-]\s*)?skipp(?:ing|ed)\s+(?:[A-Z][\w.-]*(?:\[bot\])?\s*[:—–-]|(?:the\s+|this\s+)?(?:review|reviewing|pull request|pr|run|analysis|scan)\b)/i.test(text) || /^[A-Z][\w.-]*(?:\[bot\])?\s+skipped\s+reviewing\b/i.test(text) || /^[A-Z][\w.-]*(?:\[bot\])?\s+encountered an error\b/i.test(text);
   const sentences = text.split(/(?<=[.!?])\s+/);
@@ -19798,7 +19800,13 @@ function reviewBotIdFor(login, extraLogins) {
   if (known !== null) return known.id;
   return extraLogins.some((entry2) => entry2.toLowerCase() === login.toLowerCase()) ? `custom:${login.toLowerCase()}` : null;
 }
+function commandReply(body) {
+  const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  if (!/^(?:✅\s*)?actions? performed\b/i.test(text)) return null;
+  return /\breviews? triggered\b/i.test(text) ? "started" : "done";
+}
 function isStatusLineComment(body) {
+  if (commandReply(body) === "started") return true;
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ");
   const firstLine = untagged.split("\n").find((line) => line.trim() !== "") ?? "";
   if (/^\s*reviewing (?:pr|pull request) #?\d+\s*$/i.test(firstLine.replace(/[`*_>~#]/g, " ").replace(/\s+/g, " "))) return true;
@@ -19853,6 +19861,19 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const editedAtOf = /* @__PURE__ */ new Map();
   const countedSummaries = /* @__PURE__ */ new Set();
   const lastWordBy = /* @__PURE__ */ new Map();
+  const refusedAt = /* @__PURE__ */ new Map();
+  const answeredBy = /* @__PURE__ */ new Map();
+  const refusedRuns = /* @__PURE__ */ new Map();
+  const afterAnswer = (record3) => {
+    const answer = answeredBy.get(record3.id);
+    if (record3.sourceId !== void 0 || answer === void 0) return record3;
+    return { id: record3.id, login: record3.login, verdict: "unknown", reviewedSha: record3.reviewedSha, ...record3.checkName === void 0 ? {} : { checkName: record3.checkName }, sourceId: answer.anchor };
+  };
+  const ranForAnswer = (id, started) => {
+    const answer = answeredBy.get(id);
+    if (answer === void 0 || started < answer.askedAt || started > (answer.finished ? answer.at : answer.at + REPORT_GRACE_MS)) return false;
+    return (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) <= answer.at;
+  };
   const reported = (id, comment) => {
     for (const at of [comment.createdAt, comment.editedAt]) {
       const time3 = at === void 0 ? NaN : Date.parse(at);
@@ -19893,9 +19914,24 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       threadRuns.set(id, { login: comment.author, open: open2, openAnchor, lastAnchor: comment.anchor, lastAt });
       continue;
     }
+    if (commandReply(comment.body) === "done") {
+      const posted = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
+      const rewritten = comment.editedAt === void 0 ? NaN : Date.parse(comment.editedAt);
+      const at = Number.isNaN(rewritten) ? posted : Math.max(rewritten, Number.isNaN(posted) ? rewritten : posted);
+      if (!Number.isNaN(at)) answeredBy.set(id, { askedAt: statusOnly.get(id)?.at ?? (Number.isNaN(posted) ? at : posted), at, finished: !Number.isNaN(rewritten), anchor: comment.anchor });
+      statusOnly.delete(id);
+      const prior = runsBeforeAsk.get(id);
+      if (!threadRuns.has(id) && prior !== void 0) threadRuns.set(id, prior);
+      runsBeforeAsk.delete(id);
+      continue;
+    }
     const refusal = refusalReason(comment.body);
     if (refusal !== null) {
       reported(id, comment);
+      for (const at of [comment.createdAt, comment.editedAt]) {
+        const time3 = at === void 0 ? NaN : Date.parse(at);
+        if (!Number.isNaN(time3) && time3 > (refusedAt.get(id) ?? Number.NEGATIVE_INFINITY)) refusedAt.set(id, time3);
+      }
       statusOnly.delete(id);
       const existing2 = byId.get(id);
       const prior = runsBeforeAsk.get(id);
@@ -19930,6 +19966,22 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     }
     const verdict = parsed.clean ? "clean" : "findings";
     byId.set(id, withOptionalCount({ id, login, verdict, reviewedSha: headSha, sourceId: comment.anchor }, parsed));
+  }
+  for (const [id, verdict] of checkVerdict) {
+    const refused = refusedAt.get(id);
+    if (verdict !== "running" || refused === void 0 || refused < (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY)) continue;
+    const started = checkStartedAt.get(id);
+    if (started !== void 0 ? refused > started : options.closed === true) {
+      checkVerdict.delete(id);
+      refusedRuns.set(id, byId.get(id)?.reviewedSha ?? headSha);
+    }
+  }
+  for (const [id, verdict] of checkVerdict) {
+    const started = checkStartedAt.get(id);
+    if (verdict !== "running" || started === void 0 || !ranForAnswer(id, started)) continue;
+    checkVerdict.delete(id);
+    const record3 = byId.get(id);
+    if (record3 !== void 0) byId.set(id, afterAnswer(record3));
   }
   for (const [id, { login, anchor: anchor2, at, own: own2, acknowledged }] of statusOnly) {
     const existing = byId.get(id);
@@ -20004,6 +20056,10 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       byId.set(bot.id, { ...existing, runJudged: true });
       continue;
     }
+    if (ranForAnswer(bot.id, started)) {
+      byId.set(bot.id, { ...afterAnswer(existing), runJudged: true });
+      continue;
+    }
     const finished = check2.completedAt === void 0 ? NaN : Date.parse(check2.completedAt);
     const awaiting = !Number.isNaN(finished) && now - finished < REPORT_GRACE_MS;
     byId.set(bot.id, {
@@ -20016,8 +20072,23 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       runJudged: true
     });
   }
+  for (const [id, answer] of answeredBy) {
+    const record3 = byId.get(id);
+    if (record3 === void 0 || (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) > answer.at) continue;
+    const started = checkStartedAt.get(id);
+    const finished = checkFinishedAt.get(id);
+    const ours = started !== void 0 ? ranForAnswer(id, started) : record3.checkName !== void 0 && checkVerdict.get(id) !== "running" && (finished !== void 0 ? finished >= answer.askedAt && finished <= answer.at + REPORT_GRACE_MS : checkVerdict.get(id) === "clean");
+    if (ours) byId.set(id, { ...afterAnswer(record3), runJudged: true });
+  }
+  for (const [id, refusedSha] of refusedRuns) {
+    const record3 = byId.get(id);
+    if (record3 === void 0 || record3.verdict === "running") continue;
+    const refusal = record3.verdict === "failed" && record3.reason !== void 0;
+    byId.set(id, { ...record3, runJudged: true, ...refusal || record3.reviewedSha !== refusedSha ? {} : { reviewedSha: UNKNOWN_SHA } });
+  }
   return [...byId.values()];
 }
+var UNKNOWN_SHA = "0".repeat(40);
 var REPORT_GRACE_MS = 90 * 1e3;
 function reactedBy(comment, id) {
   const bot = botById(id);

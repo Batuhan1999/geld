@@ -4,7 +4,7 @@ import type { RawPullRequest } from './build';
 import { encodePayloadAttribute, extractPayloadText, looksLikeSummaryBody, parseSummaryBody, parseSummaryElement } from './summary-parse';
 import { renderSummary } from './summary-render';
 import { PAYLOAD_BUDGET, parseGeldPrMeta } from './model';
-import { botByTrigger, botsTriggeredBy, botTitle, isReviewShaped, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
+import { botByTrigger, botsTriggeredBy, botTitle, commandReply, UNKNOWN_SHA, isReviewShaped, isStatusLineComment, looksLikeBotLogin, mergeCheckRuns, parseBotBody, refusalReason, REPORT_GRACE_MS, resolveBotId, verdictsFrom } from './bots';
 import type { BotComment, DerivedBotVerdict, RawCheckRun, VerdictOptions } from './bots';
 import { parseConsolidateOutput } from './prompts';
 
@@ -1010,6 +1010,100 @@ describe('a bot that refuses to run', () => {
     expect(refusalReason('Important\nReview skipped\nReview was skipped as selected files did not have any reviewable changes.\n⛔ Files ignored due to path filters: 1\npnpm-lock.yaml is excluded by !**/pnpm-lock.yaml')).toBe('Review was skipped as selected files did not have any reviewable changes');
     const now = Date.UTC(2026, 9, 15, 0, 30);
     expect(verdictsFrom([], [{ author: 'coderabbitai[bot]', body: crSkipPage, anchor: 'issuecomment-1', createdAt: new Date(now - 3_600_000).toISOString() }], 'aaa', [], now)[0]).toMatchObject({ verdict: 'failed', reason: 'Auto reviews are disabled on base/target branches other than the default branch', sourceId: 'issuecomment-1' });
+  });
+
+  it('ends a run left under way by the bot giving up on it (geld#103)', () => {
+    // A merge mid-run: CodeRabbit rewrote its summary into a failure notice over the last walkthrough, and its commit
+    // status stayed "pending · Review in progress" for good.
+    const failRaw =
+      '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n\n> [!CAUTION]\n> ## Review failed\n> \n> The pull request is closed.\n\n<!-- end of auto-generated comment: failure by coderabbit.ai -->\n\n<!-- walkthrough_start -->\n\nNo actionable comments were generated in the recent review.\n\n<details><summary>Recent review info</summary>Run configuration</details>';
+    const failPage = 'Caution\nReview failed\nThe pull request is closed.\nNo actionable comments were generated in the recent review.\nRecent review info\nRun configuration';
+    expect(refusalReason(failRaw)).toBe('The pull request is closed');
+    expect(refusalReason(failPage)).toBe('The pull request is closed');
+    expect(refusalReason('Review failed login attempts are not rate limited, so the endpoint can be brute forced.')).toBeNull();
+    const pending = { name: 'CodeRabbit', status: 'in_progress' as const, conclusion: null, sha: 'head' };
+    const comments = [
+      { author: 'coderabbitai[bot]', body: failPage, anchor: 'issuecomment-1', createdAt: '2026-10-26T20:42:12Z', editedAt: '2026-10-26T21:59:47Z' },
+      { author: 'coderabbitai[bot]', body: 'Actionable comments posted: 1', anchor: 'pullrequestreview-1', createdAt: '2026-10-26T20:53:13Z' },
+      { author: 'coderabbitai[bot]', body: 'Refit the box on scroll.', anchor: 'discussion_r1', createdAt: '2026-10-26T20:53:12Z', resolved: true },
+    ];
+    const now = Date.parse('2026-10-26T22:10:00Z');
+    // Merged: the run cannot go on, and the last real review (its one finding, resolved) stands.
+    // Its commit is not the refused check's (the run there was refused), and the comments do not say which it is: behind.
+    expect(verdictsFrom([pending], comments, 'head', [], now, { closed: true })[0]).toMatchObject({ id: 'coderabbit', verdict: 'findings', count: 0, runJudged: true, reviewedSha: UNKNOWN_SHA });
+    // Still open and the status carries no start: an old refusal must not end a run that may be new.
+    expect(verdictsFrom([pending], comments, 'head', [], now)[0]?.verdict).toBe('running');
+    // A known start: a refusal after it ends that run, one before it does not.
+    expect(verdictsFrom([{ ...pending, startedAt: '2026-10-26T21:51:59Z' }], comments, 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 0, reviewedSha: UNKNOWN_SHA });
+    expect(verdictsFrom([{ ...pending, startedAt: '2026-10-26T22:05:00Z' }], comments, 'head', [], now)[0]?.verdict).toBe('running');
+    // A bot that never reviewed here reads skipped, with its reason.
+    expect(verdictsFrom([pending], [comments[0]!], 'head', [], now, { closed: true })[0]).toMatchObject({ verdict: 'failed', reason: 'The pull request is closed', reviewedSha: 'head' });
+  });
+
+  it("reads CodeRabbit's answer to a command as no review (geld#68)", () => {
+    const finishedRaw =
+      '<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated reply by CodeRabbit -->\n<details>\n<summary>✅ Action performed</summary>\n<dl>\n<dd>\n\nReview finished.\n\n> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.\n\n</dd>\n</dl>\n</details>';
+    const finishedPage = '✅ Action performed\nReview finished.\nNote: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.';
+    const triggeredPage = '✅ Action performed\nReview triggered.\nNote: CodeRabbit is an incremental review system and does not re-review already reviewed commits.';
+    expect(commandReply(finishedRaw)).toBe('done');
+    expect(commandReply(finishedPage)).toBe('done');
+    expect(commandReply(triggeredPage)).toBe('started');
+    expect(isStatusLineComment(triggeredPage)).toBe(true);
+    expect(commandReply('Actionable comments posted: 1')).toBeNull();
+    const before = [
+      { author: 'coderabbitai[bot]', body: 'Actionable comments posted: 1', anchor: 'pullrequestreview-1', createdAt: '2026-10-22T22:49:37Z' },
+      { author: 'coderabbitai[bot]', body: 'Guard the empty list.', anchor: 'discussion_r1', createdAt: '2026-10-22T22:49:36Z', resolved: true },
+      { author: 'brandonmcconnell', body: '@coderabbitai review', anchor: 'issuecomment-1', createdAt: '2026-10-26T04:57:04Z' },
+    ];
+    const status = (state: 'in_progress' | 'completed') => ({ name: 'CodeRabbit', status: state, conclusion: state === 'completed' ? ('success' as const) : null, sha: 'head' });
+    const now = Date.parse('2026-10-26T22:00:00Z');
+    // Nothing new to review: the earlier run stands whole, its one finding resolved, not that finding's count.
+    const finished = { author: 'coderabbitai[bot]', body: finishedPage, anchor: 'issuecomment-2', createdAt: '2026-10-26T04:57:10Z', editedAt: '2026-10-26T05:03:14Z' };
+    expect(verdictsFrom([status('completed')], [...before, finished], 'head', [], now)[0]).toMatchObject({ id: 'coderabbit', verdict: 'findings', count: 0, sourceId: 'discussion_r1' });
+    // The check the request started, dated (the Action dates commit statuses): it began moments after the reply was
+    // posted and closed green when the reply turned "finished". The run before stands, and the green check does not
+    // turn it into "clean" once the report's grace runs out, whether or not the reply's rewrite is known yet.
+    const dated = { ...status('completed'), startedAt: '2026-10-26T04:57:14Z', completedAt: '2026-10-26T05:03:12Z' };
+    const unedited = { author: finished.author, body: finished.body, anchor: finished.anchor, createdAt: finished.createdAt };
+    for (const reply of [finished, unedited]) {
+      expect(verdictsFrom([dated], [...before, reply], 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 0, runJudged: true });
+      const open = before.map((comment) => (comment.anchor === 'discussion_r1' ? { ...comment, resolved: false } : comment));
+      expect(verdictsFrom([dated], [...open, reply], 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 1 });
+    }
+    // With the answer's rewrite known, that is the run's finish: a check begun 30 s after it (a review started on the
+    // bot's own site, no trigger comment) that closes green with no report is the newer, clean run.
+    const after = { ...dated, startedAt: '2026-10-26T05:03:44Z', completedAt: '2026-10-26T05:06:00Z' };
+    expect(verdictsFrom([after], [...before, finished], 'head', [], now)[0]).toMatchObject({ verdict: 'clean', runJudged: true });
+    // Still under way, the same check leaves the restored run standing rather than reading running until it closes; one
+    // begun after the answer's finish is a newer run, running.
+    const underWay = { ...status('in_progress'), startedAt: dated.startedAt };
+    expect(verdictsFrom([underWay], [...before, finished], 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 0 });
+    expect(verdictsFrom([underWay], [...before, unedited], 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 0 });
+    expect(verdictsFrom([{ ...underWay, startedAt: '2026-10-26T05:03:44Z' }], [...before, finished], 'head', [], now)[0]?.verdict).toBe('running');
+    // A first request, no earlier review: the check that ran for it is all there is, and its green or its "in progress"
+    // would claim a review the reply says did not happen. No word, opening the reply.
+    const firstOnly = [before[2]!, finished];
+    expect(verdictsFrom([dated], firstOnly, 'head', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-2', runJudged: true });
+    expect(verdictsFrom([underWay], firstOnly, 'head', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-2' });
+    // The Action dates a commit status by its finish alone: a first request's green status with no start still claims
+    // no review, and one finished before the request is not this request's.
+    const statusOnlyFinish = { ...status('completed'), completedAt: '2026-10-26T05:03:12Z' };
+    expect(verdictsFrom([statusOnlyFinish], firstOnly, 'head', [], now)[0]).toMatchObject({ verdict: 'unknown', sourceId: 'issuecomment-2', runJudged: true });
+    expect(verdictsFrom([{ ...statusOnlyFinish, completedAt: '2026-10-26T04:00:00Z' }], firstOnly, 'head', [], now)[0]?.verdict).toBe('clean');
+    // A later run that failed and posted nothing, hours after the answer, is its own: never hidden behind the old reply.
+    const laterFailure = { ...status('completed'), conclusion: 'failure' as const, completedAt: '2026-10-26T09:00:00Z' };
+    expect(verdictsFrom([laterFailure], firstOnly, 'head', [], now)[0]).toMatchObject({ verdict: 'failed' });
+    // With no time at all (the page's commit statuses), only a green check is taken for the answered run.
+    expect(verdictsFrom([status('completed')], firstOnly, 'head', [], now)[0]).toMatchObject({ verdict: 'unknown' });
+    expect(verdictsFrom([{ ...status('completed'), conclusion: 'failure' as const }], firstOnly, 'head', [], now)[0]?.verdict).toBe('failed');
+    // The run a still-open check left standing is judged, so an Action summary saved while the check ran gives way to it.
+    expect(verdictsFrom([underWay], [...before, finished], 'head', [], now)[0]).toMatchObject({ verdict: 'findings', count: 0, runJudged: true });
+    // A check begun hours after the answer is a newer run, judged on its own.
+    const later = { ...dated, startedAt: '2026-10-26T09:00:00Z', completedAt: '2026-10-26T09:05:00Z' };
+    expect(verdictsFrom([later], [...before, finished], 'head', [], now)[0]).toMatchObject({ verdict: 'clean', runJudged: true });
+    // While it still says "Review triggered", the review is under way.
+    const triggered = { author: finished.author, body: triggeredPage, anchor: finished.anchor, createdAt: finished.createdAt };
+    expect(verdictsFrom([status('in_progress')], [...before, triggered], 'head', [], Date.parse('2026-10-26T04:58:00Z'))[0]?.verdict).toBe('running');
   });
 
   it('does not mistake a review, a status line or a question for a refusal', () => {
