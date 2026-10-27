@@ -1291,7 +1291,7 @@ async function main(): Promise<void> {
   /** A pattern box holding text the reader has not saved: a rebuild would replace it with the saved patterns. */
   function hasUnsavedPatterns(): boolean {
     return Array.from(document.querySelectorAll<HTMLTextAreaElement>('.options__categories .options__editor textarea')).some(
-      (textarea) => parsePatternList(textarea.value).join('\n') !== (textarea.dataset.saved ?? textarea.value),
+      (textarea) => parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? textarea.value).join('\n'),
     );
   }
   /**
