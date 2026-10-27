@@ -1303,7 +1303,7 @@ async function main(): Promise<void> {
   function hasUnsavedEdits(): boolean {
     const lists = '.options__categories';
     const patterns = Array.from(document.querySelectorAll<HTMLTextAreaElement>(`${lists} .options__editor textarea`)).some(
-      (textarea) => parsePatternList(textarea.value).join('\n') !== (textarea.dataset.saved ?? textarea.value),
+      (textarea) => parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? textarea.value).join('\n'),
     );
     const fields = Array.from(document.querySelectorAll<HTMLInputElement>(`${lists} .options__custom-editor input[data-saved]`)).some((input) => input.value !== input.dataset.saved);
     return patterns || fields || document.querySelector(`${lists} [data-unsaved], ${lists} [data-draft]`) !== null;
