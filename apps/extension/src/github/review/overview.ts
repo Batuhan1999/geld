@@ -473,7 +473,7 @@ function unique<T>(values: readonly T[]): T[] {
 
 type Crawled = ReturnType<typeof crawlConversation>;
 
-function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: string, generatedAt: string, partial: boolean): GeldPrMeta {
+function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: string, generatedAt: string, partial: boolean, threadsRead: boolean): GeldPrMeta {
   const comments = crawled.comments.map((entry) => entry.comment);
   const items = clusterComments(comments, settings.reviewBots);
   // The head's check rows, as the Action would read them from the API: a bot whose run finished green and that
@@ -507,7 +507,7 @@ function buildFromComments(crawled: Crawled, settings: GeldSettings, headSha: st
     headSha,
     settings.reviewBots,
     Date.now(),
-    { partial, closed: pullRequestClosed() },
+    { partial, closed: pullRequestClosed(), complete: threadsRead },
   );
   return {
     v: 1,
@@ -962,6 +962,11 @@ function resetFragments(): void {
   fetchedFragments = new Map();
   fragmentsInFlight = new Set();
   failedFragments = new Map();
+}
+
+/** Whether `src` has been read: its fetched markup stands in the page (a failed or skipped fetch has none). */
+function fragmentRead(src: string): boolean {
+  return fetchedFragments.get(src)?.some((node) => node.isConnected) === true;
 }
 
 /** Whether `src` is in the page right now: fetched and still standing, in flight, or failed too recently to try again. */
@@ -2732,7 +2737,11 @@ function applyReviewOverviewPass(settings: GeldSettings, paths?: readonly string
   // open thread is never deferred — GitHub minimizes only reviews whose threads are all resolved — so a thread the
   // crawl cannot see is a resolved one, or one past that fold).
   const complete = !partial && !hasLoadMore();
-  const composed = phase('cluster', () => composeMeta(found, buildFromComments(crawledDom, settings, headSha, visit.generatedAt, partial), complete));
+  // And every thread's comments too: a resolved thread's stay behind its fragment until fetched, which the full timeline,
+  // the fetch limit or a failed fetch leave unread, so a bot's resolved thread may be there unseen. Coverage is what the
+  // page holds (each fragment's fetched markup standing in it), not what is still worth asking for.
+  const threadsRead = complete && deferredFragments().every(({ src }) => fragmentRead(src));
+  const composed = phase('cluster', () => composeMeta(found, buildFromComments(crawledDom, settings, headSha, visit.generatedAt, partial, threadsRead), complete));
   // Then the threads, now that items exist: whether the replies say a thread is done.
   const bodies = new Map(crawledDom.comments.map((entry) => [entry.comment.anchor, { author: entry.author.login, body: entry.comment.body }] as const));
   const threads: ThreadToClassify[] = composed.meta.items

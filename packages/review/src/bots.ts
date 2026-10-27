@@ -1069,6 +1069,11 @@ export interface VerdictOptions {
    * passed as a check the reader can no longer see.
    */
   readonly closed?: boolean;
+  /**
+   * Every thread on the pull request has been read: nothing behind "Load more", no deferred thread left unfetched. A
+   * bot's silence in threads is then evidence (`postedThreads`); with this unset it is not, whatever `partial` says.
+   */
+  readonly complete?: boolean;
 }
 
 export function verdictsFrom(
@@ -1090,6 +1095,8 @@ export function verdictsFrom(
   const checkStartedAt = new Map<string, number>();
   /** When each bot's check finished (epoch ms), when known: places the run only when its start is unknown (a commit status). */
   const checkFinishedAt = new Map<string, number>();
+  /** Bots that have posted a review thread here, resolved or not. */
+  const postedThreads = new Set<string>();
   /** Bots whose check was skipped: a run the bot did not make. */
   const checkSkipped = new Set<string>();
   /**
@@ -1228,6 +1235,7 @@ export function verdictsFrom(
     if (id === null) continue;
     if (comment.resolved !== undefined) {
       // The run the bot announced has reported: its findings are these threads.
+      postedThreads.add(id);
       reported(id, comment);
       statusOnly.delete(id);
       runsBeforeAsk.delete(id);
@@ -1313,6 +1321,21 @@ export function verdictsFrom(
     }
     const verdict = parsed.clean ? 'clean' : 'findings';
     byId.set(id, withOptionalCount({ id, login, verdict, reviewedSha: headSha, sourceId: comment.anchor }, parsed));
+  }
+  // A neutral that means findings (Bugbot) is findings only from a bot that has posted them: Bugbot posts every finding
+  // as a review thread, and also concludes neutral when it skips a commit whose patch matches its last review ("Bugbot
+  // skipped this commit because its changes match the last review", mint#13635), which read "findings" with nothing to
+  // open. With no thread from it on the whole timeline the neutral is that last review standing, which found nothing.
+  // Only when every thread has been read (`complete`): behind a "Load more" or an unfetched fragment may be its threads.
+  // The check's own verdict is corrected whatever comment the record came from, so a later pass judging by the check
+  // (a finished run with no report since) does not bring "findings" back over an earlier clean summary.
+  if (options.complete === true) {
+    for (const [id, verdict] of checkVerdict) {
+      if (verdict !== 'findings' || postedThreads.has(id)) continue;
+      checkVerdict.set(id, 'clean');
+      const record = byId.get(id);
+      if (record !== undefined && record.sourceId === undefined) byId.set(id, { ...record, verdict: 'clean' });
+    }
   }
   // A check left under way by a run the bot gave up on: CodeRabbit rewrites its summary into "Review failed · The pull
   // request is closed" when a merge lands mid-run and never closes its commit status (geld#103), so the check alone

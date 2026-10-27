@@ -19844,6 +19844,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const checkVerdict = /* @__PURE__ */ new Map();
   const checkStartedAt = /* @__PURE__ */ new Map();
   const checkFinishedAt = /* @__PURE__ */ new Map();
+  const postedThreads = /* @__PURE__ */ new Set();
   const checkSkipped = /* @__PURE__ */ new Set();
   const shaOver = (existing) => checkSkipped.has(existing.id) && existing.verdict === "failed" && existing.reason === "Check skipped" ? UNKNOWN_SHA : existing.reviewedSha;
   for (const check2 of checks) {
@@ -19925,6 +19926,7 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     }
     if (id === null) continue;
     if (comment.resolved !== void 0) {
+      postedThreads.add(id);
       reported(id, comment);
       statusOnly.delete(id);
       runsBeforeAsk.delete(id);
@@ -19996,6 +19998,14 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
     }
     const verdict = parsed.clean ? "clean" : "findings";
     byId.set(id, withOptionalCount({ id, login, verdict, reviewedSha: headSha, sourceId: comment.anchor }, parsed));
+  }
+  if (options.complete === true) {
+    for (const [id, verdict] of checkVerdict) {
+      if (verdict !== "findings" || postedThreads.has(id)) continue;
+      checkVerdict.set(id, "clean");
+      const record3 = byId.get(id);
+      if (record3 !== void 0 && record3.sourceId === void 0) byId.set(id, { ...record3, verdict: "clean" });
+    }
   }
   for (const [id, verdict] of checkVerdict) {
     const refused = refusedAt.get(id);
@@ -21411,7 +21421,7 @@ function buildMeta(pr, options) {
     if (!Number.isNaN(a.at) && !Number.isNaN(b.at) && a.at !== b.at) return a.at - b.at;
     return a.rank - b.rank;
   }).map((entry2) => entry2.comment);
-  const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now());
+  const bots = verdictsFrom(pr.checks, botComments, pr.headSha, extra, Date.parse(options.generatedAt) || Date.now(), { complete: true });
   const previews = pr.comments.flatMap((comment) => parsePreviews(previewDocFromMarkdown(comment.author, `issuecomment-${comment.databaseId}`, comment.body, comment.createdAt)));
   const meta3 = {
     v: META_VERSION,
