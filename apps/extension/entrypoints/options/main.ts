@@ -275,7 +275,7 @@ async function main(): Promise<void> {
     const save = el('button', 'geld-button geld-button--primary geld-button--small', [copy.saveLabel]);
     save.type = 'button';
     // Against what was saved last, not what the card was built with: a save keeps this editor on the page.
-    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== (textarea.dataset.saved ?? '') ? 'Unsaved changes' : '', 'neutral'));
+    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? '').join('\n') ? 'Unsaved changes' : '', 'neutral'));
     save.addEventListener('click', async () => {
       const cleaned = parsePatternList(textarea.value);
       const problem = validatePatterns(cleaned);
