@@ -263,6 +263,8 @@ async function main(): Promise<void> {
     textarea.placeholder = copy.placeholder;
     textarea.spellcheck = false;
     textarea.value = lines.join('\n');
+    // What is saved, so a rebuild caught up later (`catchUpRender`) never replaces text the reader has not saved.
+    textarea.dataset.saved = lines.join('\n');
     textarea.setAttribute('aria-label', copy.label);
     const syntax = el(
       'ul',
@@ -286,6 +288,7 @@ async function main(): Promise<void> {
         return;
       }
       textarea.value = cleaned.join('\n');
+      textarea.dataset.saved = textarea.value;
       status(`Saved ${cleaned.length} line${cleaned.length === 1 ? '' : 's'}`, 'success');
     });
     const statusNode = el('span', 'geld-status');
@@ -1285,14 +1288,32 @@ async function main(): Promise<void> {
     if (document.activeElement !== hostsArea) hostsArea.value = next.enterpriseHosts.join('\n');
     runTester();
   });
-  // Catch up on a skipped rebuild once focus lands outside the category lists.
-  // Not inside them: focus moves on mousedown, so rebuilding then would pull
-  // the control being clicked (another card's switch or Save) out from under the click.
-  document.addEventListener('focusin', (event) => {
-    if (!renderDeferred) return;
-    if (event.target instanceof Element && event.target.closest('.options__categories') !== null) return;
+  /** A pattern box holding text the reader has not saved: a rebuild would replace it with the saved patterns. */
+  function hasUnsavedPatterns(): boolean {
+    return Array.from(document.querySelectorAll<HTMLTextAreaElement>('.options__categories .options__editor textarea')).some(
+      (textarea) => parsePatternList(textarea.value).join('\n') !== (textarea.dataset.saved ?? textarea.value),
+    );
+  }
+  /**
+   * Catch up on a skipped rebuild once focus is outside the category lists and nothing there is unsaved. Not with
+   * focus inside them: focus moves on mousedown, so rebuilding then would pull the control being clicked (another
+   * card's switch or Save) out from under the click. Unsaved text waits until it is saved or put back.
+   */
+  function catchUpRender(): void {
+    if (!renderDeferred || isEditingPatterns() || hasUnsavedPatterns()) return;
+    if ((document.activeElement?.closest('.options__categories') ?? null) !== null) return;
     lastSignature = categorySignature(settings);
     renderAll();
+  }
+  document.addEventListener('focusin', (event) => {
+    if (event.target instanceof Element && event.target.closest('.options__categories') !== null) return;
+    catchUpRender();
+  });
+  // Focus leaving for no element (a click on the page's background fires no focusin): catch up after that click has
+  // run, so a rebuild never removes what it landed on.
+  document.addEventListener('focusout', (event) => {
+    if (!renderDeferred || event.relatedTarget !== null) return;
+    document.addEventListener('click', () => window.setTimeout(catchUpRender, 0), { once: true });
   });
 }
 
