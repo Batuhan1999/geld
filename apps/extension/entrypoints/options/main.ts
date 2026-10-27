@@ -1257,7 +1257,7 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (isEditingPatterns()) renderDeferred = true;
+    if (isEditingPatterns() || hasUnsavedPatterns()) renderDeferred = true;
     else renderAll();
     runTester();
   }
@@ -1276,7 +1276,7 @@ async function main(): Promise<void> {
     const signature = categorySignature(next);
     // Rebuilding while someone types in a pattern box (or has just clicked its Save) would eat their input or the Saved status.
     if (signature !== lastSignature) {
-      if (isEditingPatterns()) renderDeferred = true;
+      if (isEditingPatterns() || hasUnsavedPatterns()) renderDeferred = true;
       else {
         lastSignature = signature;
         renderAll();
