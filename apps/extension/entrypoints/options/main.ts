@@ -1265,7 +1265,7 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (isEditingCategory()) renderDeferred = true;
+    if (isEditingCategory() || hasUnsavedEdits()) renderDeferred = true;
     else renderAll();
     runTester();
   }
@@ -1284,7 +1284,7 @@ async function main(): Promise<void> {
     const signature = categorySignature(next);
     // Rebuilding while someone edits a category would eat their input, draft or Saved status.
     if (signature !== lastSignature) {
-      if (isEditingCategory()) renderDeferred = true;
+      if (isEditingCategory() || hasUnsavedEdits()) renderDeferred = true;
       else {
         lastSignature = signature;
         renderAll();
