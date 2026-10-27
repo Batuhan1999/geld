@@ -19800,7 +19800,13 @@ function reviewBotIdFor(login, extraLogins) {
   if (known !== null) return known.id;
   return extraLogins.some((entry2) => entry2.toLowerCase() === login.toLowerCase()) ? `custom:${login.toLowerCase()}` : null;
 }
+function commandReply(body) {
+  const text = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/[`*_>~#]/g, "").replace(/\s+/g, " ").trim();
+  if (!/^(?:✅\s*)?actions? performed\b/i.test(text)) return null;
+  return /\breviews? triggered\b/i.test(text) ? "started" : "done";
+}
 function isStatusLineComment(body) {
+  if (commandReply(body) === "started") return true;
   const untagged = body.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ");
   const firstLine = untagged.split("\n").find((line) => line.trim() !== "") ?? "";
   if (/^\s*reviewing (?:pr|pull request) #?\d+\s*$/i.test(firstLine.replace(/[`*_>~#]/g, " ").replace(/\s+/g, " "))) return true;
@@ -19856,7 +19862,18 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
   const countedSummaries = /* @__PURE__ */ new Set();
   const lastWordBy = /* @__PURE__ */ new Map();
   const refusedAt = /* @__PURE__ */ new Map();
+  const answeredBy = /* @__PURE__ */ new Map();
   const refusedRuns = /* @__PURE__ */ new Map();
+  const afterAnswer = (record3) => {
+    const answer = answeredBy.get(record3.id);
+    if (record3.sourceId !== void 0 || answer === void 0) return record3;
+    return { id: record3.id, login: record3.login, verdict: "unknown", reviewedSha: record3.reviewedSha, ...record3.checkName === void 0 ? {} : { checkName: record3.checkName }, sourceId: answer.anchor };
+  };
+  const ranForAnswer = (id, started) => {
+    const answer = answeredBy.get(id);
+    if (answer === void 0 || started < answer.askedAt || started > (answer.finished ? answer.at : answer.at + REPORT_GRACE_MS)) return false;
+    return (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) <= answer.at;
+  };
   const reported = (id, comment) => {
     for (const at of [comment.createdAt, comment.editedAt]) {
       const time3 = at === void 0 ? NaN : Date.parse(at);
@@ -19895,6 +19912,17 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       const at = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
       const lastAt = Number.isNaN(at) ? run2?.lastAt ?? null : Math.max(at, run2?.lastAt ?? Number.NEGATIVE_INFINITY);
       threadRuns.set(id, { login: comment.author, open: open2, openAnchor, lastAnchor: comment.anchor, lastAt });
+      continue;
+    }
+    if (commandReply(comment.body) === "done") {
+      const posted = comment.createdAt === void 0 ? NaN : Date.parse(comment.createdAt);
+      const rewritten = comment.editedAt === void 0 ? NaN : Date.parse(comment.editedAt);
+      const at = Number.isNaN(rewritten) ? posted : Math.max(rewritten, Number.isNaN(posted) ? rewritten : posted);
+      if (!Number.isNaN(at)) answeredBy.set(id, { askedAt: statusOnly.get(id)?.at ?? (Number.isNaN(posted) ? at : posted), at, finished: !Number.isNaN(rewritten), anchor: comment.anchor });
+      statusOnly.delete(id);
+      const prior = runsBeforeAsk.get(id);
+      if (!threadRuns.has(id) && prior !== void 0) threadRuns.set(id, prior);
+      runsBeforeAsk.delete(id);
       continue;
     }
     const refusal = refusalReason(comment.body);
@@ -19947,6 +19975,13 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       checkVerdict.delete(id);
       refusedRuns.set(id, byId.get(id)?.reviewedSha ?? headSha);
     }
+  }
+  for (const [id, verdict] of checkVerdict) {
+    const started = checkStartedAt.get(id);
+    if (verdict !== "running" || started === void 0 || !ranForAnswer(id, started)) continue;
+    checkVerdict.delete(id);
+    const record3 = byId.get(id);
+    if (record3 !== void 0) byId.set(id, afterAnswer(record3));
   }
   for (const [id, { login, anchor: anchor2, at, own: own2, acknowledged }] of statusOnly) {
     const existing = byId.get(id);
@@ -20021,6 +20056,10 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       byId.set(bot.id, { ...existing, runJudged: true });
       continue;
     }
+    if (ranForAnswer(bot.id, started)) {
+      byId.set(bot.id, { ...afterAnswer(existing), runJudged: true });
+      continue;
+    }
     const finished = check2.completedAt === void 0 ? NaN : Date.parse(check2.completedAt);
     const awaiting = !Number.isNaN(finished) && now - finished < REPORT_GRACE_MS;
     byId.set(bot.id, {
@@ -20032,6 +20071,14 @@ function verdictsFrom(checks, comments, headSha, extraLogins = [], now = Date.no
       ...existing.sourceId === void 0 ? {} : { sourceId: existing.sourceId },
       runJudged: true
     });
+  }
+  for (const [id, answer] of answeredBy) {
+    const record3 = byId.get(id);
+    if (record3 === void 0 || (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) > answer.at) continue;
+    const started = checkStartedAt.get(id);
+    const finished = checkFinishedAt.get(id);
+    const ours = started !== void 0 ? ranForAnswer(id, started) : record3.checkName !== void 0 && checkVerdict.get(id) !== "running" && (finished !== void 0 ? finished >= answer.askedAt && finished <= answer.at + REPORT_GRACE_MS : checkVerdict.get(id) === "clean");
+    if (ours) byId.set(id, { ...afterAnswer(record3), runJudged: true });
   }
   for (const [id, refusedSha] of refusedRuns) {
     const record3 = byId.get(id);
