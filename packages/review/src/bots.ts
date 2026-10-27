@@ -584,7 +584,8 @@ export interface DerivedBotVerdict {
    * The verdict was judged against the check's known start: either a report
    * newer than it, or the check alone once the report's grace ran out. Set
    * only when `RawCheckRun.startedAt` was known; a page that opened after the
-   * check finished cannot say and leaves it unset.
+   * check finished cannot say and leaves it unset. Also set when the bot's
+   * refusal ended a check left under way (its own words judged the run).
    */
   readonly runJudged?: true;
 }
@@ -656,6 +657,11 @@ export function refusalReason(body: string): string | null {
   // for a bot that never reviewed here, as any refusal is).
   const skipNotice = /^(?:\[!important\][.\s]*|important[.\s]+)?(?:automatic\s+)?review skipped[.:]?\s+(.+?)(?:[.!?](?:\s|$)|\s+(?:please|to trigger|trigger a|⚙)|$)/i.exec(text);
   if (skipNotice?.[1] !== undefined && skipNotice[1].trim() !== '') return skipNotice[1].trim();
+  // Its failure notice, rewritten into the same summary over the last review's walkthrough: "Review failed" in a
+  // caution alert, then why ("The pull request is closed", a merge mid-run). The alert's title or the heading's own
+  // block end has to be there, so a sentence that merely opens on the words ("Review failed login attempts…") is not one.
+  const failNotice = /^(?:(?:\[!caution\][.\s]*|caution[.\s]+)review failed[.:]?|review failed[.:])\s+(.+?)(?:[.!?](?:\s|$)|$)/i.exec(text);
+  if (failNotice?.[1] !== undefined && failNotice[1].trim() !== '') return failNotice[1].trim();
   if (text.length > 400) return null;
   // "Skipping Bugbot: …", "Skipped review: …" — a skip of the run, not of something in the code under review.
   // "Macroscope skipped reviewing this pull request." names itself first; "Claude encountered an error" is a run that
@@ -885,7 +891,25 @@ function reviewBotIdFor(login: string, extraLogins: readonly string[]): string |
  * Review.", "Bugbot is reviewing your changes", "Review in progress"): a
  * status line, never a verdict. Short, one sentence, and shaped like one.
  */
+/**
+ * CodeRabbit's answer to a command (`@coderabbitai review`, `resume`): "✅ Action performed" in a disclosure, then what
+ * it did, edited in place from "Review triggered." to "Review finished." — the second with "does not re-review already
+ * reviewed commits" when there was nothing new. `started` is a run under way; `done` answers the request and reviews
+ * nothing, so the run before it stands (geld#68 read the inherited count of a resolved finding as "1 issue").
+ */
+export function commandReply(body: string): 'started' | 'done' | null {
+  const text = body
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[`*_>~#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/^(?:✅\s*)?actions? performed\b/i.test(text)) return null;
+  return /\breviews? triggered\b/i.test(text) ? 'started' : 'done';
+}
+
 export function isStatusLineComment(body: string): boolean {
+  if (commandReply(body) === 'started') return true;
   const untagged = body
     .replace(/<!--[\s\S]*?-->/g, '')
     // Qodo's "<h3>Qodo is busy working</h3>" is HTML, raw.
@@ -1083,6 +1107,40 @@ export function verdictsFrom(
    * or rewritten. Its "Starting" lines and a coding agent's conversational replies are not reports.
    */
   const lastWordBy = new Map<string, number>();
+  /** When each bot last refused, posted or rewritten: a run its check still shows under way may be the one it gave up. */
+  const refusedAt = new Map<string, number>();
+  /**
+   * Requests a bot answered with no review ("Review finished"): when it was asked, when the answer was last written, and
+   * whether that time is its rewrite (the run's finish) or only its first posting. A check that ran for that request ends
+   * with nothing new, so the run the request set aside stands over its conclusion.
+   */
+  const answeredBy = new Map<string, { readonly askedAt: number; readonly at: number; readonly finished: boolean; readonly anchor: string }>();
+  /**
+   * Bots whose running check a refusal ended, with the commit that check ran on: their verdict is judged, as one read
+   * against a finished check is, and an earlier review standing in it is not of that commit.
+   */
+  const refusedRuns = new Map<string, string>();
+  /**
+   * Whether a check begun at `started` is the run of a request the bot answered with "Review finished": begun after the
+   * request and before the answer's rewrite (the run's finish), or, with that rewrite not known yet, within the report's
+   * grace of the answer's first posting, since the bot posts the answer moments before it starts the check; and the bot
+   * has voted nothing since. A check begun after that is a newer run (one started on the bot's own site, say).
+   */
+  /**
+   * What an answered request leaves: the run it set aside, or, for a bot with none (a summary, a review, threads), no
+   * word at all — the check that ran for it is all its record holds, and "clean" or "running" from that check would
+   * claim a review the reply says did not happen. It opens the reply.
+   */
+  const afterAnswer = (record: DerivedBotVerdict): DerivedBotVerdict => {
+    const answer = answeredBy.get(record.id);
+    if (record.sourceId !== undefined || answer === undefined) return record;
+    return { id: record.id, login: record.login, verdict: 'unknown', reviewedSha: record.reviewedSha, ...(record.checkName === undefined ? {} : { checkName: record.checkName }), sourceId: answer.anchor };
+  };
+  const ranForAnswer = (id: string, started: number): boolean => {
+    const answer = answeredBy.get(id);
+    if (answer === undefined || started < answer.askedAt || started > (answer.finished ? answer.at : answer.at + REPORT_GRACE_MS)) return false;
+    return (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) <= answer.at;
+  };
   const reported = (id: string, comment: BotComment): void => {
     for (const at of [comment.createdAt, comment.editedAt]) {
       const time = at === undefined ? NaN : Date.parse(at);
@@ -1132,9 +1190,25 @@ export function verdictsFrom(
       threadRuns.set(id, { login: comment.author, open, openAnchor, lastAnchor: comment.anchor, lastAt });
       continue;
     }
+    if (commandReply(comment.body) === 'done') {
+      // The request is answered with no review: the run it set aside is still the bot's last, threads and all.
+      const posted = comment.createdAt === undefined ? NaN : Date.parse(comment.createdAt);
+      const rewritten = comment.editedAt === undefined ? NaN : Date.parse(comment.editedAt);
+      const at = Number.isNaN(rewritten) ? posted : Math.max(rewritten, Number.isNaN(posted) ? rewritten : posted);
+      if (!Number.isNaN(at)) answeredBy.set(id, { askedAt: statusOnly.get(id)?.at ?? (Number.isNaN(posted) ? at : posted), at, finished: !Number.isNaN(rewritten), anchor: comment.anchor });
+      statusOnly.delete(id);
+      const prior = runsBeforeAsk.get(id);
+      if (!threadRuns.has(id) && prior !== undefined) threadRuns.set(id, prior);
+      runsBeforeAsk.delete(id);
+      continue;
+    }
     const refusal = refusalReason(comment.body);
     if (refusal !== null) {
       reported(id, comment);
+      for (const at of [comment.createdAt, comment.editedAt]) {
+        const time = at === undefined ? NaN : Date.parse(at);
+        if (!Number.isNaN(time) && time > (refusedAt.get(id) ?? Number.NEGATIVE_INFINITY)) refusedAt.set(id, time);
+      }
       // The bot said it would not review: the run that was asked for is answered (not running), and refused. A
       // review the bot did make earlier still stands — the chip shows the last real run, and `reviewedSha` says
       // whether it is behind the head — so the refusal is the verdict only for a bot that never reviewed here.
@@ -1178,6 +1252,29 @@ export function verdictsFrom(
     }
     const verdict = parsed.clean ? 'clean' : 'findings';
     byId.set(id, withOptionalCount({ id, login, verdict, reviewedSha: headSha, sourceId: comment.anchor }, parsed));
+  }
+  // A check left under way by a run the bot gave up on: CodeRabbit rewrites its summary into "Review failed · The pull
+  // request is closed" when a merge lands mid-run and never closes its commit status (geld#103), so the check alone
+  // would read running for good. The refusal must be the bot's latest word and newer than the check's start; a commit
+  // status carries no start, and then only a closed pull request, where no new run can begin, lets it end the run.
+  for (const [id, verdict] of checkVerdict) {
+    const refused = refusedAt.get(id);
+    if (verdict !== 'running' || refused === undefined || refused < (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY)) continue;
+    const started = checkStartedAt.get(id);
+    if (started !== undefined ? refused > started : options.closed === true) {
+      checkVerdict.delete(id);
+      refusedRuns.set(id, byId.get(id)?.reviewedSha ?? headSha);
+    }
+  }
+  // A check still under way for a request the bot answered with "Review finished": nothing new is coming, so the run
+  // the request set aside stands while the check closes, rather than reading running for as long as it stays open. Only
+  // with a start to place it by; a check begun after the answer is a newer run and reads running as any other.
+  for (const [id, verdict] of checkVerdict) {
+    const started = checkStartedAt.get(id);
+    if (verdict !== 'running' || started === undefined || !ranForAnswer(id, started)) continue;
+    checkVerdict.delete(id);
+    const record = byId.get(id);
+    if (record !== undefined) byId.set(id, afterAnswer(record));
   }
   // A bot whose latest word is "starting" has a run under way or just finished: what it found before belongs to
   // an earlier run (those threads are items in their own right). The check says how this run ended; with no
@@ -1300,6 +1397,12 @@ export function verdictsFrom(
       byId.set(bot.id, { ...existing, runJudged: true });
       continue;
     }
+    // The run this check made was the one the bot answered with "Review finished": nothing new, so the run before it
+    // stands rather than the check's bare conclusion.
+    if (ranForAnswer(bot.id, started)) {
+      byId.set(bot.id, { ...afterAnswer(existing), runJudged: true });
+      continue;
+    }
     const finished = check.completedAt === undefined ? NaN : Date.parse(check.completedAt);
     const awaiting = !Number.isNaN(finished) && now - finished < REPORT_GRACE_MS;
     byId.set(bot.id, {
@@ -1312,9 +1415,41 @@ export function verdictsFrom(
       runJudged: true,
     });
   }
+  // Judged by the bot's own words, so a summary the Action wrote while the check still ran gives way to it
+  // (`withLiveRuns` replaces a saved "running" only with a judged verdict).
+  // Requests the bot answered with no review, settled last so no pass before can drop what they leave: the run each set
+  // aside, or no word for a bot with none, marked judged so an Action summary saved while the check ran (running) gives
+  // way to it in `withLiveRuns`. The check is the answered run when its known start falls in the answer's window, or,
+  // with no start (a commit status, which the Action dates by its finish alone), when it finished between the request
+  // and the report's grace after the answer; with no time at all, only a green one, whose "clean" is the claim to undo
+  // (a failure is never hidden behind an old reply). One still under way with no start may be a new run, and reads running.
+  for (const [id, answer] of answeredBy) {
+    const record = byId.get(id);
+    if (record === undefined || (lastWordBy.get(id) ?? Number.NEGATIVE_INFINITY) > answer.at) continue;
+    const started = checkStartedAt.get(id);
+    const finished = checkFinishedAt.get(id);
+    const ours =
+      started !== undefined
+        ? ranForAnswer(id, started)
+        : record.checkName !== undefined &&
+          checkVerdict.get(id) !== 'running' &&
+          (finished !== undefined ? finished >= answer.askedAt && finished <= answer.at + REPORT_GRACE_MS : checkVerdict.get(id) === 'clean');
+    if (ours) byId.set(id, { ...afterAnswer(record), runJudged: true });
+  }
+  // An earlier review standing in a refused run took the refused check's commit with the check's record: it is not of
+  // that commit (the run there was refused), and which one it is the comments do not say, so it reads as behind.
+  for (const [id, refusedSha] of refusedRuns) {
+    const record = byId.get(id);
+    if (record === undefined || record.verdict === 'running') continue;
+    const refusal = record.verdict === 'failed' && record.reason !== undefined;
+    byId.set(id, { ...record, runJudged: true, ...(refusal || record.reviewedSha !== refusedSha ? {} : { reviewedSha: UNKNOWN_SHA }) });
+  }
 
   return [...byId.values()];
 }
+
+/** A commit no head matches (`mergeWithCrawler` reads it as no head at all): a verdict whose commit is not known. */
+export const UNKNOWN_SHA = '0'.repeat(40);
 
 /**
  * How long after a bot's check finishes its report (a summary posted or
