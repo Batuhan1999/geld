@@ -319,6 +319,8 @@ interface Mounted {
   /** What the merge box last said the reader may do, for {@link mergeFor}; null until read. */
   mergeActions: MergeActions | null;
   mergeFor: string | null;
+  /** A merge box read is in flight: the status menu says "Loading options…" rather than nothing. */
+  mergeLoading: boolean;
   /** Each read of the merge box takes the next number: an answer from a read a newer one replaced is dropped, whatever order they land in. */
   mergeRead: number;
   /** The header's state label when the merge box was last read for it: a draft converted or marked ready, a merge or close in place, changes it. */
@@ -535,7 +537,8 @@ export function removeQuickReview(): void {
   removeStatusPills();
   if (mounted === null) return;
   closePanel();
-  closeStatusMenu(mounted);
+  // Not settled: a placeholder menu's close would put back the pills this teardown has just removed.
+  closeStatusMenu(mounted, false);
   window.clearTimeout(mounted.submittedTimer);
   window.clearTimeout(mounted.mergeTimer);
   hideSnapshot(mounted);
@@ -626,6 +629,7 @@ function createControls(pullPath: string, context: QuickReviewContext): Mounted 
     snapshotTimer: 0,
     mergeActions: null,
     mergeFor: null,
+    mergeLoading: false,
     mergeRead: 0,
     stateWords: null,
     mergeTimer: 0,
@@ -861,10 +865,13 @@ async function loadMergeActions(state: Mounted): Promise<MergeActions | null> {
     sidebar = reviewers;
     showReviewers();
   });
+  state.mergeLoading = true;
   const actions = await readMergeActions(pullPath);
   if (!current()) return null;
+  state.mergeLoading = false;
   if (actions !== null) state.mergeActions = actions;
   showStatus(state);
+  refreshPlaceholderMenu(state);
   showReviewers();
   state.mergeTimer = window.setTimeout(() => {
     if (mounted === state && !document.hidden) void loadMergeActions(state);
@@ -1103,9 +1110,11 @@ function showStatus(state: Mounted): void {
   // A merged pull request has nothing to switch to whoever reads it: it says nothing about the reader's rights.
   if (options !== null && repo !== null && actions !== null && statusOf(actions.box) !== 'merged') rememberStatusHint(repo, options.length > 0);
   const on = options !== null ? options.length > 0 : repo !== null && statusHint(repo) === true && !/merged/i.test(pullRequestStateWords());
+  // A menu open on its placeholder keeps its pill: it says "No options available" where it stands, and the pill goes when it closes.
+  const holding = state.statusMenu?.dataset.placeholder !== undefined && state.statusOpener !== null && state.pills.includes(state.statusOpener);
   // While a merge is out the pills stay, whatever a reading meanwhile says (one may already read it merged): its
   // success dresses them as merged until the reload.
-  state.pills = syncStatusPills(on || (state.sending && state.pills.length > 0), openFromPill);
+  state.pills = syncStatusPills(on || holding || (state.sending && state.pills.length > 0), openFromPill);
   showInstantMerge(state);
   if (state.statusMenu !== null && (state.statusOpener === null || !state.pills.includes(state.statusOpener))) closeStatusMenu(state);
 }
@@ -1218,10 +1227,10 @@ function toggleStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
     openStatusMenu(state, pill);
     return;
   }
-  // Opened on the hint before the merge box answered: the menu waits for it.
-  void loadMergeActions(state).then(() => {
-    if (mounted === state && state.statusOpener === pill && pill.isConnected && state.statusMenu === null) openStatusMenu(state, pill);
-  });
+  // Opened before the merge box answered (on the hint, or after a read that failed): the read starts first, so the menu
+  // says it is loading, and the options take its place when they land.
+  void loadMergeActions(state);
+  openStatusMenu(state, pill);
 }
 
 /**
@@ -1253,8 +1262,13 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   const actions = state.mergeActions;
   const groups = stackMenuOf(actions);
   const options = actions === null || groups !== null ? [] : flatStatusOptions(actions);
-  if (options.length === 0 && (groups === null || groups.length === 0)) return;
-  const menu = createElement('div', { class: 'geld-quick-review__menu geld-quick-review__status-menu', [OWN_UI_ATTRIBUTE]: '', role: 'menu', 'aria-label': 'Change status' });
+  const menu = createElement('div', { class: 'geld-quick-review__menu geld-quick-review__status-menu', [OWN_UI_ATTRIBUTE]: '', role: 'menu', 'aria-label': 'Change status', tabindex: '-1' });
+  // Nothing to offer still opens, and says why, rather than a click that seems to do nothing.
+  if (options.length === 0 && (groups === null || groups.length === 0)) {
+    const words = actions !== null ? 'No options available' : state.mergeLoading || state.mergeFor === null ? 'Loading options…' : 'The options could not be read. Try again shortly.';
+    menu.dataset.placeholder = actions === null ? 'loading' : 'empty';
+    menu.append(createElement('div', { class: 'geld-quick-review__menu-item geld-quick-review__menu-empty', role: 'menuitem', 'aria-disabled': 'true' }, [createElement('span', { class: 'geld-quick-review__menu-label' }, [words])]));
+  }
   const visual = (status: PullStatus, bypass: boolean): HTMLElement =>
     createElement('span', { class: 'geld-quick-review__menu-visual', ...(bypass ? { 'data-bypass': '' } : {}) }, [
       svgFromString(STATUS_INFO[status].icon),
@@ -1316,8 +1330,8 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
   pill.setAttribute('aria-expanded', 'true');
   document.body.append(menu);
   positionStatusMenu(state);
-  const items = (): HTMLButtonElement[] => [...menu.querySelectorAll<HTMLButtonElement>(':scope > .geld-quick-review__menu-item')];
-  items()[0]?.focus({ preventScroll: true });
+  const items = (): HTMLButtonElement[] => [...menu.querySelectorAll<HTMLButtonElement>(':scope > button.geld-quick-review__menu-item')];
+  (items()[0] ?? menu).focus({ preventScroll: true });
   menu.addEventListener(
     'keydown',
     (event) => {
@@ -1331,8 +1345,9 @@ function openStatusMenu(state: Mounted, pill: HTMLButtonElement): void {
         closeSubmenu(true);
       } else if (event.key === 'Escape') {
         event.preventDefault();
+        const label = pill.previousElementSibling;
         closeStatusMenu(state);
-        pill.focus({ preventScroll: true });
+        returnStatusFocus(state, pill, label);
       } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         const list = inSubmenu && submenu !== null ? [...submenu.querySelectorAll<HTMLButtonElement>('.geld-quick-review__menu-item')] : items();
@@ -1415,13 +1430,45 @@ function positionStatusMenu(state: Mounted): void {
   menu.style.top = `${Math.round(rect.bottom + 4)}px`;
 }
 
-function closeStatusMenu(state: Mounted): void {
+/** A menu on its placeholder line takes what the read that just finished says: the options, or why there are none. */
+function refreshPlaceholderMenu(state: Mounted): void {
+  const pill = state.statusOpener;
+  if (state.statusMenu?.dataset.placeholder === undefined || pill === null || !pill.isConnected) return;
+  closeStatusMenu(state, false);
+  openStatusMenu(state, pill);
+}
+
+const shown = (el: HTMLElement): boolean => el.closest('[hidden]') === null && (typeof el.checkVisibility !== 'function' || el.checkVisibility());
+
+/** The first control after GitHub's status label, nearest first: the author's link, in GitHub's header. */
+function controlAfter(label: Element | null): HTMLElement | null {
+  if (label === null || !label.isConnected) return null;
+  for (let at = label.parentElement; at !== null && at !== document.body; at = at.parentElement) {
+    const next = [...at.querySelectorAll<HTMLElement>('a[href], button:not([disabled])')].find((el) => (label.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 && el.closest(`[${OWN_UI_ATTRIBUTE}]`) === null && shown(el));
+    if (next !== undefined) return next;
+  }
+  return null;
+}
+
+/**
+ * Back to the pill, or, when closing took the pill away (nothing to offer), to the review group's first control, or
+ * where GitHub hides the group's place (narrow screens), the control after the status label the pill stood beside.
+ */
+function returnStatusFocus(state: Mounted, pill: HTMLButtonElement, label: Element | null): void {
+  if (pill.isConnected) return pill.focus({ preventScroll: true });
+  const group = state.root.isConnected ? state.root.querySelector<HTMLButtonElement>('button:not([hidden]):not([disabled])') : null;
+  (group !== null && shown(group) ? group : controlAfter(label))?.focus({ preventScroll: true });
+}
+
+function closeStatusMenu(state: Mounted, settle = true): void {
   if (state.statusMenu === null) return;
+  const held = state.statusMenu.dataset.placeholder !== undefined;
   state.statusMenuKeys?.abort();
   state.statusMenuKeys = null;
   state.statusMenu.remove();
   state.statusMenu = null;
   state.statusOpener?.setAttribute('aria-expanded', 'false');
+  if (held && settle) showStatus(state);
 }
 
 function chooseStatus(state: Mounted, option: StatusOption): void {
