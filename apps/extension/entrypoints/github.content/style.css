@@ -993,10 +993,11 @@ html[data-geld-quick-review] details.js-reviews-container {
   gap: 3px;
 }
 
+/* The glyphs are the buttons' own, at the buttons' size and on their line: each stands level with its counterpart. */
 .geld-quick-review__tally-part > svg {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .geld-quick-review__tally-part[data-tone='approved'] > svg {
@@ -1009,6 +1010,8 @@ html[data-geld-quick-review] details.js-reviews-container {
 
 .geld-quick-review__tally-part[data-tone='commented'] > svg {
   color: var(--fgColor-muted, #59636e);
+  /* As in its button: the bubble fills y 1 to 12 of 16, so centred by its box it reads high. */
+  transform: translateY(1px);
 }
 
 /* The snapshot card under the tally: one line per reviewer, a link to their review. */
@@ -1723,6 +1726,18 @@ button.geld-status-pill[aria-haspopup]:is(:hover, :focus-visible, [aria-expanded
   padding: 6px 8px;
 }
 
+/* The one line of a menu with nothing to offer ("No options available", "Loading options…"): words, not a control. */
+.geld-quick-review__status-menu .geld-quick-review__menu-item.geld-quick-review__menu-empty {
+  color: var(--fgColor-muted, #59636e);
+  background: transparent;
+  cursor: default;
+}
+
+/* Focused itself when it holds no control, so Escape still reaches it. */
+.geld-quick-review__status-menu:focus {
+  outline: none;
+}
+
 .geld-quick-review__status-menu .geld-quick-review__menu-visual {
   padding-top: 0;
 }
@@ -2251,6 +2266,108 @@ tr[data-geld-line='hidden'] {
   text-decoration: underline;
 }
 
+/* Test files folded to their titles (ui/test-folds.ts) ------------------------ */
+
+tr[data-geld-test-fold='hidden'] {
+  display: none !important;
+}
+
+/*
+ * One full-width row per test, of Geld's own, unshaded like GitHub's own rows: the line it starts on in GitHub's
+ * line-number type, set where the numbers above stand (test-folds.ts `alignRanges` sets the margin and font),
+ * the title, then what changed in it and the chevron at the right.
+ */
+.geld-test-row__cell {
+  padding: 0 !important;
+  border-top: 1px solid var(--borderColor-muted, var(--color-border-muted));
+  border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));
+}
+
+/* Folded tests one after another share a border, not two (test-folds.ts marks a row whose shown neighbour above is one). */
+.geld-test-row[data-joined] > .geld-test-row__cell {
+  border-top: 0;
+}
+
+.geld-test-row__toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px 0 0;
+  border: 0;
+  background: none;
+  color: var(--fgColor-default, var(--color-fg-default));
+  font: 400 13px/20px var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-test-row__toggle:hover {
+  background: var(--bgColor-muted, var(--color-canvas-subtle));
+}
+
+.geld-test-row__toggle:focus-visible {
+  outline: 2px solid var(--focus-outlineColor, var(--color-accent-fg));
+  outline-offset: -2px;
+}
+
+.geld-test-row__lines {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+  font: 12px/20px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.geld-test-row__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: 16px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-test-row__changes {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 16px;
+  font: 600 12px/20px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.geld-test-row__add {
+  color: var(--fgColor-success, var(--color-success-fg));
+}
+
+.geld-test-row__del {
+  color: var(--fgColor-danger, var(--color-danger-fg));
+}
+
+.geld-test-row__chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+}
+
+.geld-test-row__changes:empty + .geld-test-row__chevron {
+  margin-left: auto;
+}
+
+.geld-test-row__chevron .octicon {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.geld-test-row[data-open='true'] .geld-test-row__chevron .octicon {
+  transform: rotate(90deg);
+}
+
 /* Pull requests hidden by author (pr-authors.ts) ------------------------------ */
 
 [data-geld-author='hidden'] {
@@ -2371,6 +2488,46 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
    * line shifts only when the number of digits does. Inherited by everything in the panel, GitHub's loaned
    * checks list included. */
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * GitHub's "N hidden items · Load more" bar while Geld presses it itself (`data-geld-autoloading` on the root): out of
+ * sight, the reading bar standing for it. Pressed with click(), which a hidden control still takes. Back as soon as
+ * Geld stops pressing (done, or at its limit), so the reader can load the rest.
+ */
+html[data-geld-autoloading] :is(form.ajax-pagination-form, button[data-testid='load-more-timeline'], .ajax-pagination-btn, button.js-ajax-pagination-btn) {
+  display: none !important;
+}
+
+/* Geld reading the timeline: a thin accent bar over the digest's top edge, filling as it goes, gone when it is done. */
+.geld-review__reading {
+  position: absolute;
+  z-index: 3;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.geld-review__reading-fill {
+  width: calc(var(--geld-progress, 0) * 100%);
+  height: 100%;
+  background: var(--bgColor-accent-emphasis, var(--color-accent-emphasis, #0969da));
+  transition:
+    width 300ms ease-out,
+    opacity 300ms ease-out 250ms;
+}
+
+.geld-review__reading[data-done] > .geld-review__reading-fill {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .geld-review__reading-fill {
+    transition: none;
+  }
 }
 
 /* ---- summary strip ----------------------------------------------------- */
@@ -3190,36 +3347,79 @@ html[data-geld-timeline='compact'] .js-discussion:has(.geld-review) :is(.js-time
 }
 
 /*
- * The reviewers on the Reviews row, one group per verdict: the verdict's glyph
- * (the same one their lines wear below), their avatars, "2 approved". The
- * words go on narrow screens; the glyph carries the meaning.
+ * The reviewers on the Reviews row, one pill per verdict: the verdict's glyph (the same one their lines wear below),
+ * how many, their avatars. Commented and awaiting wear the neutral tint of the comment chips, approved and changes
+ * requested GitHub's success and danger colours (its tokens, so a colour-blind theme's come through). The pill is
+ * opaque, mixed over the row's own surface, so the ring between its squeezed avatars can be the pill's colour.
  */
 .geld-review__reviewers {
+  --geld-pill-tone: var(--geld-review-muted);
+  --geld-pill-bg: color-mix(in srgb, var(--geld-pill-tone) 12%, var(--geld-row-bg, var(--geld-review-bg)));
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  height: 20px;
+  padding: 0 2px 0 7px;
+  border-radius: 2em;
+  background: var(--geld-pill-bg);
+  color: var(--geld-review-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.geld-review__reviewers[data-state='approved'] {
+  --geld-pill-tone: var(--fgColor-success, var(--color-success-fg, #1a7f37));
+  color: var(--geld-pill-tone);
+}
+
+.geld-review__reviewers[data-state='changes_requested'] {
+  --geld-pill-tone: var(--fgColor-danger, var(--color-danger-fg, #d1242f));
+  color: var(--geld-pill-tone);
 }
 
 .geld-review__reviewers-glyph {
   display: inline-flex;
-  color: var(--geld-review-muted);
 }
 
 .geld-review__reviewers-glyph .octicon {
-  width: 14px;
-  height: 14px;
-}
-
-.geld-review__reviewers[data-state='approved'] .geld-review__reviewers-glyph {
-  color: var(--fgColor-success, var(--color-success-fg, #1a7f37));
-}
-
-.geld-review__reviewers[data-state='changes_requested'] .geld-review__reviewers-glyph {
-  color: var(--fgColor-danger, var(--color-danger-fg, #d1242f));
+  width: 12px;
+  height: 12px;
 }
 
 .geld-review__reviewers[data-state='awaiting'] .geld-review__reviewers-glyph {
   color: var(--fgColor-attention, var(--color-attention-fg, #bf8700));
+}
+
+/* 16px faces in a 20px pill; three at a 5px overlap make 38px, and four to six share those 38px between them. */
+.geld-review__avatars--pill {
+  margin-left: 1px;
+}
+
+.geld-review__avatars--pill .geld-review__avatar {
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+}
+
+.geld-review__avatars--pill .geld-review__avatar + .geld-review__avatar {
+  margin-left: calc(22px / var(--geld-avatar-steps, 2) - 16px);
+  box-shadow: 0 0 0 1.5px var(--geld-pill-bg);
+}
+
+/* Within the pill, so it outranks the base `.geld-review__avatar` rule that comes later in this file. */
+.geld-review__avatars--pill .geld-review__avatar--more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--geld-pill-tone) 22%, var(--geld-row-bg, var(--geld-review-bg)));
+  color: var(--geld-pill-tone);
+}
+
+.geld-review__avatars--pill .geld-review__avatar--more .octicon {
+  width: 10px;
+  height: 10px;
 }
 
 /* Every row says who and when itself; a worn header only lends its actions (react, ⋯), so open and closed read alike. */
@@ -6398,6 +6598,35 @@ a.geld-review__rerun:hover {
   line-height: 18px;
 }
 
+/* The opened pinned comment is part of the chat's own box, not a card inside it: full width and square, set off
+ * from its strip by one rule. A rounded, bordered card 12px inside the chat's border read as a second frame. */
+.geld-review__chat-context-body[data-geld-revision] {
+  gap: 0;
+  padding: 0;
+}
+
+.geld-review__chat-then {
+  padding: 12px;
+  border-width: 1px 0 0;
+  border-radius: 0;
+}
+
+.geld-review__chat-then-note {
+  padding: 6px 12px;
+}
+
+.geld-review__chat-context-body:has(> [data-geld-message][data-geld-lone]),
+.geld-review__chat-context-body :has(> [data-geld-message][data-geld-lone]) {
+  padding: 0 !important;
+}
+
+.geld-review__chat-context-body [data-geld-lone] > [data-geld-part='bubble'] {
+  border-width: 1px 0 0 !important;
+  border-style: solid !important;
+  border-color: var(--geld-review-border-muted) !important;
+  border-radius: 0 !important;
+}
+
 /* ---- rounds --------------------------------------------------------------- */
 
 .geld-review__status--progress {
@@ -7394,7 +7623,6 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   .geld-review__deploy-sum-text,
   .geld-review__push-compare > span,
   .geld-review__label-long,
-  .geld-review__reviewers-text,
   .geld-review__row .geld-review__time {
     display: none;
   }
@@ -7435,4 +7663,42 @@ html[data-geld-timeline='compact'] [data-testid='timeline-commit-row'] {
   .geld-review__ai-notice {
     flex-wrap: wrap;
   }
+}
+
+
+/* Embedded shell in workflow run blocks, without replacing GitHub's diff nodes. */
+::highlight(geld-shell-plain),
+::highlight(geld-shell-subst) {
+  color: var(--fgColor-default);
+}
+
+::highlight(geld-shell-keyword) {
+  color: var(--color-prettylights-syntax-keyword);
+}
+
+::highlight(geld-shell-built_in),
+::highlight(geld-shell-title) {
+  color: var(--color-prettylights-syntax-entity);
+}
+
+::highlight(geld-shell-literal),
+::highlight(geld-shell-number),
+::highlight(geld-shell-attr) {
+  color: var(--color-prettylights-syntax-constant);
+}
+
+::highlight(geld-shell-string) {
+  color: var(--color-prettylights-syntax-string);
+}
+
+::highlight(geld-shell-comment) {
+  color: var(--color-prettylights-syntax-comment);
+}
+
+::highlight(geld-shell-variable) {
+  color: var(--color-prettylights-syntax-variable);
+}
+
+::highlight(geld-shell-meta) {
+  color: var(--color-prettylights-syntax-comment);
 }

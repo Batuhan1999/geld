@@ -1,5 +1,6 @@
 import type { Catalog, HiddenCategory } from '@geld/core';
-import { BUNDLED_CATALOG } from '@geld/core';
+import { BUNDLED_CATALOG, CATEGORY_IDS, isAutoViewed, testSyntaxesFrom } from '@geld/core';
+import type { TestSyntax } from '@geld/core';
 import type { ChangeTotals } from '@geld/core';
 import { subtractTotals } from '@geld/core';
 import type { PathMatcher } from '@geld/core';
@@ -44,11 +45,14 @@ import { LIVE_CATCH_UP_EVENT, liveCatchUpDue } from './review/live-regions';
 import { catchUpTimeline } from './review/timeline-catchup';
 import { applyReviewOverview, onReviewBeforeMatch, onReviewHashChange, refreshReviewTimes, reviewSignature, takeReviewDeferred, teardownReviewOverview } from './review/overview';
 import { applyCommentRows, clearCommentRows } from './ui/comment-rows';
+import { applyTestFolds, clearTestFolds, forgetLinkedFold, hasHiddenLines } from './ui/test-folds';
+import { wholeFile } from './whole-file';
 import { removeHiddenSection, renderHiddenSection } from './ui/hidden-section';
 import { applyVirtualHiddenStyles, ATTR_VIRTUAL, removeVirtualHiddenStyles } from './ui/virtual-hidden';
 import { detachBreakdownTooltip, removeTooltipElement } from './ui/tooltip';
 import { categoryIconFor } from './ui/icons';
 import { expandLargeDiffs } from './large-diffs';
+import { applyWorkflowSyntax, removeWorkflowSyntax } from './workflow-syntax';
 import type { TreeSectionFile } from './ui/tree-section';
 import {
   applySidebarLayout,
@@ -264,6 +268,11 @@ function diffPageUrlFor(page: PageInfo, url: URL): string | null {
  * header counts and side panels in sync. Every operation is idempotent so it
  * can run after any DOM mutation without accumulating state in the page.
  */
+/** Presses of a hidden file's Viewed control `autoMarkViewed` makes before leaving it to the reader. */
+const AUTO_VIEWED_TRIES = 3;
+/** How long a press may take to show before it counts as ignored and is made again. */
+const AUTO_VIEWED_RETRY_MS = 1500;
+
 export class GeldController {
   private settings: GeldSettings;
   /** The active pattern catalog (bundled, or a newer fetched one); see `lib/catalog.ts`. */
@@ -297,6 +306,11 @@ export class GeldController {
   private diffFacts: ReadonlyMap<string, FileStats> | null = null;
   /** Runs of comment-only lines the user has opened ("Show") on this visit. */
   private readonly shownCommentRuns = new Set<string>();
+  /** Test folds the reader opened on this page (`anchor:fold id`). */
+  private readonly openedTestFolds = new Set<string>();
+  /** Per repository: a matcher that knows only the Tests category, on, to tell test files apart whatever is hidden. */
+  private readonly testFileMatchers = new Map<string, PathMatcher>();
+  private testSyntaxCache: { readonly lines: readonly string[]; readonly syntaxes: readonly TestSyntax[] } | null = null;
   private currentView: DiffView | null = null;
   private currentPage: PageInfo | null = null;
   private pendingReveal: PendingReveal | null = null;
@@ -358,6 +372,8 @@ export class GeldController {
   private debugScopes = false;
   /** The head SHA read from the page, per page state; the read parses GitHub's embedded JSON payload. */
   private headShaCache: { readonly stateKey: string; readonly sha: string | null } | null = null;
+  /** `stateKey|path` of every file `autoMarkViewed` has pressed or found viewed. */
+  private readonly autoViewedFiles = new Map<string, { head: string; tries: number; at: number; took: boolean }>();
   /** Stops watching for the files view's in-place refresh (head-sha.ts `watchFilesRefresh`). */
   private unwatchFilesRefresh: (() => void) | null = null;
   /** The refresh the files view is on, so an answer to an earlier ask is not taken for the latest. */
@@ -515,6 +531,7 @@ export class GeldController {
    */
   private onRepoConfigChange(): void {
     this.matchers.clear();
+    this.testFileMatchers.clear();
     this.settledHeader = null;
     this.applyHeaderNow();
     this.schedule();
@@ -579,6 +596,9 @@ export class GeldController {
     this.diffExpanded.clear();
     this.inlineTouched.clear();
     this.shownCommentRuns.clear();
+    this.openedTestFolds.clear();
+    forgetLinkedFold();
+    this.testFileMatchers.clear();
     this.pendingReveal = null;
     // A settings change reaches every tab; the hidden ones tear down and rebuild when they are next shown.
     if (this.deferWhileHidden()) {
@@ -712,6 +732,47 @@ export class GeldController {
     this.schedule();
   }
 
+  /**
+   * Hidden files of the categories the reader chose (`autoViewed`) marked as viewed through GitHub's own control,
+   * once per file per page and head commit: a file the reader marks unviewed again stays so until the next push,
+   * when GitHub resets what changed and those files are marked again. A press GitHub ignored (its React headers
+   * take clicks only once hydrated, after Geld's first passes) is pressed again a moment later, a few times at most;
+   * one GitHub took (the file read as viewed since) is never repeated. Headers without their control yet wait.
+   */
+  private autoMarkViewed(view: DiffView, stateKey: string, matcher: PathMatcher): void {
+    if (!Object.values(this.settings.autoViewed).some((on) => on === true)) return;
+    const head = this.headShaCache?.stateKey === stateKey ? (this.headShaCache.sha ?? '') : '';
+    const now = Date.now();
+    for (const entry of view.entries) {
+      if (view.filteredPaths.has(entry.path)) continue;
+      const key = `${stateKey}|${entry.path}`;
+      let press = this.autoViewedFiles.get(key);
+      // The head is often read after the first pass: that first reading fills it in, it is not a push.
+      if (press !== undefined && press.head === '' && head !== '') press.head = head;
+      // A new push re-arms the file.
+      if (press !== undefined && head !== '' && press.head !== head) press = undefined;
+      if (press?.took === true) continue;
+      if (press !== undefined && (press.tries >= AUTO_VIEWED_TRIES || now - press.at < AUTO_VIEWED_RETRY_MS)) {
+        // Taken only when GitHub shows the file viewed: a header it has unmounted for a moment shows neither control.
+        const shown = findViewedControls(entry.root);
+        if (shown.unviewed.length === 0 && shown.viewed.length > 0) press.took = true;
+        continue;
+      }
+      const category = this.classify(matcher, entry.path, entry.stats);
+      if (category === null || !isAutoViewed(this.settings, category.id)) continue;
+      const { unviewed, viewed } = findViewedControls(entry.root);
+      if (unviewed.length === 0 && viewed.length === 0) continue;
+      if (unviewed.length === 0) {
+        this.autoViewedFiles.set(key, { head: head || (press?.head ?? ''), tries: press?.tries ?? 0, at: now, took: true });
+        continue;
+      }
+      this.autoViewedFiles.set(key, { head: head || (press?.head ?? ''), tries: (press?.tries ?? 0) + 1, at: now, took: false });
+      for (const control of unviewed) activateControl(control);
+      // The check that the press was taken needs a pass after the retry wait even on a page that has gone quiet.
+      window.setTimeout(() => this.schedule(), AUTO_VIEWED_RETRY_MS + 50);
+    }
+  }
+
   /** Re-evaluate the page soon (debounced). Safe to call from anywhere. */
   requestRefresh(): void {
     this.schedule();
@@ -745,6 +806,33 @@ export class GeldController {
     return matcher.categorizeFile(file ?? { path, additions: stats?.additions ?? null, deletions: stats?.deletions ?? null });
   }
 
+  /** Test files are the Tests category's files with the reader's and the repository's patterns, whether hidden or not. */
+  private testFileMatcher(repo: string | null): PathMatcher {
+    const key = repo ?? '';
+    const cached = this.testFileMatchers.get(key);
+    if (cached !== undefined) return cached;
+    const settings = this.effectiveSettings(repo);
+    const categories = Object.fromEntries(CATEGORY_IDS.map((id) => [id, id === 'tests']));
+    const matcher = createMatcher({ ...settings, categories, customCategories: [], hideLargeDiffs: false }, repo, this.catalog);
+    this.testFileMatchers.set(key, matcher);
+    return matcher;
+  }
+
+  /** The whole file at the diff's commit, for a test file the page shows only part of (null until it is read, or when it is all there). */
+  private wholeFileFor(root: HTMLElement, path: string): readonly string[] | null {
+    if (!hasHiddenLines(root) || this.currentPage === null) return null;
+    const url = new URL(window.location.href);
+    const sha = this.diffShaFor(this.currentPage, url);
+    const repo = repoFromPathname(url.pathname);
+    if (sha === null || repo === null) return null;
+    return wholeFile(url.origin, repo, sha, path, () => this.schedule());
+  }
+
+  private testSyntaxes(): readonly TestSyntax[] {
+    if (this.testSyntaxCache?.lines !== this.settings.testSyntaxes) this.testSyntaxCache = { lines: this.settings.testSyntaxes, syntaxes: testSyntaxesFrom(this.settings.testSyntaxes) };
+    return this.testSyntaxCache.syntaxes;
+  }
+
   /** Every rendered diff entry with its category, counts and (when on) the comment-only lines to collapse; the collapsing itself happens here too. */
   private classifyEntries(view: DiffView, matcher: PathMatcher): ClassifiedEntry[] {
     const items: ClassifiedEntry[] = view.entries.map((entry) => {
@@ -761,9 +849,12 @@ export class GeldController {
       };
       return this.settings.hideCommentLines && category === null && facts?.commentLines !== undefined ? { ...item, commentLines: facts.commentLines } : item;
     });
+    const tests = this.settings.testOutline ? this.testFileMatcher(repoFromPathname(window.location.pathname)) : null;
     for (const item of items) {
       if (item.commentLines !== undefined && item.entry.anchor !== null) applyCommentRows(item.entry.root, item.entry.anchor, item.commentLines, this.shownCommentRuns);
       else clearCommentRows(item.entry.root);
+      if (tests !== null && item.entry.anchor !== null && !item.filtered && tests.categorize(item.path)?.id === 'tests') applyTestFolds(item.entry.root, item.entry.anchor, this.testSyntaxes(), this.openedTestFolds, this.wholeFileFor(item.entry.root, item.path));
+      else clearTestFolds(item.entry.root);
     }
     return items;
   }
@@ -921,7 +1012,9 @@ export class GeldController {
       const view = phase('read', () => legacyAdapter.read() ?? reactAdapter.read());
       this.currentView = view;
       if (view !== null) {
+        applyWorkflowSyntax(view.entries);
         const result = phase('files', () => this.applyView(view, page.stateKey, matcher));
+        this.autoMarkViewed(view, page.stateKey, matcher);
         this.lastFiles = { view, breakdown: result.breakdown, expanded: result.expanded, renderedEntryCount: view.entries.length };
         this.consumeRevealHash(page.stateKey);
         this.continuePendingReveal(view, page.stateKey);
@@ -1701,6 +1794,7 @@ export class GeldController {
   }
 
   private teardownView(): void {
+    removeWorkflowSyntax();
     for (const element of queryAll(`[${ATTR_CONTAINER}]`)) {
       element.removeAttribute(ATTR_CONTAINER);
       element.removeAttribute(ATTR_EXPANDED);
@@ -1713,6 +1807,7 @@ export class GeldController {
     }
     for (const element of queryAll(`.${INLINE_ICON_CLASS}`)) element.remove();
     clearCommentRows(document);
+    clearTestFolds(document);
     removeHiddenSection(document);
     removeTreeSection(document);
     removeSidebarLayout(document);
@@ -1722,6 +1817,8 @@ export class GeldController {
 
   private readonly onHashChange = (): void => {
     onReviewHashChange(this.settings);
+    // A link into a folded test's body: the pass opens its fold (`ui/test-folds.ts`).
+    if (this.settings.testOutline) this.schedule();
   };
 
   private readonly onBeforeMatch = (event: Event): void => {

@@ -43,6 +43,10 @@ export interface MergeBox {
   readonly canQueue: boolean;
   /** Whether GitHub offers "Enable auto-merge": the repository allows it and the pull request cannot merge yet; false once it is on. */
   readonly canAutoMerge: boolean;
+  /** In the repository's merge queue now. */
+  readonly queued: boolean;
+  /** Auto-merge is on: GitHub merges it once its requirements are met. */
+  readonly autoMerging: boolean;
 }
 
 export interface ReviewVerdict {
@@ -96,7 +100,10 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     .sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true))
     .map((method) => method.name)
     .filter(isMethod);
-  const email = stringOf(requirements.defaultCommitAuthorEmail);
+  // GitHub's merge box sends the default email only while it offers emails to pick from: with none (a pull request a bot
+  // opened, whose noreply address is the default) it sends no email and GitHub takes the reader's own, which the bot's is not.
+  const offered = Array.isArray(requirements.possibleCommitAuthorEmails) && requirements.possibleCommitAuthorEmails.length > 0;
+  const email = offered ? stringOf(requirements.defaultCommitAuthorEmail) : '';
   const conditions = Array.isArray(requirements.conditions) ? requirements.conditions : [];
   const stacked = conditions.some((condition) => isRecord(condition) && condition.type === 'STACK' && condition.isStacked === true);
   const reviews = Array.isArray(pull.latestOpinionatedReviews) ? pull.latestOpinionatedReviews : [];
@@ -124,6 +131,8 @@ export function parseMergeBox(payload: unknown): MergeBox | null {
     stacked,
     canQueue: queue?.allowableStatus === 'ALLOWED' && pull.isInMergeQueue !== true,
     canAutoMerge: pull.viewerCanEnableAutoMerge === true && !isRecord(pull.autoMergeRequest),
+    queued: pull.isInMergeQueue === true,
+    autoMerging: isRecord(pull.autoMergeRequest),
   };
 }
 

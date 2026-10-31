@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import type { BuiltInCategory, Catalog, CategoriesField, CategoryIconName, CustomCategoriesField, CustomCategory, GeldSettings, HiddenCategory, PatternGroup } from '@geld/core';
+import type { AnyCategoryId, BuiltInCategory, Catalog, CategoriesField, CategoryIconName, CustomCategoriesField, CustomCategory, GeldSettings, HiddenCategory, PatternGroup } from '@geld/core';
 import {
   CATEGORY_ICON_NAMES,
   categoryIconLabel,
@@ -16,6 +16,8 @@ import {
   hiddenCategoryFromCustom,
   isCategoryEnabled,
   isCategoryInPicker,
+  isAutoViewed,
+  isCategoryId,
   isGroupEnabled,
   choiceFields,
   listFields,
@@ -30,6 +32,7 @@ import {
   serializeSettingsPayload,
   splitInlineCode,
   toggleFields,
+  testSyntaxProblem,
   validateSettingsDocument,
   withCustomCategory,
   withoutCustomCategory,
@@ -208,6 +211,7 @@ async function main(): Promise<void> {
 
   renderToggleSection('general', 'general-rows');
   applySchemaCopy('hide');
+  renderToggleSection('tests', 'tests-rows');
   renderToggleSection('large-diffs', 'large-diffs-rows');
 
   /* Categories: built-ins with an "advanced" disclosure, then the user's own. */
@@ -248,6 +252,49 @@ async function main(): Promise<void> {
     if (group.patterns.length === 0) return el('div', 'options__group options__group--static', [heading]);
     const count = el('span', 'options__group-count', [`${group.patterns.length}`]);
     return el('details', 'options__group', [el('summary', '', [el('span', 'options__chevron', ['\u203a']), heading, count]), patternChips(group.patterns)]);
+  }
+
+  /** What a built-in category's summary says is customised: groups, extra patterns, marked as viewed. */
+  function customisedText(id: BuiltInCategory['id']): string | null {
+    return [describeAdvancedSettings(settings, id, catalog), isAutoViewed(settings, id) ? 'marked as viewed' : null].filter((part) => part !== null).join(' · ') || null;
+  }
+
+  /**
+   * A category's checkbox and summary as the settings say, in place: rebuilding the category lists would throw away a
+   * custom category's unsaved name and patterns.
+   */
+  function showAutoViewed(checkbox: HTMLInputElement, id: AnyCategoryId): void {
+    checkbox.checked = isAutoViewed(settings, id);
+    const summary = checkbox.closest('details.options__category')?.querySelector('summary');
+    if (!(summary instanceof HTMLElement) || !isCategoryId(id)) return;
+    const text = customisedText(id);
+    let badge = summary.querySelector('.options__customised');
+    if (text === null) badge?.remove();
+    else if (badge === null) {
+      badge = el('span', 'options__customised', [text]);
+      summary.querySelector('button.geld-switch')?.before(badge);
+    } else badge.textContent = text;
+  }
+
+  /** The category's "Mark as viewed automatically" checkbox (`autoViewed`). */
+  function autoViewedRow(id: AnyCategoryId): HTMLElement {
+    const checkbox = el('input', 'geld-checkbox options__checkbox');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isAutoViewed(settings, id);
+    checkbox.dataset.autoViewed = id;
+    checkbox.addEventListener('change', async () => {
+      // Read now: a storage notice from an earlier save can reset the box before this update runs.
+      const checked = checkbox.checked;
+      settings = await settingsItem.update((current) => ({ autoViewed: { ...current.autoViewed, [id]: checked } }));
+      showAutoViewed(checkbox, id);
+    });
+    const copy = categoriesField.autoViewed;
+    return el('div', 'options__auto-viewed', [
+      el('label', 'options__group-heading options__group-heading--checkbox', [
+        checkbox,
+        el('span', '', [el('span', 'options__group-title', [copy.label]), el('span', 'options__group-description', richText(copy.description))]),
+      ]),
+    ]);
   }
 
   /** Textarea + save button for a pattern list; `onSave` receives the cleaned lines. */
@@ -305,7 +352,7 @@ async function main(): Promise<void> {
   function renderBuiltIn(category: BuiltInCategory): HTMLElement {
     const label = el('span', 'geld-label', [category.title]);
     label.id = `category-${category.id}-label`;
-    const customised = describeAdvancedSettings(settings, category.id, catalog);
+    const customised = customisedText(category.id);
     const help = el('p', 'geld-help options__category-description', richText(category.description));
     help.id = `category-${category.id}-help`;
     const button = switchButton(`category-${category.id}`, isCategoryEnabled(settings, category.id), label.id, help.id);
@@ -329,7 +376,7 @@ async function main(): Promise<void> {
       runTester();
       return null;
     });
-    const body = el('div', 'options__advanced', [el('p', 'geld-help options__advanced-intro', [categoriesField.advanced.description]), groups, editor.root]);
+    const body = el('div', 'options__advanced', [el('p', 'geld-help options__advanced-intro', [categoriesField.advanced.description]), autoViewedRow(category.id), groups, editor.root]);
     const card = el('details', 'options__category', [
       el('summary', 'options__category-summary', [
         el('span', 'options__chevron', ['\u203a']),
@@ -342,7 +389,7 @@ async function main(): Promise<void> {
     ]);
     card.dataset.categoryId = category.id;
     // Open when anything beyond the switch is in use, so those settings are seen.
-    card.open = hasAdvancedSettings(settings, category.id, catalog);
+    card.open = hasAdvancedSettings(settings, category.id, catalog) || isAutoViewed(settings, category.id);
     return card;
   }
 
@@ -479,6 +526,7 @@ async function main(): Promise<void> {
         el('p', 'geld-help', [customField.nounDescription]),
         el('div', 'options__noun-row', [nounInput, nounPluralInput]),
       ]),
+      ...(existing === null ? [] : [autoViewedRow(existing.id)]),
       editor.root,
       el('div', 'geld-row options__actions options__actions--start', [remove]),
     ]);
@@ -626,6 +674,42 @@ async function main(): Promise<void> {
     show(settings);
     choiceSetters.push(show);
     choiceHost.append(el('div', 'options__choice', [el('div', 'geld-row', [el('div', '', [label, help]), group]), note]));
+  }
+
+  /* Test files: the reader's own test declaration syntaxes. */
+  const syntaxField = listFields(sections.find((candidate) => candidate.id === 'tests')?.fields ?? []).find((field) => field.key === 'testSyntaxes');
+  let syntaxArea: HTMLTextAreaElement | null = null;
+  /** The syntaxes as last saved here or seen saved elsewhere: the box takes a change from elsewhere only while it holds no edit of its own. */
+  let syntaxSaved = settings.testSyntaxes.join('\n');
+  if (syntaxField !== undefined) {
+    const label = el('span', 'geld-label', [syntaxField.label]);
+    const help = el('p', 'geld-help', richText(syntaxField.description));
+    const area = el('textarea', 'geld-textarea geld-code options__textarea');
+    area.rows = syntaxField.rows;
+    area.placeholder = syntaxField.placeholder;
+    area.spellcheck = false;
+    area.value = settings.testSyntaxes.join('\n');
+    area.setAttribute('aria-label', syntaxField.label);
+    syntaxArea = area;
+    const syntax = el('ul', 'geld-help options__syntax', syntaxField.syntax.map((line) => el('li', '', richText(line))));
+    const statusNode = el('span', 'geld-status');
+    const status = statusReporter(statusNode);
+    const save = el('button', 'geld-button geld-button--primary', [syntaxField.saveLabel]);
+    save.type = 'button';
+    area.addEventListener('input', () => status(parsePatternList(area.value).join('\n') !== settings.testSyntaxes.join('\n') ? 'Unsaved changes' : '', 'neutral'));
+    save.addEventListener('click', async () => {
+      const testSyntaxes = parsePatternList(area.value);
+      const problem = testSyntaxes.map(testSyntaxProblem).find((entry): entry is string => entry !== null) ?? null;
+      if (problem !== null) {
+        status(problem, 'error');
+        return;
+      }
+      settings = await settingsItem.patch({ testSyntaxes });
+      syntaxSaved = testSyntaxes.join('\n');
+      area.value = syntaxSaved;
+      status(`Saved ${pluralize(testSyntaxes.length, 'syntax', 'syntaxes')}`, 'success');
+    });
+    requireElement('test-syntaxes', HTMLDivElement).replaceChildren(el('div', 'options__editor', [label, help, area, syntax, el('div', 'geld-row options__actions', [statusNode, save])]));
   }
 
   /* Pull request lists: authors to hide */
@@ -1304,8 +1388,17 @@ async function main(): Promise<void> {
         renderAll();
       }
     }
+    // Not in the signature (that rebuild would drop unsaved category edits): an import, a reset or another window is shown in place.
+    for (const checkbox of document.querySelectorAll<HTMLInputElement>('input[data-auto-viewed]')) {
+      const id = checkbox.dataset.autoViewed ?? '';
+      const category = isCategoryId(id) ? id : settings.customCategories.find((custom) => custom.id === id)?.id;
+      if (category !== undefined) showAutoViewed(checkbox, category);
+    }
     if (document.activeElement !== rulesArea) rulesArea.value = next.repoRules.join('\n');
     if (document.activeElement !== authorsArea) authorsArea.value = next.hiddenAuthors.join('\n');
+    const nextSyntaxes = next.testSyntaxes.join('\n');
+    if (syntaxArea !== null && nextSyntaxes !== syntaxSaved && parsePatternList(syntaxArea.value).join('\n') === syntaxSaved) syntaxArea.value = nextSyntaxes;
+    syntaxSaved = nextSyntaxes;
     if (reviewBotsArea !== null && document.activeElement !== reviewBotsArea) reviewBotsArea.value = next.reviewBots.join('\n');
     if (document.activeElement !== hostsArea) hostsArea.value = next.enterpriseHosts.join('\n');
     runTester();
