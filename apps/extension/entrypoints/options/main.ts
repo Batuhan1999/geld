@@ -302,7 +302,7 @@ async function main(): Promise<void> {
     copy: { readonly label: string; readonly description: string; readonly placeholder: string; readonly rows: number; readonly syntax: readonly string[]; readonly saveLabel: string },
     lines: readonly string[],
     onSave: (lines: readonly string[]) => Promise<string | null>,
-  ): { readonly root: HTMLElement; readonly textarea: HTMLTextAreaElement } {
+  ): { readonly root: HTMLElement; readonly textarea: HTMLTextAreaElement; readonly status: StatusReporter } {
     const label = el('span', 'geld-label', [copy.label]);
     const help = el('p', 'geld-help', [copy.description]);
     const textarea = el('textarea', 'geld-textarea geld-code options__textarea');
@@ -310,6 +310,8 @@ async function main(): Promise<void> {
     textarea.placeholder = copy.placeholder;
     textarea.spellcheck = false;
     textarea.value = lines.join('\n');
+    // What is saved, so a rebuild caught up later (`catchUpRender`) never replaces text the reader has not saved.
+    textarea.dataset.saved = lines.join('\n');
     textarea.setAttribute('aria-label', copy.label);
     const syntax = el(
       'ul',
@@ -319,7 +321,8 @@ async function main(): Promise<void> {
     const status = statusReporter(el('span', 'geld-status'));
     const save = el('button', 'geld-button geld-button--primary geld-button--small', [copy.saveLabel]);
     save.type = 'button';
-    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== lines.join('\n') ? 'Unsaved changes' : '', 'neutral'));
+    // Against what was saved last, not what the card was built with: a save keeps this editor on the page.
+    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? '').join('\n') ? 'Unsaved changes' : '', 'neutral'));
     save.addEventListener('click', async () => {
       const cleaned = parsePatternList(textarea.value);
       const problem = validatePatterns(cleaned);
@@ -333,6 +336,7 @@ async function main(): Promise<void> {
         return;
       }
       textarea.value = cleaned.join('\n');
+      textarea.dataset.saved = textarea.value;
       status(`Saved ${cleaned.length} line${cleaned.length === 1 ? '' : 's'}`, 'success');
     });
     const statusNode = el('span', 'geld-status');
@@ -340,6 +344,7 @@ async function main(): Promise<void> {
     return {
       root: el('div', 'options__editor', [label, help, textarea, syntax, el('div', 'geld-row options__actions', [statusNode, save])]),
       textarea,
+      status,
     };
   }
 
@@ -484,7 +489,14 @@ async function main(): Promise<void> {
       };
       settings = await settingsItem.update((current) => ({ customCategories: withCustomCategory(current, custom).customCategories }));
       customStatus(existing === null ? `Added “${cleanTitle}”` : 'Saved', 'success');
+      // The rebuild turns a draft into the saved category (a second Save must not add another) and detaches this card,
+      // so the editor's "Saved N lines" goes to the card that replaces it, open.
       renderAll();
+      const fresh = savedCustomCards.get(id);
+      if (fresh !== undefined) {
+        fresh.card.open = true;
+        fresh.status(`Saved ${lines.length} line${lines.length === 1 ? '' : 's'}`, 'success');
+      }
       return null;
     });
 
@@ -518,11 +530,29 @@ async function main(): Promise<void> {
     if (hidden !== null) card.dataset.categoryId = hidden.id;
     // A new draft opens ready to edit; saved categories reopen through renderAll's bookkeeping.
     card.open = existing === null;
+    if (existing !== null) savedCustomCards.set(existing.id, { card, status: editor.status });
     return card;
   }
 
+  /**
+   * Focus is in a category's pattern editor: its textarea, or its Save button
+   * (Chrome focuses a clicked button). Rebuilding then would eat typed input
+   * or the "Saved" status the click is about to show.
+   */
+  function isEditingPatterns(): boolean {
+    const active = document.activeElement;
+    return active !== null && active.closest('.options__categories .options__editor') !== null;
+  }
+  /** A rebuild was skipped because someone was editing; it runs once focus moves on (see the focusin listener below). */
+  let renderDeferred = false;
+
+  /** Each saved custom category's card and editor status, as the last rebuild made them. */
+  const savedCustomCards = new Map<string, { readonly card: HTMLDetailsElement; readonly status: StatusReporter }>();
+
   /** Rebuild both category lists from the current settings, keeping open disclosures open. */
   function renderAll(): void {
+    renderDeferred = false;
+    savedCustomCards.clear();
     const wasOpen = new Set(
       Array.from(document.querySelectorAll<HTMLDetailsElement>('details.options__category[open]')).map((card) => card.dataset.categoryId ?? ''),
     );
@@ -1325,7 +1355,8 @@ async function main(): Promise<void> {
     cachedCatalog = next;
     catalog = catalogFromCache(next);
     renderCatalogStatus();
-    if (!(document.activeElement instanceof HTMLTextAreaElement && document.activeElement.closest('.options__categories') !== null)) renderAll();
+    if (isEditingPatterns() || hasUnsavedPatterns()) renderDeferred = true;
+    else renderAll();
     runTester();
   }
   catalogItem.watch(applyCatalog);
@@ -1341,10 +1372,13 @@ async function main(): Promise<void> {
     for (const { field, set } of reviewSwitches) set(next[field.key]);
     for (const show of choiceSetters) show(next);
     const signature = categorySignature(next);
-    // Rebuilding while someone types in a pattern box would eat their input.
-    if (signature !== lastSignature && !(document.activeElement instanceof HTMLTextAreaElement && document.activeElement.closest('.options__categories') !== null)) {
-      lastSignature = signature;
-      renderAll();
+    // Rebuilding while someone types in a pattern box (or has just clicked its Save) would eat their input or the Saved status.
+    if (signature !== lastSignature) {
+      if (isEditingPatterns() || hasUnsavedPatterns()) renderDeferred = true;
+      else {
+        lastSignature = signature;
+        renderAll();
+      }
     }
     // Not in the signature (that rebuild would drop unsaved category edits): an import, a reset or another window is shown in place.
     for (const checkbox of document.querySelectorAll<HTMLInputElement>('input[data-auto-viewed]')) {
@@ -1360,6 +1394,33 @@ async function main(): Promise<void> {
     if (reviewBotsArea !== null && document.activeElement !== reviewBotsArea) reviewBotsArea.value = next.reviewBots.join('\n');
     if (document.activeElement !== hostsArea) hostsArea.value = next.enterpriseHosts.join('\n');
     runTester();
+  });
+  /** A pattern box holding text the reader has not saved: a rebuild would replace it with the saved patterns. */
+  function hasUnsavedPatterns(): boolean {
+    return Array.from(document.querySelectorAll<HTMLTextAreaElement>('.options__categories .options__editor textarea')).some(
+      (textarea) => parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? textarea.value).join('\n'),
+    );
+  }
+  /**
+   * Catch up on a skipped rebuild once focus is outside the category lists and nothing there is unsaved. Not with
+   * focus inside them: focus moves on mousedown, so rebuilding then would pull the control being clicked (another
+   * card's switch or Save) out from under the click. Unsaved text waits until it is saved or put back.
+   */
+  function catchUpRender(): void {
+    if (!renderDeferred || isEditingPatterns() || hasUnsavedPatterns()) return;
+    if ((document.activeElement?.closest('.options__categories') ?? null) !== null) return;
+    lastSignature = categorySignature(settings);
+    renderAll();
+  }
+  document.addEventListener('focusin', (event) => {
+    if (event.target instanceof Element && event.target.closest('.options__categories') !== null) return;
+    catchUpRender();
+  });
+  // Focus leaving for no element (a click on the page's background fires no focusin): catch up after that click has
+  // run, so a rebuild never removes what it landed on.
+  document.addEventListener('focusout', (event) => {
+    if (!renderDeferred || event.relatedTarget !== null) return;
+    document.addEventListener('click', () => window.setTimeout(catchUpRender, 0), { once: true });
   });
 }
 
