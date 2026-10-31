@@ -255,7 +255,7 @@ async function main(): Promise<void> {
     copy: { readonly label: string; readonly description: string; readonly placeholder: string; readonly rows: number; readonly syntax: readonly string[]; readonly saveLabel: string },
     lines: readonly string[],
     onSave: (lines: readonly string[]) => Promise<string | null>,
-  ): { readonly root: HTMLElement; readonly textarea: HTMLTextAreaElement } {
+  ): { readonly root: HTMLElement; readonly textarea: HTMLTextAreaElement; readonly status: StatusReporter } {
     const label = el('span', 'geld-label', [copy.label]);
     const help = el('p', 'geld-help', [copy.description]);
     const textarea = el('textarea', 'geld-textarea geld-code options__textarea');
@@ -274,7 +274,8 @@ async function main(): Promise<void> {
     const status = statusReporter(el('span', 'geld-status'));
     const save = el('button', 'geld-button geld-button--primary geld-button--small', [copy.saveLabel]);
     save.type = 'button';
-    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== lines.join('\n') ? 'Unsaved changes' : '', 'neutral'));
+    // Against what was saved last, not what the card was built with: a save keeps this editor on the page.
+    textarea.addEventListener('input', () => status(parsePatternList(textarea.value).join('\n') !== parsePatternList(textarea.dataset.saved ?? '').join('\n') ? 'Unsaved changes' : '', 'neutral'));
     save.addEventListener('click', async () => {
       const cleaned = parsePatternList(textarea.value);
       const problem = validatePatterns(cleaned);
@@ -296,6 +297,7 @@ async function main(): Promise<void> {
     return {
       root: el('div', 'options__editor', [label, help, textarea, syntax, el('div', 'geld-row options__actions', [statusNode, save])]),
       textarea,
+      status,
     };
   }
 
@@ -444,7 +446,14 @@ async function main(): Promise<void> {
       };
       settings = await settingsItem.update((current) => ({ customCategories: withCustomCategory(current, custom).customCategories }));
       customStatus(existing === null ? `Added “${cleanTitle}”` : 'Saved', 'success');
+      // The rebuild turns a draft into the saved category (a second Save must not add another) and detaches this card,
+      // so the editor's "Saved N lines" goes to the card that replaces it, open.
       renderAll();
+      const fresh = savedCustomCards.get(id);
+      if (fresh !== undefined) {
+        fresh.card.open = true;
+        fresh.status(`Saved ${lines.length} line${lines.length === 1 ? '' : 's'}`, 'success');
+      }
       return null;
     });
 
@@ -479,6 +488,7 @@ async function main(): Promise<void> {
     else card.dataset.draft = '';
     // A new draft opens ready to edit; saved categories reopen through renderAll's bookkeeping.
     card.open = existing === null;
+    if (existing !== null) savedCustomCards.set(existing.id, { card, status: editor.status });
     return card;
   }
 
@@ -496,9 +506,13 @@ async function main(): Promise<void> {
   /** A rebuild was skipped because someone was editing; it runs once focus moves on (see the focusin listener below). */
   let renderDeferred = false;
 
+  /** Each saved custom category's card and editor status, as the last rebuild made them. */
+  const savedCustomCards = new Map<string, { readonly card: HTMLDetailsElement; readonly status: StatusReporter }>();
+
   /** Rebuild both category lists from the current settings, keeping open disclosures open. */
   function renderAll(): void {
     renderDeferred = false;
+    savedCustomCards.clear();
     const wasOpen = new Set(
       Array.from(document.querySelectorAll<HTMLDetailsElement>('details.options__category[open]')).map((card) => card.dataset.categoryId ?? ''),
     );
