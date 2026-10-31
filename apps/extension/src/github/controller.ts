@@ -1,5 +1,6 @@
 import type { Catalog, HiddenCategory } from '@geld/core';
-import { BUNDLED_CATALOG, isAutoViewed } from '@geld/core';
+import { BUNDLED_CATALOG, CATEGORY_IDS, isAutoViewed, testSyntaxesFrom } from '@geld/core';
+import type { TestSyntax } from '@geld/core';
 import type { ChangeTotals } from '@geld/core';
 import { subtractTotals } from '@geld/core';
 import type { PathMatcher } from '@geld/core';
@@ -44,6 +45,8 @@ import { LIVE_CATCH_UP_EVENT, liveCatchUpDue } from './review/live-regions';
 import { catchUpTimeline } from './review/timeline-catchup';
 import { applyReviewOverview, onReviewBeforeMatch, onReviewHashChange, refreshReviewTimes, reviewSignature, takeReviewDeferred, teardownReviewOverview } from './review/overview';
 import { applyCommentRows, clearCommentRows } from './ui/comment-rows';
+import { applyTestFolds, clearTestFolds, forgetLinkedFold, hasHiddenLines } from './ui/test-folds';
+import { wholeFile } from './whole-file';
 import { removeHiddenSection, renderHiddenSection } from './ui/hidden-section';
 import { applyVirtualHiddenStyles, ATTR_VIRTUAL, removeVirtualHiddenStyles } from './ui/virtual-hidden';
 import { detachBreakdownTooltip, removeTooltipElement } from './ui/tooltip';
@@ -303,6 +306,11 @@ export class GeldController {
   private diffFacts: ReadonlyMap<string, FileStats> | null = null;
   /** Runs of comment-only lines the user has opened ("Show") on this visit. */
   private readonly shownCommentRuns = new Set<string>();
+  /** Test folds the reader opened on this page (`anchor:fold id`). */
+  private readonly openedTestFolds = new Set<string>();
+  /** Per repository: a matcher that knows only the Tests category, on, to tell test files apart whatever is hidden. */
+  private readonly testFileMatchers = new Map<string, PathMatcher>();
+  private testSyntaxCache: { readonly lines: readonly string[]; readonly syntaxes: readonly TestSyntax[] } | null = null;
   private currentView: DiffView | null = null;
   private currentPage: PageInfo | null = null;
   private pendingReveal: PendingReveal | null = null;
@@ -523,6 +531,7 @@ export class GeldController {
    */
   private onRepoConfigChange(): void {
     this.matchers.clear();
+    this.testFileMatchers.clear();
     this.settledHeader = null;
     this.applyHeaderNow();
     this.schedule();
@@ -587,6 +596,9 @@ export class GeldController {
     this.diffExpanded.clear();
     this.inlineTouched.clear();
     this.shownCommentRuns.clear();
+    this.openedTestFolds.clear();
+    forgetLinkedFold();
+    this.testFileMatchers.clear();
     this.pendingReveal = null;
     // A settings change reaches every tab; the hidden ones tear down and rebuild when they are next shown.
     if (this.deferWhileHidden()) {
@@ -794,6 +806,33 @@ export class GeldController {
     return matcher.categorizeFile(file ?? { path, additions: stats?.additions ?? null, deletions: stats?.deletions ?? null });
   }
 
+  /** Test files are the Tests category's files with the reader's and the repository's patterns, whether hidden or not. */
+  private testFileMatcher(repo: string | null): PathMatcher {
+    const key = repo ?? '';
+    const cached = this.testFileMatchers.get(key);
+    if (cached !== undefined) return cached;
+    const settings = this.effectiveSettings(repo);
+    const categories = Object.fromEntries(CATEGORY_IDS.map((id) => [id, id === 'tests']));
+    const matcher = createMatcher({ ...settings, categories, customCategories: [], hideLargeDiffs: false }, repo, this.catalog);
+    this.testFileMatchers.set(key, matcher);
+    return matcher;
+  }
+
+  /** The whole file at the diff's commit, for a test file the page shows only part of (null until it is read, or when it is all there). */
+  private wholeFileFor(root: HTMLElement, path: string): readonly string[] | null {
+    if (!hasHiddenLines(root) || this.currentPage === null) return null;
+    const url = new URL(window.location.href);
+    const sha = this.diffShaFor(this.currentPage, url);
+    const repo = repoFromPathname(url.pathname);
+    if (sha === null || repo === null) return null;
+    return wholeFile(url.origin, repo, sha, path, () => this.schedule());
+  }
+
+  private testSyntaxes(): readonly TestSyntax[] {
+    if (this.testSyntaxCache?.lines !== this.settings.testSyntaxes) this.testSyntaxCache = { lines: this.settings.testSyntaxes, syntaxes: testSyntaxesFrom(this.settings.testSyntaxes) };
+    return this.testSyntaxCache.syntaxes;
+  }
+
   /** Every rendered diff entry with its category, counts and (when on) the comment-only lines to collapse; the collapsing itself happens here too. */
   private classifyEntries(view: DiffView, matcher: PathMatcher): ClassifiedEntry[] {
     const items: ClassifiedEntry[] = view.entries.map((entry) => {
@@ -810,9 +849,12 @@ export class GeldController {
       };
       return this.settings.hideCommentLines && category === null && facts?.commentLines !== undefined ? { ...item, commentLines: facts.commentLines } : item;
     });
+    const tests = this.settings.testOutline ? this.testFileMatcher(repoFromPathname(window.location.pathname)) : null;
     for (const item of items) {
       if (item.commentLines !== undefined && item.entry.anchor !== null) applyCommentRows(item.entry.root, item.entry.anchor, item.commentLines, this.shownCommentRuns);
       else clearCommentRows(item.entry.root);
+      if (tests !== null && item.entry.anchor !== null && !item.filtered && tests.categorize(item.path)?.id === 'tests') applyTestFolds(item.entry.root, item.entry.anchor, this.testSyntaxes(), this.openedTestFolds, this.wholeFileFor(item.entry.root, item.path));
+      else clearTestFolds(item.entry.root);
     }
     return items;
   }
@@ -1765,6 +1807,7 @@ export class GeldController {
     }
     for (const element of queryAll(`.${INLINE_ICON_CLASS}`)) element.remove();
     clearCommentRows(document);
+    clearTestFolds(document);
     removeHiddenSection(document);
     removeTreeSection(document);
     removeSidebarLayout(document);
@@ -1774,6 +1817,8 @@ export class GeldController {
 
   private readonly onHashChange = (): void => {
     onReviewHashChange(this.settings);
+    // A link into a folded test's body: the pass opens its fold (`ui/test-folds.ts`).
+    if (this.settings.testOutline) this.schedule();
   };
 
   private readonly onBeforeMatch = (event: Event): void => {

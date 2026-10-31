@@ -32,6 +32,7 @@ import {
   serializeSettingsPayload,
   splitInlineCode,
   toggleFields,
+  testSyntaxProblem,
   validateSettingsDocument,
   withCustomCategory,
   withoutCustomCategory,
@@ -210,6 +211,7 @@ async function main(): Promise<void> {
 
   renderToggleSection('general', 'general-rows');
   applySchemaCopy('hide');
+  renderToggleSection('tests', 'tests-rows');
   renderToggleSection('large-diffs', 'large-diffs-rows');
 
   /* Categories: built-ins with an "advanced" disclosure, then the user's own. */
@@ -634,6 +636,42 @@ async function main(): Promise<void> {
     show(settings);
     choiceSetters.push(show);
     choiceHost.append(el('div', 'options__choice', [el('div', 'geld-row', [el('div', '', [label, help]), group]), note]));
+  }
+
+  /* Test files: the reader's own test declaration syntaxes. */
+  const syntaxField = listFields(sections.find((candidate) => candidate.id === 'tests')?.fields ?? []).find((field) => field.key === 'testSyntaxes');
+  let syntaxArea: HTMLTextAreaElement | null = null;
+  /** The syntaxes as last saved here or seen saved elsewhere: the box takes a change from elsewhere only while it holds no edit of its own. */
+  let syntaxSaved = settings.testSyntaxes.join('\n');
+  if (syntaxField !== undefined) {
+    const label = el('span', 'geld-label', [syntaxField.label]);
+    const help = el('p', 'geld-help', richText(syntaxField.description));
+    const area = el('textarea', 'geld-textarea geld-code options__textarea');
+    area.rows = syntaxField.rows;
+    area.placeholder = syntaxField.placeholder;
+    area.spellcheck = false;
+    area.value = settings.testSyntaxes.join('\n');
+    area.setAttribute('aria-label', syntaxField.label);
+    syntaxArea = area;
+    const syntax = el('ul', 'geld-help options__syntax', syntaxField.syntax.map((line) => el('li', '', richText(line))));
+    const statusNode = el('span', 'geld-status');
+    const status = statusReporter(statusNode);
+    const save = el('button', 'geld-button geld-button--primary', [syntaxField.saveLabel]);
+    save.type = 'button';
+    area.addEventListener('input', () => status(parsePatternList(area.value).join('\n') !== settings.testSyntaxes.join('\n') ? 'Unsaved changes' : '', 'neutral'));
+    save.addEventListener('click', async () => {
+      const testSyntaxes = parsePatternList(area.value);
+      const problem = testSyntaxes.map(testSyntaxProblem).find((entry): entry is string => entry !== null) ?? null;
+      if (problem !== null) {
+        status(problem, 'error');
+        return;
+      }
+      settings = await settingsItem.patch({ testSyntaxes });
+      syntaxSaved = testSyntaxes.join('\n');
+      area.value = syntaxSaved;
+      status(`Saved ${pluralize(testSyntaxes.length, 'syntax', 'syntaxes')}`, 'success');
+    });
+    requireElement('test-syntaxes', HTMLDivElement).replaceChildren(el('div', 'options__editor', [label, help, area, syntax, el('div', 'geld-row options__actions', [statusNode, save])]));
   }
 
   /* Pull request lists: authors to hide */
@@ -1316,6 +1354,9 @@ async function main(): Promise<void> {
     }
     if (document.activeElement !== rulesArea) rulesArea.value = next.repoRules.join('\n');
     if (document.activeElement !== authorsArea) authorsArea.value = next.hiddenAuthors.join('\n');
+    const nextSyntaxes = next.testSyntaxes.join('\n');
+    if (syntaxArea !== null && nextSyntaxes !== syntaxSaved && parsePatternList(syntaxArea.value).join('\n') === syntaxSaved) syntaxArea.value = nextSyntaxes;
+    syntaxSaved = nextSyntaxes;
     if (reviewBotsArea !== null && document.activeElement !== reviewBotsArea) reviewBotsArea.value = next.reviewBots.join('\n');
     if (document.activeElement !== hostsArea) hostsArea.value = next.enterpriseHosts.join('\n');
     runTester();

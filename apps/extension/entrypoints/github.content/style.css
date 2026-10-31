@@ -2266,6 +2266,108 @@ tr[data-geld-line='hidden'] {
   text-decoration: underline;
 }
 
+/* Test files folded to their titles (ui/test-folds.ts) ------------------------ */
+
+tr[data-geld-test-fold='hidden'] {
+  display: none !important;
+}
+
+/*
+ * One full-width row per test, of Geld's own, unshaded like GitHub's own rows: the line it starts on in GitHub's
+ * line-number type, set where the numbers above stand (test-folds.ts `alignRanges` sets the margin and font),
+ * the title, then what changed in it and the chevron at the right.
+ */
+.geld-test-row__cell {
+  padding: 0 !important;
+  border-top: 1px solid var(--borderColor-muted, var(--color-border-muted));
+  border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));
+}
+
+/* Folded tests one after another share a border, not two (test-folds.ts marks a row whose shown neighbour above is one). */
+.geld-test-row[data-joined] > .geld-test-row__cell {
+  border-top: 0;
+}
+
+.geld-test-row__toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px 0 0;
+  border: 0;
+  background: none;
+  color: var(--fgColor-default, var(--color-fg-default));
+  font: 400 13px/20px var(--fontStack-sansSerif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  text-align: left;
+  cursor: pointer;
+}
+
+.geld-test-row__toggle:hover {
+  background: var(--bgColor-muted, var(--color-canvas-subtle));
+}
+
+.geld-test-row__toggle:focus-visible {
+  outline: 2px solid var(--focus-outlineColor, var(--color-accent-fg));
+  outline-offset: -2px;
+}
+
+.geld-test-row__lines {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+  font: 12px/20px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.geld-test-row__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: 16px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geld-test-row__changes {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 16px;
+  font: 600 12px/20px var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.geld-test-row__add {
+  color: var(--fgColor-success, var(--color-success-fg));
+}
+
+.geld-test-row__del {
+  color: var(--fgColor-danger, var(--color-danger-fg));
+}
+
+.geld-test-row__chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+}
+
+.geld-test-row__changes:empty + .geld-test-row__chevron {
+  margin-left: auto;
+}
+
+.geld-test-row__chevron .octicon {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.geld-test-row[data-open='true'] .geld-test-row__chevron .octicon {
+  transform: rotate(90deg);
+}
+
 /* Pull requests hidden by author (pr-authors.ts) ------------------------------ */
 
 [data-geld-author='hidden'] {
